@@ -63,3 +63,13 @@ Simpan masalah yang sudah selesai agar pendekatan gagal tidak diulang. Jangan me
 - 2026-09-16: `npm test` menghasilkan 44/45 lulus.
 - `test/session-limits.test.ts:13` mengharapkan penolakan `session_inactive`, tetapi `SessionManager.connected` mengembalikan `session_suspended`.
 - Belum diubah karena di luar cakupan tabel akun admin. Pemeriksaan tipe, build, sintaks JavaScript, dan browser-check lulus.
+
+## AI — 16 September 2026
+
+Pemeriksaan tipe pertama menemukan TS2769 pada dua argumen SQL: narrowing boolean dari body tidak bertahan dalam callback transaksi. Nilai diubah menjadi boolean eksplisit setelah validasi tipe; tidak mengubah aturan validasi request.
+
+Pemeriksaan tipe berikutnya menemukan TS2322 karena produk AI sintetis diberi tipe RowDataPacket. Snapshot produk kini memakai tipe field produk yang diperlukan pembayaran. Satu skrip edit lokal sempat menggunakan prefix direktori ganda dan berhenti dengan FileNotFoundError sebelum mengubah file; dijalankan ulang dengan path sesuai direktori kerja.
+
+Review isolasi AI menemukan query pengambilan memori belum menyertakan predikat customer meskipun parameternya dikirim. Diperbaiki dengan predikat lengkap akun/session/customer. Fixture diubah memakai nomor pelanggan kedua yang urutan sort-nya lebih besar, agar kesalahan pemilihan baris pertama tidak bisa lolos karena baris baru berada di urutan pertama.
+
+Pemeriksaan akhir pertama: suite 55/56 lulus. Tes batas body pembuatan API key gagal (mengharapkan 413, menerima 201) karena ukuran JSON diperbesar global untuk isian AI. Diperbaiki dengan parser 64 KiB hanya pada PUT pengaturan asisten per session; endpoint lain tetap 16 KiB. Browser AI timeout saat memeriksa isian sesudah reload: respons loadAssistant dapat menimpa ketikan baru. Isian kini dinonaktifkan selama pemuatan, dan respons lama diabaikan saat pilihan nomor berubah. Hanya tes terdampak diulang sesudah perbaikan.

@@ -1,6 +1,6 @@
 import { log, protectLibraryLogs } from './log.js';
-import { parseIncoming } from './incoming.js';
-import makeWASocket, { useMultiFileAuthState, downloadMediaMessage, type AnyMessageContent, type WAMessageKey } from '@whiskeysockets/baileys';
+import { parseIncoming, parseManualCandidate } from './incoming.js';
+import makeWASocket, { useMultiFileAuthState, downloadMediaMessage, generateMessageIDV2, type AnyMessageContent, type WAMessageKey } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import { join } from 'node:path';
 import { ApiError, type Connector } from './sessions.js';
@@ -11,7 +11,7 @@ const silentLogger = {
   level: 'silent', child() { return silentLogger; },
   trace() {}, debug() {}, info() {}, warn() {}, error() {},
 };
-export function baileysConnector(store: SessionStore): Connector {
+export function baileysConnector(store: SessionStore, registerSystemMessage: (session: string, messageId: string) => Promise<void>): Connector {
   protectLibraryLogs();
   return async (id, update) => {
     const { state, saveCreds } = await useMultiFileAuthState(join(store.directory(id), 'auth'));
@@ -22,11 +22,23 @@ export function baileysConnector(store: SessionStore): Connector {
         log(id, `Gagal menyimpan kredensial`);
       });
     });
+    const connectedAtSeconds = Math.floor(Date.now() / 1000);
     const messageKeys = new Map<string, WAMessageKey>();
     const seen = new Set<string>();
     socket.ev.on('messages.upsert', event => {
       if (event.type !== 'notify') return;
-      for (const message of event.messages) {
+      for (let message of event.messages) {
+        if (message.key.fromMe) {
+          void (async()=>{
+            if (message.key.remoteJid?.endsWith('@lid') && !message.key.remoteJidAlt) {
+              const phone = await socket.signalRepository.lidMapping.getPNForLID(message.key.remoteJid);
+              if (phone) message = { ...message, key: { ...message.key, remoteJidAlt: phone } };
+            }
+            const outgoing = parseManualCandidate(message, connectedAtSeconds);
+            if (outgoing) update({ outgoing });
+          })().catch(()=>log(id,'Gagal memeriksa pesan keluar manual'));
+          continue;
+        }
         const incoming = parseIncoming(message);
         if (!incoming) continue;
         const address = incoming.from.includes('@') ? incoming.from : `${incoming.from}@s.whatsapp.net`;
@@ -78,7 +90,10 @@ export function baileysConnector(store: SessionStore): Connector {
             case 'document': outgoing = { document: media, caption: content.caption, fileName: content.filename ?? 'document', mimetype: content.mimetype ?? 'application/octet-stream' }; break;
           }
         }
-        const message = await socket.sendMessage(jid, outgoing);
+        const messageId = generateMessageIDV2(socket.user?.id);
+        // Persist before network dispatch: even an early echo or a restart is recognized.
+        await registerSystemMessage(id, messageId);
+        const message = await socket.sendMessage(jid, outgoing, { messageId });
         if (!message?.key.id) throw new Error('WhatsApp tidak memberikan ID pesan');
         return message.key.id;
       },

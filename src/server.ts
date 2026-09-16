@@ -1,3 +1,4 @@
+import {ai} from './ai.js';
 import {recoverReservations} from './credits.js';
 import {gateway} from './gateway.js';
 import {app} from './app.js';
@@ -7,7 +8,7 @@ import {payments} from './payments.js';
 import {acquireEngineLock} from './runtime.js';
 const lock=await acquireEngineLock();
 try {
- await recoverReservations();
+ await recoverReservations();await ai.recover();
  await gateway.restore();gateway.start();
 }catch{console.error('Pemulihan engine gagal; periksa metadata dan penyimpanan.');await gateway.stop();await lock.release();await db.end();process.exit(1);}
 const stopScheduler=startBasicScheduler();

@@ -53,3 +53,14 @@ Session WhatsApp per akun tersedia lewat `/sessions`, QR, logout, reconnect, hap
 Scheduler kredit dasar berjalan saat startup dan setiap 30 detik; akses saldo juga memeriksa periode WIB. Reservasi kredit persisten tersedia sebagai layanan internal: retry ID sama tidak memotong ulang, timeout menahan saldo, dan kegagalan pada periode lama tidak menambah kuota periode baru. Belum dihubungkan ke pengiriman nyata.
 
 Verifikasi terbaru: 11 tes lulus, pemeriksaan tipe dan build lulus. Uji isolasi session/QR dan batas nomor memakai connector tiruan. Belum ada scan HP atau pengujian browser otomatis. API kirim, webhook, media masuk, paket berbayar, downgrade, serta pemulihan akun masih belum selesai. Hanya uji kredensial `/stats` dan operasi session node n8n yang kini tersedia; jangan menganggap seluruh integrasi n8n sudah siap.
+
+
+## Asisten AI
+
+Jalankan `npm run migrate`, kemudian buka **Pengaturan AI** pada dashboard pemilik. Isi endpoint Chat Completions HTTPS, API key, model, tarif kata, harga jual per 1.000 kredit, dan batas memori. Tarif awal input 1/output 2; harga 0 menonaktifkan pembelian. Key terenkripsi memakai `PAYMENT_ENCRYPTION_KEY` yang sama dengan pembayaran. Untuk konfigurasi pengembangan yang sudah ada, gunakan `npx tsx --env-file=.env scripts/setup-ai.ts --test`; file `.envpengembangan` tidak dibaca runtime atau dikirim ke browser.
+
+Pengguna membuka **Asisten AI**, memilih nomor, mengisi pengetahuan/perilaku, lalu mengaktifkan asisten. Saldo AI dan WhatsApp harus tersedia. Pembelian AI memakai konfigurasi QRIS Midtrans yang sudah ada dan tidak mengubah paket WhatsApp. Saldo AI tidak kedaluwarsa. Jeda per pelanggan dan hapus konteks tersedia di halaman yang sama.
+
+Endpoint dashboard: `GET /api/ai/wallet`, `GET /api/ai/usage`, `POST /api/ai/payments`; pengaturan per sesi `GET/PUT /sessions/:id/ai`, percakapan `GET /sessions/:id/ai/conversations`, `PUT /sessions/:id/ai/conversations/:customer` dengan `{paused, clear?}`. Identitas akun selalu berasal dari autentikasi. Endpoint pemilik: `GET/PUT /api/admin/ai`, `POST /api/admin/ai/test`, `POST /api/admin/accounts/:id/ai-credits` dengan `{amount, reason, requestId}`.
+
+Aturan billing, batas input/output, memori, dan pemulihan restart dijelaskan pada [rencana dan implementasi AI](plane-fitur-ai.md#10-implementasi--16-september-2026). Restart tidak mengulangi pengiriman ambigu. Harga jual, QRIS merchant nyata, dan uji HP harus diselesaikan sebelum membuka layanan ke pelanggan.

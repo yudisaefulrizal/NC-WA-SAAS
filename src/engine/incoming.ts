@@ -41,3 +41,18 @@ export function parseIncoming(message: WAMessage): IncomingMessage | undefined {
     if (media) return { ...common, type, text: 'caption' in media ? media.caption ?? '' : '', mimetype: media.mimetype ?? 'application/octet-stream' };
   }
 }
+
+// Only live outbound chat content can trigger takeover; protocol updates and groups cannot.
+export function parseManualCandidate(message: WAMessage, connectedAtSeconds: number): IncomingMessage | undefined {
+  if (!message.key.fromMe || Number(message.messageTimestamp ?? 0) < connectedAtSeconds) return;
+  const content = normalizeMessageContent(message.message);
+  const supported = content && [
+    ['stiker', content.stickerMessage], ['kontak', content.contactMessage ?? content.contactsArrayMessage],
+    ['lokasi', content.locationMessage ?? content.liveLocationMessage],
+    ['polling', content.pollCreationMessage ?? content.pollCreationMessageV2 ?? content.pollCreationMessageV3],
+  ].find(([, value]) => value);
+  const parsed = parseIncoming({ ...message, key: { ...message.key, fromMe: false },
+    message: supported ? { conversation: `[Pesan ${supported[0]} manual]` } : message.message });
+  if (!parsed || parsed.isGroup || !/^[1-9][0-9]{5,14}$/.test(parsed.from)) return;
+  return parsed;
+}

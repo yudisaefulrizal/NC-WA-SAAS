@@ -1,3 +1,4 @@
+import {migrateAI} from './ai-schema.js';
 import { db } from './db.js';
 try {
 await db.query(`CREATE TABLE IF NOT EXISTS accounts (id CHAR(36) PRIMARY KEY, email VARCHAR(254) NOT NULL UNIQUE, password_hash VARCHAR(256) NOT NULL, role ENUM('user','owner') NOT NULL DEFAULT 'user', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`);
@@ -29,5 +30,7 @@ await db.query(`CREATE TABLE IF NOT EXISTS payment_settings (id INT PRIMARY KEY,
 await db.query(`CREATE TABLE IF NOT EXISTS payment_orders (id VARCHAR(64) PRIMARY KEY,account_id CHAR(36) NOT NULL,plan_id VARCHAR(36) NOT NULL,plan_name VARCHAR(100) NOT NULL,price INT UNSIGNED NOT NULL,fee INT UNSIGNED NOT NULL,total INT UNSIGNED NOT NULL,credits INT UNSIGNED NOT NULL,session_limit INT UNSIGNED NOT NULL,config_id CHAR(36) NOT NULL,environment ENUM('sandbox','production') NOT NULL,status VARCHAR(20) NOT NULL DEFAULT 'creating',transaction_id VARCHAR(100),qr_url VARCHAR(512),created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,checked_at DATETIME,activated_at DATETIME,UNIQUE KEY one_transaction(environment,transaction_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,FOREIGN KEY(config_id) REFERENCES payment_config(id)) ENGINE=InnoDB`);
 await db.query(`CREATE TABLE IF NOT EXISTS credit_adjustments (account_id CHAR(36) NOT NULL,request_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,actor_id CHAR(36) NOT NULL,amount INT NOT NULL,reason VARCHAR(200) NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,request_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
 await column('payment_orders','expires_at','DATETIME NULL');
-console.log('Migrasi fondasi selesai.');
+await column('payment_orders','kind',"VARCHAR(16) NOT NULL DEFAULT 'whatsapp'");
+await migrateAI();
+console.log('Migrasi fondasi dan AI selesai.');
 } finally { await db.end(); }

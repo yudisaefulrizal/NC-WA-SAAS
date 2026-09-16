@@ -1,5 +1,9 @@
 # NC-WA SaaS — Panduan Agent
 
+## Rencana fitur AI — 16 September 2026
+
+Target Asisten AI dicatat di [plane-fitur-ai.md](plane-fitur-ai.md). Dokumen memisahkan kesepakatan, usulan versi pertama, dan keputusan terbuka. Belum ada implementasi AI; perubahan ini hanya dokumentasi.
+
 **Keputusan terbaru:** pemulihan akun mandiri/kode pemulihan dihapus. Jika lupa password, hubungi admin. Catatan recovery sebelumnya merupakan riwayat.
 
 Dibaca saat mulai mengerjakan proyek ini.
@@ -86,3 +90,24 @@ Pembaruan permintaan pengguna: kolom Kedaluwarsa dihapus dari tabel akun admin; 
 Pembaruan tabel pembayaran admin, 16 September 2026: `/dashboard/admin/payments` menampilkan Email menggantikan ID akun. Endpoint admin menyertakan `account_email` melalui LEFT JOIN akun agar baris pembayaran tetap ditampilkan. Pemeriksaan tipe, sintaks JavaScript, build, dan validasi query MySQL (LIMIT 0, tanpa menampilkan data pelanggan) lulus.
 
 Pembaruan tabel audit admin, 16 September 2026: `/dashboard/admin/health` menampilkan Email menggantikan ID akun. Endpoint audit menyertakan `account_email` melalui LEFT JOIN; audit tanpa akun tetap ditampilkan dengan tanda — pada email. Pemeriksaan tipe, sintaks JavaScript, build, dan validasi query MySQL (LIMIT 0) lulus.
+
+Pembaruan rencana AI: `plane-fitur-ai.md` disesuaikan dengan Quick Start SumoPod yang diberikan pengguna dan nama konfigurasi AI dalam `.envpengembangan`. Penyedia awal SumoPod, model awal `deepseek-v4-flash`; nilai API key tidak disalin. Kontrak usage dan akses model belum diuji dengan API nyata. Perubahan hanya dokumentasi.
+
+Pembaruan perencanaan AI: dokumen target dirapikan dan aturan kredit diganti menjadi jumlah kata input/output × tarif masing-masing yang diatur pemilik. Token penyedia bukan dasar potongan kredit pelanggan. Detail teknis dipadatkan; usulan dan keputusan terbuka tetap ditandai. Belum ada implementasi atau pengujian AI.
+
+
+## Status terbaru — implementasi AI, 16 September 2026
+
+Asisten AI tersedia per nomor dengan pengaturan pengguna dan pemilik, saldo/riwayat berbasis kata, memori global, jeda dan hapus konteks, serta QRIS per 1.000 kredit tanpa kedaluwarsa. Default input 1/output 2, harga jual harus diisi pemilik. Koneksi SumoPod nyata berhasil; key lokal diimpor terenkripsi tanpa dicetak. Lihat aturan operasional, reservasi, kegagalan, dan restart pada plane-fitur-ai.md bagian 10. Status perencanaan AI sebelumnya adalah riwayat.
+
+Perbaikan pendukung: pemeriksaan nomor nonaktif karena batas paket kini mendahului status suspend internal pada `connected()`, agar kontraknya konsisten dengan QR dan tes downgrade yang sebelumnya gagal. Tidak ada perubahan mekanisme pengiriman atau aktivasi paket.
+
+Verifikasi AI: check/build/sintaks JavaScript dan browser desktop/mobile lulus. Suite penuh 55/56 sebelum perbaikan batas body; tes terarah AI/keamanan 12/12 lulus sesudah perbaikan. Pembayaran 8/8 lulus. Tes downgrade historis kini lulus. Tidak ada commit/push/deploy. Harga jual AI tetap 0 sampai ditetapkan pemilik. Runtime pengembangan yang sudah berjalan memakai tsx watch.
+
+## Pembaruan balasan AI natural — 16 September 2026
+
+Asisten menandai pesan dibaca sebelum generasi, mengirim composing setelah jawaban siap, menunggu acak 1–3 detik, mengirim jawaban, lalu paused melalui finally. Read/presence best effort tanpa kredit tambahan; pemeriksaan pembatalan dipertahankan selama jeda. Check/build dan 13/13 tes AI lulus. Uji HP nyata belum dilakukan.
+
+## Pembaruan ambil alih otomatis — 16 September 2026
+
+Event pesan keluar manual kini menjeda AI per pelanggan dan menyimpan balasan admin ke memori. Connector menentukan dan menyimpan ID sistem sebelum sendMessage; tabel `ai_message_origins` persisten mencegah pesan AI/API dan duplikat memicu jeda. History lama/grup/protokol diabaikan; nomor LID dipetakan bila tersedia. Migrasi lokal sudah dijalankan. Check/build, 21 tes AI/incoming, serta tes regresi incoming/outbound lulus. Uji HP/Web nyata belum dilakukan. Detail batas deteksi ada di plane-fitur-ai.md bagian 12.

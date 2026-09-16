@@ -73,3 +73,15 @@ Tidak ada proses test/server/tool yang sengaja dibiarkan berjalan saat handoff.
 ## Pembaruan UI/UX
 
 Login/daftar dipisahkan; dashboard menampilkan satu menu aktif dengan saldo bersama. Nomor dan akun dipilih melalui dropdown; pengaturan admin dan webhook manual dikelompokkan dalam bagian buka/tutup. Tampilan desktop/mobile, navigasi, login/logout, QR tiruan, kirim berkredit, menu peran, dan rendering XSS lulus browser-check. Pemeriksaan TypeScript dan sintaks JavaScript lulus. Uji ini memakai connector tiruan.
+
+## Pembaruan AI — 16 September 2026
+
+Implementasi AI versi pertama selesai; acuan aktif `plane-fitur-ai.md` bagian 10. Pengguna menetapkan pengaturan per nomor, tarif awal input 1/output 2 yang dapat diubah pemilik, serta QRIS per 1.000 kredit tanpa kedaluwarsa. Harga jual belum ditetapkan (0 = pembelian ditutup). Migrasi lokal sudah dijalankan; konfigurasi SumoPod dari `.envpengembangan` sudah diimpor terenkripsi dan tes model nyata berhasil. Jangan tampilkan isi file kredensial.
+
+Menu pengguna `/dashboard/ai`, pemilik `/dashboard/admin/ai`. Kode utama `src/ai.ts`, `src/ai-schema.ts`; alur terhubung ke gateway, pengiriman berkredit, pembayaran, dan pemulihan startup. Batas jawaban/input, reservasi saldo, kegagalan tanpa biaya, dan perilaku restart didokumentasikan di rencana AI. Antrean RAM tidak diputar ulang otomatis setelah crash; pengiriman ambigu tidak diulang.
+
+Verifikasi: check/build/sintaks dan browser desktop/mobile lulus. Suite penuh sekali menghasilkan 55/56; kegagalan batas body diperbaiki, kemudian 12/12 tes AI/keamanan terarah lulus. Pembayaran 8/8, termasuk snapshot harga dan settlement AI idempoten. Tes khusus recovery diperiksa lagi setelah isolasi pemulihan fixture. Jangan mengulang seluruh suite tanpa perubahan relevan. Tes HP WhatsApp dan QRIS merchant nyata belum dilakukan. Tidak ada commit/push/deploy.
+
+## Ambil alih otomatis — 16 September 2026
+
+Balasan manual HP/Web kini otomatis menjeda AI khusus pelanggan terkait. Jalur engine memakai event outgoing terpisah, tidak melewati filter incoming. Baileys menerima messageId yang dibuat dan dicatat di database sebelum jaringan dipanggil. AI/API tidak memicu pause; ID manual juga persisten agar replay setelah resume tidak menjeda ulang. Pesan lama sebelum koneksi dan event history append diabaikan. UI menjelaskan refresh status dan Lanjutkan AI. Migrasi ai_message_origins sudah dijalankan; check/build dan tes AI/incoming/outbound lulus. Masih perlu uji HP/Web nyata. Tidak ada commit/push.

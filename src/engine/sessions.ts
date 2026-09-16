@@ -23,7 +23,7 @@ export interface Connection {
   send?(jid: string, content: Outbound): Promise<string>;
   exists?(jid: string): Promise<boolean>;
 }
-export interface Update { incoming?: IncomingMessage; status?: Status; phone?: string; qr?: string; disconnected?: number }
+export interface Update { outgoing?: IncomingMessage; incoming?: IncomingMessage; status?: Status; phone?: string; qr?: string; disconnected?: number }
 export type Connector = (id: string, update: (event: Update) => void) => Promise<Connection>;
 interface Session extends SessionInfo {
   qr: string | null;
@@ -46,6 +46,7 @@ export class SessionManager {
   onBeforeSend?: () => Promise<void>;
   private limiting: Promise<void> = Promise.resolve();
   onEvent?: (event: { event: string; sessionId: string; [key: string]: unknown }) => Promise<void>;
+  onOutgoing?: (session: SessionInfo, message: IncomingMessage) => Promise<void>;
   onIncoming?: (session: SessionInfo, message: IncomingMessage) => Promise<void>;
   private queues = new WeakMap<Session, SendQueue>();
   constructor(protected connect: Connector, protected store?: SessionStore, private retryBaseMs = 1000, private sendIntervalMs = 1000) {}
@@ -134,8 +135,8 @@ export class SessionManager {
   connected(id: string) {
     const session = this.get(id);
     if (this.stopped) throw new ApiError(503, 'unavailable', 'Engine sedang berhenti');
-    if (session.suspended) throw new ApiError(409, 'session_suspended', `Session ${id} sedang ditangguhkan`);
     if (session.serviceActive===false) throw new ApiError(409, 'session_inactive', `Nomor nonaktif karena batas paket`);
+    if (session.suspended) throw new ApiError(409, 'session_suspended', `Session ${id} sedang ditangguhkan`);
     if (session.status !== 'connected') throw new ApiError(409, 'session_not_connected', `Session ${id} belum tersambung (status: ${session.status})`);
     if (!session.connection) throw new ApiError(409, 'session_not_connected', `Session ${id} tidak memiliki koneksi aktif`);
     return session.connection;
@@ -266,6 +267,10 @@ export class SessionManager {
     const connection = await this.connect(session.id, update => {
       if (this.sessions.get(session.id) !== session || generation !== session.generation) {
         log(session.id, `Update diabaikan: session diganti atau generation berubah (gen=${generation} vs ${session.generation})`);
+        return;
+      }
+      if (update.outgoing) {
+        this.track(this.onOutgoing?.(this.detail(session.id), update.outgoing),session.id);
         return;
       }
       if (update.incoming) {

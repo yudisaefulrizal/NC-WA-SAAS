@@ -1,3 +1,4 @@
+import {ai} from './ai.js';
 import {createKey} from './keys.js';
 import {payments as defaultPayments} from './payments.js';
 import express from 'express';
@@ -16,7 +17,7 @@ const configuredOrigin=new URL(process.env.APP_ORIGIN??'http://127.0.0.1:8067');
 if(configuredOrigin.origin!==(process.env.APP_ORIGIN??'http://127.0.0.1:8067')||!['http:','https:'].includes(configuredOrigin.protocol))throw new Error('APP_ORIGIN harus berupa origin HTTP/HTTPS tanpa path');
 if(process.env.NODE_ENV==='production'&&configuredOrigin.protocol!=='https:')throw new Error('Produksi memerlukan APP_ORIGIN HTTPS');
 if(process.env.TRUST_PROXY_HOPS&&!/^[0-3]$/.test(process.env.TRUST_PROXY_HOPS))throw new Error('TRUST_PROXY_HOPS harus 0–3');
-app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY_HOPS?Number(process.env.TRUST_PROXY_HOPS):false); app.use(helmet());app.use(express.json({limit:'16kb'}));
+app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY_HOPS?Number(process.env.TRUST_PROXY_HOPS):false); app.use(helmet());const normalJson=express.json({limit:'16kb'}),assistantJson=express.json({limit:'64kb'});app.use((req,res,next)=>(req.method==='PUT'&&/^\/sessions\/[A-Za-z0-9_-]+\/ai$/.test(req.path)?assistantJson:normalJson)(req,res,next));
 app.post('/payments/midtrans/notification',rateLimit({windowMs:60000,limit:120}),async(req,res)=>{const result=await payments.notification(req.body);await gateway.refresh();res.json(result);});
 app.get('/public/plans',async(_req,res)=>{const [rows]=await db.query('SELECT id,name,price,credits,session_limit FROM plans WHERE active=TRUE');res.json(rows);});
 const origin=process.env.APP_ORIGIN ?? 'http://127.0.0.1:8067';
@@ -60,6 +61,9 @@ app.get('/api/payments/:id',async(req,res)=>res.json(await payments.order(res.lo
 app.post('/api/payments/:id/check',async(req,res)=>{await payments.order(res.locals.account.id,req.params.id);await payments.reconcile(req.params.id);await gateway.refresh();res.json(await payments.order(res.locals.account.id,req.params.id));});
 app.post('/api/payments/:id/cancel',async(req,res)=>{const order=await payments.cancel(res.locals.account.id,req.params.id);await gateway.refresh();res.json(order);});
 app.get('/api/payments/:id/qr',async(req,res)=>res.set('Content-Type','image/png').set('Cache-Control','private, no-store').send(await payments.qr(res.locals.account.id,req.params.id)));
+app.post('/api/ai/payments',async(_req,res)=>res.json(await payments.create(res.locals.account.id,'ai-1000','ai')));
+app.get('/api/ai/wallet',async(_req,res)=>res.json(await ai.wallet(res.locals.account.id)));
+app.get('/api/ai/usage',async(_req,res)=>res.json(await ai.usage(res.locals.account.id)));
 app.get('/api/wallet',async(_req,res)=>res.json(await basicWallet(res.locals.account.id)));
 app.get('/api/plans',async(_req,res)=>{const [plans]=await db.query('SELECT * FROM plans WHERE active=TRUE');res.json(plans);});
 app.use('/api/admin',(_req,res,next)=>{if(res.locals.account.role!=='owner'){res.status(403).json({error:'forbidden'});return;}next();});
@@ -85,6 +89,10 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
  await c.commit();res.json({ok:true});}catch(e){await c.rollback();throw e;}finally{c.release();}
 });
 app.get('/api/admin/payments',async(_req,res)=>{const [rows]=await db.query('SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT 100');res.json(rows);});
+app.get('/api/admin/ai',async(_req,res)=>res.json(await ai.configuration()));
+app.put('/api/admin/ai',async(req,res)=>res.json(await ai.configure(res.locals.account.id,req.body)));
+app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(_req,res)=>res.json(await ai.test()));
+app.post('/api/admin/accounts/:id/ai-credits',async(req,res)=>res.json(await ai.adjust(res.locals.account.id,req.params.id,req.body)));
 app.get('/api/admin/midtrans',async(_req,res)=>res.json(await payments.configuration()));
 app.put('/api/admin/midtrans',async(req,res)=>res.json(await payments.configure(res.locals.account.id,req.body)));
 app.post('/api/admin/midtrans/test',async(_req,res)=>res.json(await payments.test()));
@@ -109,7 +117,7 @@ app.put('/api/admin/plans/:id',async(req,res)=>{
  try {await connection.beginTransaction();await connection.execute('INSERT INTO plans VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),price=VALUES(price),credits=VALUES(credits),session_limit=VALUES(session_limit),active=VALUES(active)',[id,input.name,input.price,input.credits,input.session_limit,input.active]);await connection.execute('INSERT INTO audit_events (account_id,action) VALUES (?,?)',[res.locals.account.id,'plan_updated:'+id]);await connection.commit();res.json({ok:true});}catch(e){await connection.rollback();throw e;}finally{connection.release();}
 });
 app.use(express.static('public'));
-app.get(['/','/login','/register','/dashboard','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/health','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
+app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/health','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
 app.use((_req,res)=>res.status(404).json({error:'not_found'}));
 app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{if(res.headersSent){_next(err);return;}if(err instanceof ApiError){res.status(err.status).json({error:err.code,message:err.message});return;}const status=(err as {status?:number}).status;res.status(status===400||status===413?status:500).json({error:status===400||status===413?'invalid_request':'internal_error'});});
 

@@ -7,7 +7,7 @@ import {downloadPublicMedia} from './engine/download.js';
 import {db} from './db.js';
 import type {RowDataPacket} from 'mysql2/promise';
 
-export async function sendBilled(accountId:string,manager:SessionManager,id:string,kind:'text'|'media',body:unknown,key?:string,download=downloadPublicMedia){
+export async function sendBilled(accountId:string,manager:SessionManager,id:string,kind:'text'|'media',body:unknown,key?:string,download=downloadPublicMedia,beforeDispatch?:()=>Promise<void>){
  const input=object(body),jid=recipient(input.to);
  let content:Outbound;
  if(kind==='text')content={text:requiredString(input.text,'text')};
@@ -38,7 +38,7 @@ export async function sendBilled(accountId:string,manager:SessionManager,id:stri
  try{
   manager.connected(id);
   if('url' in content){file=await download(content.url);content={...content,url:file.path,mimetype:file.mimetype};}
-  const result=await manager.send(id,jid,content,async()=>{try{await validateReservation(accountId,requestId);}catch(error){if((error as Error).message==='reservation_expired')throw new ApiError(409,'reservation_expired','Periode kredit berakhir sebelum pesan dikirim');throw error;}});accepted=true;
+  const result=await manager.send(id,jid,content,async()=>{await beforeDispatch?.();try{await validateReservation(accountId,requestId);}catch(error){if((error as Error).message==='reservation_expired')throw new ApiError(409,'reservation_expired','Periode kredit berakhir sebelum pesan dikirim');throw error;}});accepted=true;
   // Store the receipt before finalizing credit. A crash never causes an automatic resend.
   await db.execute('INSERT INTO outbound_results(account_id,request_id,message_id,recipient) VALUES (?,?,?,?)',[accountId,requestId,result.messageId,result.to]);
   await settleCredit(accountId,requestId,'sent');

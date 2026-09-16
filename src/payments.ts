@@ -1,5 +1,5 @@
 import {createCipheriv,createDecipheriv,createHash,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
-import type {RowDataPacket} from 'mysql2/promise';
+import type {PoolConnection,RowDataPacket} from 'mysql2/promise';
 import {db} from './db.js';
 import {activatePackage} from './plans.js';
 import {ApiError} from './engine/sessions.js';
@@ -7,7 +7,7 @@ import {object,requiredString} from './engine/messages.js';
 const base=(environment:string)=>environment==='production'?'https://api.midtrans.com':'https://api.sandbox.midtrans.com';
 function encryptionKey(){const key=process.env.PAYMENT_ENCRYPTION_KEY;if(!key||! /^[a-f0-9]{64}$/i.test(key))throw new ApiError(503,'payment_not_configured','Kunci enkripsi pembayaran belum dikonfigurasi');return Buffer.from(key,'hex');}
 export function encrypt(value:string){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',encryptionKey(),iv);const encrypted=Buffer.concat([cipher.update(value,'utf8'),cipher.final()]);return [iv,cipher.getAuthTag(),encrypted].map(v=>v.toString('hex')).join(':');}
-function decrypt(value:string){const [iv,tag,body]=value.split(':').map(v=>Buffer.from(v,'hex'));const cipher=createDecipheriv('aes-256-gcm',encryptionKey(),iv);cipher.setAuthTag(tag);return Buffer.concat([cipher.update(body),cipher.final()]).toString('utf8');}
+export function decrypt(value:string){const [iv,tag,body]=value.split(':').map(v=>Buffer.from(v,'hex'));const cipher=createDecipheriv('aes-256-gcm',encryptionKey(),iv);cipher.setAuthTag(tag);return Buffer.concat([cipher.update(body),cipher.final()]).toString('utf8');}
 export type Transport=(environment:string,key:string,path:string,body?:unknown)=>Promise<Record<string,any>>;
 const transport:Transport=async(environment,key,path,body)=>{
  const response=await fetch(base(environment)+path,{method:body?'POST':'GET',redirect:'error',signal:AbortSignal.timeout(10000),headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64'),'Content-Type':'application/json',Accept:'application/json'},body:body?JSON.stringify(body):undefined});
@@ -29,18 +29,19 @@ export class Payments {
   if(!rows[0])throw new ApiError(503,'payment_not_configured','Pembayaran belum tersedia');return {id:rows[0].id as string,environment:rows[0].environment as string,key:decrypt(rows[0].secret)};
  }
  async test(){const c=await this.credential();const data=await this.call(c.environment,c.key,'/v2/ncwa-check-'+randomUUID()+'/status');if(String(data.status_code)!=='404')throw new ApiError(502,'payment_provider_error','Kredensial belum terverifikasi');return {ok:true,message:'Autentikasi status berhasil; aktivasi QRIS tetap perlu diuji di merchant.'};}
- async list(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT id,plan_id,plan_name,price,fee,total,status,environment,created_at,activated_at,expires_at,qr_url FROM payment_orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
- async order(account:string,id:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT id,plan_id,plan_name,price,fee,total,status,environment,created_at,activated_at,expires_at,qr_url FROM payment_orders WHERE account_id=? AND id=?',[account,id]);if(!rows[0])throw new ApiError(404,'order_not_found','Pembayaran tidak ditemukan');return rows[0];}
- async create(account:string,planId:unknown){
+ async list(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT id,kind,credits,plan_id,plan_name,price,fee,total,status,environment,created_at,activated_at,expires_at,qr_url FROM payment_orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
+ async order(account:string,id:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT id,kind,credits,plan_id,plan_name,price,fee,total,status,environment,created_at,activated_at,expires_at,qr_url FROM payment_orders WHERE account_id=? AND id=?',[account,id]);if(!rows[0])throw new ApiError(404,'order_not_found','Pembayaran tidak ditemukan');return rows[0];}
+ protected async aiPrice(c:PoolConnection){const [rows]=await c.query<RowDataPacket[]>('SELECT credit_price FROM ai_settings WHERE id=1 FOR SHARE');return Number(rows[0]?.credit_price??0);}
+ async create(account:string,planId:unknown,kind:'whatsapp'|'ai'='whatsapp'){
   const selected=requiredString(planId,'planId',36);
   const [stale]=await db.execute<RowDataPacket[]>("SELECT id FROM payment_orders WHERE account_id=? AND status='pending' AND expires_at<=UTC_TIMESTAMP() LIMIT 1",[account]);
-  if(stale[0]){await this.reconcile(stale[0].id);const previous=await this.order(account,stale[0].id);if(previous.status==='settlement')return previous;}
+  if(stale[0]){await this.reconcile(stale[0].id);const previous=await this.order(account,stale[0].id);if(previous.status==='settlement'&&previous.kind===kind)return previous;}
   const config=await this.credential();const c=await db.getConnection();let id:string;
   try{await c.beginTransaction();await c.execute('SELECT id FROM accounts WHERE id=? FOR UPDATE',[account]);
-   const [pending]=await c.execute<RowDataPacket[]>("SELECT id,plan_id FROM payment_orders WHERE account_id=? AND status IN ('creating','pending','unknown') LIMIT 1",[account]);
-   if(pending[0]){if(pending[0].plan_id!==planId)throw new ApiError(409,'payment_pending','Selesaikan pembayaran sebelumnya terlebih dahulu');await c.commit();return this.order(account,pending[0].id);}
-   const [plans]=await c.execute<RowDataPacket[]>('SELECT * FROM plans WHERE id=? AND active=TRUE AND price>0 FOR SHARE',[selected]);const plan=plans[0];if(!plan)throw new ApiError(400,'plan_unavailable','Paket tidak dapat dibeli');
-   id='ncwa-'+randomUUID();await c.execute('INSERT INTO payment_orders(id,account_id,plan_id,plan_name,price,fee,total,credits,session_limit,config_id,environment) VALUES (?,?,?,?,?,0,?,?,?,?,?)',[id,account,plan.id,plan.name,plan.price,plan.price,plan.credits,plan.session_limit,config.id,config.environment]);await c.commit();
+   const [pending]=await c.execute<RowDataPacket[]>("SELECT id,plan_id,kind FROM payment_orders WHERE account_id=? AND status IN ('creating','pending','unknown') LIMIT 1",[account]);
+   if(pending[0]){if(pending[0].plan_id!==planId||pending[0].kind!==kind)throw new ApiError(409,'payment_pending','Selesaikan pembayaran sebelumnya terlebih dahulu');await c.commit();return this.order(account,pending[0].id);}
+   const [plans]=await c.execute<RowDataPacket[]>('SELECT * FROM plans WHERE id=? AND active=TRUE AND price>0 FOR SHARE',[selected]);let plan: {id:string;name:string;price:number;credits:number;session_limit:number}|undefined=plans[0] as any;if(kind==='ai'){const price=await this.aiPrice(c);if(selected!=='ai-1000'||!price)throw new ApiError(409,'ai_purchase_unavailable','Harga kredit AI belum ditetapkan pemilik');plan={id:selected,name:'1.000 Kredit AI',price,credits:1000,session_limit:0};}if(!plan)throw new ApiError(400,'plan_unavailable','Paket tidak dapat dibeli');
+   id='ncwa-'+randomUUID();await c.execute('INSERT INTO payment_orders(id,account_id,plan_id,plan_name,price,fee,total,credits,session_limit,config_id,environment,kind) VALUES (?,?,?,?,?,0,?,?,?,?,?,?)',[id,account,plan.id,plan.name,plan.price,plan.price,plan.credits,plan.session_limit,config.id,config.environment,kind]);await c.commit();
   }catch(e){await c.rollback();throw e;}finally{c.release();}
   try{
    const order=await this.internal(id);const data=await this.call(config.environment,config.key,'/v2/charge',{payment_type:'qris',transaction_details:{order_id:id,gross_amount:order.total},qris:{acquirer:'gopay'},custom_expiry:{expiry_duration:15,unit:'minute'}});
@@ -83,7 +84,7 @@ export class Payments {
    if(order.activated_at){await c.commit();return;}
    let status=order.status;
    if(verified&&data.transaction_status==='settlement'&&String(data.status_code)==='200'&&(data.fraud_status===undefined||data.fraud_status==='accept')){
-    await activatePackage(c,order.account_id,id,{id:order.plan_id,credits:order.credits,session_limit:order.session_limit});status='settlement';
+    if(order.kind==='ai'){await c.execute('INSERT INTO ai_wallets VALUES (?,?) ON DUPLICATE KEY UPDATE balance=balance+VALUES(balance)',[order.account_id,order.credits]);}else await activatePackage(c,order.account_id,id,{id:order.plan_id,credits:order.credits,session_limit:order.session_limit});status='settlement';
     await c.execute('UPDATE payment_orders SET activated_at=UTC_TIMESTAMP() WHERE id=?',[id]);
    }else if(['pending','expire','deny','cancel'].includes(data.transaction_status))status=data.transaction_status;
    let expires=order.expires_at;

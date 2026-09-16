@@ -23,3 +23,18 @@ test('filter private mencegah pesan grup diteruskan', async () => {
   update({ incoming: { ...common, messageId: 'private', isGroup: false, groupId: null } });
   assert.deepEqual(received, ['private']);
 });
+
+test('Manual candidates only include fresh fromMe private chat content, using alternate phone for LID',async()=>{
+ const {parseManualCandidate}=await import('../src/engine/incoming.js');
+ const message={key:{id:'manual',fromMe:true,remoteJid:'123@lid',remoteJidAlt:'628123456789@s.whatsapp.net'},message:{conversation:'Admin menjawab'},messageTimestamp:101};
+ assert.equal(parseManualCandidate(message,100)?.from,'628123456789');
+ assert.equal(parseManualCandidate({...message,messageTimestamp:99},100),undefined);
+ assert.equal(parseManualCandidate({...message,key:{...message.key,fromMe:false}},100),undefined);
+ assert.equal(parseManualCandidate({...message,key:{...message.key,remoteJid:'123@g.us'}},100),undefined);
+ assert.equal(parseManualCandidate({...message,message:{protocolMessage:{}}},100),undefined);
+});
+test('Outgoing event reaches takeover even when incoming filter is group-only',async()=>{
+ let update!: (event:Update)=>void;const manager=new SessionManager(async(_id,cb)=>{update=cb;return {close(){},async logout(){}};});const seen:string[]=[];
+ manager.onOutgoing=async(_session,message)=>{seen.push(message.messageId);};
+ try{await manager.create('manual');await manager.setFilter('manual','group');update({outgoing:{messageId:'manual',from:'628123456789',sender:'628123456789',isGroup:false,groupId:null,type:'text',text:'Hello',timestamp:1}});assert.deepEqual(seen,['manual']);}finally{await manager.stop();}
+});

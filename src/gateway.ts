@@ -1,3 +1,4 @@
+import {ai as defaultAI} from './ai.js';
 import express from 'express';
 import {TenantWebhooks} from './webhooks.js';
 import {MediaStore} from './engine/media.js';
@@ -14,7 +15,7 @@ import {SessionManager,ApiError,type Connector} from './engine/sessions.js';
 import {SessionStore} from './engine/store.js';
 import {baileysConnector} from './engine/baileys.js';
 
-export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth')) {
+export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth'),ai=defaultAI) {
  const hooks=new TenantWebhooks();
  const media=new Map<string,MediaStore>();
  const streams=new Map<string,EventStream>();
@@ -23,17 +24,19 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  async function manager(id:string){
   if(!managers.has(id))managers.set(id,(async()=>{
    const store=new SessionStore(resolve(root,id));
-   const result=new SessionManager(connector?connector(id,store):baileysConnector(store),store);
+   const result=new SessionManager(connector?connector(id,store):baileysConnector(store,(session,messageId)=>ai.registerSystemMessage(id,session,messageId)),store);
    const files=new MediaStore(resolve(root,'_media',id),process.env.APP_ORIGIN??'http://127.0.0.1:8067');
    const events=new EventStream();media.set(id,files);streams.set(id,events);
    result.onEvent=async event=>{events.push(event);await hooks.enqueue(id,event);};
    result.onBeforeSend=async()=>{const [accounts]=await db.execute<RowDataPacket[]>('SELECT suspended FROM accounts WHERE id=?',[id]);if(!accounts[0]||accounts[0].suspended){await result.applyLimit(0);throw new ApiError(403,'account_suspended','Akun dinonaktifkan');}await result.applyLimit((await basicWallet(id)).session_limit);};
+   result.onOutgoing=async(session,message)=>{await ai.manualOutgoing(id,session.id,message);};
    result.onIncoming=async(session,message)=>{
     await result.onBeforeSend!();if(result.detail(session.id).serviceActive===false)return;
     const {download,...data}=message;
     const stored=await files.save(session.id,message);
     const event={event:'message',sessionId:session.id,...data,media:stored};
     events.push(event);await hooks.enqueue(id,event);
+    await ai.incoming(id,result,session.id,message);
    };
    try {await files.prune();await result.restore((await basicWallet(id)).session_limit);return result;}
    catch(error){await result.stop();throw error;}
@@ -89,11 +92,15 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
    const result=await m.create(req.body.id);await connection.commit();res.json(result);
   }catch(e){await connection.rollback();throw e;}finally{connection.release();}
  });
+ router.get('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.assistant(res.locals.accountId,req.params.id));});
+ router.put('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.saveAssistant(res.locals.accountId,req.params.id,req.body));});
+ router.get('/sessions/:id/ai/conversations',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversations(res.locals.accountId,req.params.id));});
+ router.put('/sessions/:id/ai/conversations/:customer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversation(res.locals.accountId,req.params.id,req.params.customer,req.body));});
  router.get('/sessions/:id',(req,res)=>res.json((res.locals.manager as SessionManager).detail(req.params.id)));
  router.get('/sessions/:id/qr',(req,res)=>res.json((res.locals.manager as SessionManager).qr(req.params.id)));
  router.post('/sessions/:id/logout',async(req,res)=>res.json(await (res.locals.manager as SessionManager).logout(req.params.id)));
  router.post('/sessions/:id/reconnect',async(req,res)=>res.json(await (res.locals.manager as SessionManager).reconnect(req.params.id)));
- router.delete('/sessions/:id',async(req,res)=>res.json(await (res.locals.manager as SessionManager).remove(req.params.id)));
+ router.delete('/sessions/:id',async(req,res)=>{const result=await (res.locals.manager as SessionManager).remove(req.params.id);await ai.removeSession(res.locals.accountId,req.params.id);res.json(result);});
  router.put('/sessions/:id/filter',async(req,res)=>res.json(await (res.locals.manager as SessionManager).setFilter(req.params.id,req.body?.filter)));
  let maintenance:ReturnType<typeof setInterval>|undefined;
  let refreshing:Promise<void>|undefined;
@@ -111,6 +118,6 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
    if(rows[0])await manager(rows[0].id);
   }
  }
- return {router,restore,start:()=>hooks.start(),refresh,health:()=>({loadedAccounts:managers.size,pendingSends:[...pending.values()].reduce((a,b)=>a+b,0)}),revoke:(account:string,tag?:string)=>{const stream=streams.get(account);if(tag)stream?.revoke(tag);else stream?.stop();},stop:async()=>{clearInterval(maintenance);await refreshing;await hooks.stop();for(const stream of streams.values())stream.stop();for(const pending of managers.values())await (await pending).stop();for(const files of media.values())await files.flush();managers.clear();}};
+ return {router,restore,start:()=>hooks.start(),refresh,health:()=>({loadedAccounts:managers.size,pendingSends:[...pending.values()].reduce((a,b)=>a+b,0)}),revoke:(account:string,tag?:string)=>{const stream=streams.get(account);if(tag)stream?.revoke(tag);else stream?.stop();},stop:async()=>{clearInterval(maintenance);await refreshing;await hooks.stop();await ai.stop();for(const stream of streams.values())stream.stop();for(const pending of managers.values())await (await pending).stop();for(const files of media.values())await files.flush();managers.clear();}};
 }
 export const gateway=createGateway();
