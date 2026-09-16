@@ -1,0 +1,25 @@
+import {test,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import request from 'supertest';
+import {db} from '../src/db.js';
+import {app} from '../src/app.js';
+import {hashPassword} from '../src/security.js';
+const origin=process.env.APP_ORIGIN??'http://127.0.0.1:8067',ids:string[]=[];
+after(async()=>{for(const id of ids){await db.execute('DELETE FROM accounts WHERE id=?',[id]);await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);}await db.end();});
+test('Direct owner APIs reject users and keys; injection and oversize bodies do not change roles',async()=>{
+ const id=randomUUID(),email=id+'@test.invalid',password='password-long-123';ids.push(id);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[id,email,await hashPassword(password)]);
+ const user=request.agent(app);await user.post('/api/auth/login').set('Origin',origin).send({email,password}).expect(200);
+ for(const path of ['/api/admin/midtrans','/api/admin/payments','/api/admin/audit','/api/admin/health'])await user.get(path).expect(403);
+ await user.put('/api/admin/midtrans').set('Origin',origin).send({environment:'sandbox',serverKey:'secret'}).expect(403);
+ await user.post('/api/admin/midtrans/test').set('Origin',origin).expect(403);
+ await user.put('/api/admin/accounts/'+id+'/status').set('Origin',origin).send({suspended:true}).expect(403);
+ await user.post('/api/admin/accounts/'+id+'/credits').set('Origin',origin).send({amount:100}).expect(403);
+ await request(app).post('/api/auth/login').set('Origin',origin).send({email:"x' OR 1=1 --@example.com",password}).expect(400);
+ await request(app).post('/api/auth/login').set('Origin',origin).send({email:"x'/**/OR/**/1=1#@example.com",password}).expect(401);
+ await user.post('/api/keys').set('Origin','https://evil.invalid').expect(403);
+ await user.post('/api/keys').set('Origin',origin).send({payload:'x'.repeat(20000)}).expect(413);
+ const me=(await user.get('/api/me').expect(200)).body;assert.equal(me.role,'user');
+ const publicPlans=await request(app).get('/public/plans').expect(200);for(const p of publicPlans.body)assert.deepEqual(Object.keys(p).sort(),['credits','id','name','price','session_limit']);
+});
+test('Login limiter stops repeated attempts',async()=>{let limited=false;for(let i=0;i<21;i++){const r=await request(app).post('/api/auth/login').set('Origin',origin).send({email:'none@test.invalid',password:'invalid-password'});if(r.status===429){limited=true;break;}}assert.equal(limited,true);});

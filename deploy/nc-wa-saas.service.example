@@ -1,0 +1,24 @@
+[Unit]
+Description=NC-WA SaaS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ncwa
+Group=ncwa
+WorkingDirectory=/srv/nc-wa-saas
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --env-file=.env dist/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/nc-wa-saas/auth /srv/nc-wa-saas/data
+
+[Install]
+WantedBy=multi-user.target

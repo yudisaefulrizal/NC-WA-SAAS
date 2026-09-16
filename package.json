@@ -1,0 +1,42 @@
+{
+  "name": "nc-wa-saas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "start": "node --env-file=.env dist/server.js",
+    "migrate": "tsx --env-file=.env src/migrate.ts",
+    "test": "tsx --env-file=.env --test test/*.test.ts",
+    "owner": "tsx --env-file=.env src/owner.ts",
+    "test:browser": "tsx --env-file=.env scripts/browser-check.ts",
+    "backup": "tsx --env-file=.env scripts/backup.ts",
+    "bench": "tsx --env-file=.env scripts/bench.ts",
+    "setup:secrets": "tsx scripts/setup-secrets.ts",
+    "test:restore": "tsx scripts/restore-check.ts"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "ipaddr.js": "^2.5.0",
+    "mysql2": "^3.24.4",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.5.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/supertest": "^7.2.1",
+    "playwright": "^1.63.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
