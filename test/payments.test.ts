@@ -85,11 +85,11 @@ test('QR selection falls back from unsupported v2 action host and repairs missin
  assert.equal((await service.order(f.account,id)).qr_url,order.qr_url);
 });
 
-test('AI QRIS snapshots 1,000 credits and price; repeated settlement only updates AI balance',async()=>{
+test('AI QRIS snapshots 10,000 credits and price; repeated settlement only updates AI balance',async()=>{
  const f=await fixture();let price=5000;class AIPayments extends Payments {protected override async aiPrice(){return price;}}
  let id='';const service=new AIPayments(async(_env,_key,_path,body)=>{if(body)id=(body as any).transaction_details.order_id;return {order_id:id,transaction_id:'tx-'+id,payment_type:'qris',currency:'IDR',gross_amount:'5000.00',transaction_status:body?'pending':'settlement',status_code:body?'201':'200'};},f.config);
- const initial=await basicWallet(f.account);const order=await service.create(f.account,'ai-1000','ai');assert.equal(order.kind,'ai');assert.equal(order.total,5000);assert.equal(order.credits,1000);
+ const initial=await basicWallet(f.account);const order=await service.create(f.account,'ai-10000','ai');assert.equal(order.kind,'ai');assert.equal(order.total,5000);assert.equal(order.credits,10000);
  price=9900;
- await Promise.all([service.reconcile(order.id),service.reconcile(order.id)]);const [wallet]=await db.execute<any[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[f.account]);assert.equal(wallet[0].balance,1000);assert.deepEqual(await basicWallet(f.account),initial);assert.equal((await service.order(f.account,order.id)).total,5000);
- price=0;await assert.rejects(service.create(f.account,'ai-1000','ai'),{code:'ai_purchase_unavailable'});
+ await Promise.all([service.reconcile(order.id),service.reconcile(order.id)]);const [wallet]=await db.execute<any[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[f.account]);assert.equal(wallet[0].balance,10000);assert.deepEqual(await basicWallet(f.account),initial);assert.equal((await service.order(f.account,order.id)).total,5000);
+ price=0;await assert.rejects(service.create(f.account,'ai-10000','ai'),{code:'ai_purchase_unavailable'});
 });

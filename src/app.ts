@@ -61,7 +61,7 @@ app.get('/api/payments/:id',async(req,res)=>res.json(await payments.order(res.lo
 app.post('/api/payments/:id/check',async(req,res)=>{await payments.order(res.locals.account.id,req.params.id);await payments.reconcile(req.params.id);await gateway.refresh();res.json(await payments.order(res.locals.account.id,req.params.id));});
 app.post('/api/payments/:id/cancel',async(req,res)=>{const order=await payments.cancel(res.locals.account.id,req.params.id);await gateway.refresh();res.json(order);});
 app.get('/api/payments/:id/qr',async(req,res)=>res.set('Content-Type','image/png').set('Cache-Control','private, no-store').send(await payments.qr(res.locals.account.id,req.params.id)));
-app.post('/api/ai/payments',async(_req,res)=>res.json(await payments.create(res.locals.account.id,'ai-1000','ai')));
+app.post('/api/ai/payments',async(_req,res)=>res.json(await payments.create(res.locals.account.id,'ai-10000','ai')));
 app.get('/api/ai/wallet',async(_req,res)=>res.json(await ai.wallet(res.locals.account.id)));
 app.get('/api/ai/usage',async(_req,res)=>res.json(await ai.usage(res.locals.account.id)));
 app.get('/api/wallet',async(_req,res)=>res.json(await basicWallet(res.locals.account.id)));

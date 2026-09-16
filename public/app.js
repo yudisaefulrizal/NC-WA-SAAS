@@ -116,7 +116,7 @@ document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.c
 async function loadAI(){
  const [w,rows,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/api/ai/usage'),api('/sessions')]);
  $('ai-balance').textContent=`${w.balance} kredit AI · Input ${w.input_rate} kredit/kata · Output ${w.output_rate} kredit/kata · Tidak kedaluwarsa`;
- $('ai-buy').disabled=!w.credit_price;$('ai-buy').textContent=w.credit_price?`Beli 1.000 kredit AI · ${money(w.credit_price)}`:'Pembelian AI belum tersedia';
+ $('ai-buy').disabled=!w.credit_price;$('ai-buy').textContent=w.credit_price?`Beli 10.000 kredit AI · ${money(w.credit_price)}`:'Pembelian AI belum tersedia';
  const selected=$('ai-session').value;$('ai-session').replaceChildren(new Option('Pilih sesi',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-session').value=selected;
  table('ai-usage',['Waktu','Sesi','Pelanggan','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,({sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
  if(selected)await loadAssistant();

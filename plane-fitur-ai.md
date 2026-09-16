@@ -137,7 +137,7 @@ Keputusan pengguna saat implementasi:
 Aturan versi pertama yang diterapkan:
 
 - Kata = bagian teks nonkosong yang dipisahkan whitespace (`\S+`): tanda baca menempel, URL, emoji, dan teks tanpa spasi masing-masing satu bagian. Seluruh teks pesan system (termasuk arahan teknis), pengetahuan, perilaku, dan memori dihitung berdasarkan payload yang benar-benar dikirim.
-- Tarif bulat: input 0–1.000 dan output 1–1.000 kredit/kata. Harga per 1.000 kredit 0–1.000.000 rupiah. Pecahan belum didukung.
+- Tarif bulat: input 0–1.000 dan output 1–1.000 kredit/kata. Harga per 10.000 kredit 0–1.000.000 rupiah. Pecahan belum didukung.
 - Pengetahuan maksimal 8.000 karakter, perilaku 2.000 karakter, pesan pelanggan 4.000 karakter. Payload maksimal 12.000 kata. Jawaban maksimal 300 kata/8.000 karakter, dikurangi sesuai saldo tersedia.
 - Saldo dicadangkan sebelum pemanggilan AI; sisa cadangan dikembalikan setelah pemakaian aktual diketahui. Timeout, jawaban kosong, respons tidak valid, atau jawaban melewati batas diperlakukan sebagai kegagalan AI: tidak diteruskan dan tidak dikenai kredit pelanggan. Biaya penyedia untuk kegagalan tersebut menjadi tanggungan pemilik.
 - Jawaban valid yang telah dihasilkan tetap ditagih jika WhatsApp gagal atau jika pengiriman dibatalkan karena asisten/konteks berubah selama proses. Kredit WhatsApp mengikuti reservasi dan hasil kirim yang sudah ada.
