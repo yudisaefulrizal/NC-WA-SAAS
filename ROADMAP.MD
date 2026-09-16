@@ -20,8 +20,11 @@ Centang = implementasi tersedia; verifikasi akhir dan uji integrasi nyata masih 
 - [x] Pembayaran QRIS Midtrans
 - [x] Pengaturan Midtrans
 - [x] Riwayat pemakaian dan pembayaran
+- [x] Tabel pembayaran admin menampilkan email akun
 - [x] Manajemen akun dan penyesuaian kredit
+- [x] Tabel akun admin: paket aktif dan sisa kredit
 - [x] Audit dan pemantauan layanan
+- [x] Tabel audit admin menampilkan email akun
 - [x] Isolasi data dan keamanan
 - [x] Landing page
 - [x] Backup dan restore

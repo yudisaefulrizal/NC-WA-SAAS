@@ -58,3 +58,8 @@ Simpan masalah yang sudah selesai agar pendekatan gagal tidak diulang. Jangan me
 - 2026-09-15: pengujian memanggil `NcWa.execute` dari paket n8n yang ada terhadap router SaaS. Send Text lulus, Read menerima 400 invalid_request.
 - Penyebab: node mengirim `from`; implementasi SaaS awal membaca `to`.
 - Perbaikan: rute Read menerima `from` sebagai field utama dan `to` sebagai alias. Proyek n8n tidak diubah.
+
+## Pemeriksaan suite saat penambahan informasi tabel akun admin
+- 2026-09-16: `npm test` menghasilkan 44/45 lulus.
+- `test/session-limits.test.ts:13` mengharapkan penolakan `session_inactive`, tetapi `SessionManager.connected` mengembalikan `session_suspended`.
+- Belum diubah karena di luar cakupan tabel akun admin. Pemeriksaan tipe, build, sintaks JavaScript, dan browser-check lulus.

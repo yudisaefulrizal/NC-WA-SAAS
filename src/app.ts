@@ -45,7 +45,15 @@ app.get('/api/keys',async(_req,res)=>{const [rows]=await db.execute('SELECT id,c
 app.post('/api/keys',async(req,res)=>{const {id,key}=await createKey(res.locals.account.id,digest(cookie(req)));res.status(201).json({id,key});});
 app.post('/api/keys/:id/rotate',async(req,res)=>{const {id,key,revokedHash}=await createKey(res.locals.account.id,digest(cookie(req)),req.params.id);if(revokedHash)gateway.revoke(res.locals.account.id,revokedHash);res.json({id,key});});
 app.delete('/api/keys/:id',async(req,res)=>{const [keys]=await db.execute<RowDataPacket[]>('SELECT key_hash FROM api_keys WHERE id=? AND account_id=?',[req.params.id,res.locals.account.id]);await db.execute('DELETE FROM api_keys WHERE id=? AND account_id=?',[req.params.id,res.locals.account.id]);if(keys[0])gateway.revoke(res.locals.account.id,keys[0].key_hash);res.json({ok:true});});
-app.get('/api/admin/accounts',async(_req,res)=>{if(res.locals.account.role!=='owner'){res.status(403).json({error:'forbidden'});return;}const [rows]=await db.query('SELECT id,email,role,suspended,created_at FROM accounts ORDER BY created_at DESC LIMIT 100');res.json(rows);});
+app.get('/api/admin/accounts',async(_req,res)=>{if(res.locals.account.role!=='owner'){res.status(403).json({error:'forbidden'});return;}const [rows]=await db.query<RowDataPacket[]>('SELECT id,email,role,suspended,created_at FROM accounts ORDER BY created_at DESC LIMIT 100');
+ const [plans]=await db.query<RowDataPacket[]>('SELECT id,name FROM plans');
+ const names=new Map(plans.map(plan=>[plan.id,plan.name]));
+ const accounts=[];
+ for(const account of rows){
+  const wallet=await basicWallet(account.id);
+  accounts.push({...account,plan_id:wallet.plan_id,plan_name:names.get(wallet.plan_id)??wallet.plan_id,balance:wallet.balance,expires_at:wallet.expires_at});
+ }
+ res.json(accounts);});
 app.get('/api/payments',async(_req,res)=>res.json(await payments.list(res.locals.account.id)));
 app.post('/api/payments',async(req,res)=>res.json(await payments.create(res.locals.account.id,req.body?.planId)));
 app.get('/api/payments/:id',async(req,res)=>res.json(await payments.order(res.locals.account.id,req.params.id)));
@@ -55,7 +63,7 @@ app.get('/api/payments/:id/qr',async(req,res)=>res.set('Content-Type','image/png
 app.get('/api/wallet',async(_req,res)=>res.json(await basicWallet(res.locals.account.id)));
 app.get('/api/plans',async(_req,res)=>{const [plans]=await db.query('SELECT * FROM plans WHERE active=TRUE');res.json(plans);});
 app.use('/api/admin',(_req,res,next)=>{if(res.locals.account.role!=='owner'){res.status(403).json({error:'forbidden'});return;}next();});
-app.get('/api/admin/audit',async(_req,res)=>{const [rows]=await db.query('SELECT id,account_id,action,created_at FROM audit_events ORDER BY id DESC LIMIT 100');res.json(rows);});
+app.get('/api/admin/audit',async(_req,res)=>{const [rows]=await db.query('SELECT e.id,e.account_id,a.email AS account_email,e.action,e.created_at FROM audit_events e LEFT JOIN accounts a ON a.id=e.account_id ORDER BY e.id DESC LIMIT 100');res.json(rows);});
 app.get('/api/admin/health',async(_req,res)=>{await db.query('SELECT 1');res.json({database:'ok',engine:gateway.health(),uptime:Math.floor(process.uptime())});});
 app.put('/api/admin/accounts/:id/status',async(req,res)=>{
  if(typeof req.body?.suspended!=='boolean')throw new ApiError(400,'invalid_request','Status wajib valid');
@@ -76,7 +84,7 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
  await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[res.locals.account.id,'credit_adjusted:'+req.params.id]);}
  await c.commit();res.json({ok:true});}catch(e){await c.rollback();throw e;}finally{c.release();}
 });
-app.get('/api/admin/payments',async(_req,res)=>{const [rows]=await db.query('SELECT id,account_id,plan_name,total,status,environment,created_at FROM payment_orders ORDER BY created_at DESC LIMIT 100');res.json(rows);});
+app.get('/api/admin/payments',async(_req,res)=>{const [rows]=await db.query('SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT 100');res.json(rows);});
 app.get('/api/admin/midtrans',async(_req,res)=>res.json(await payments.configuration()));
 app.put('/api/admin/midtrans',async(req,res)=>res.json(await payments.configure(res.locals.account.id,req.body)));
 app.post('/api/admin/midtrans/test',async(_req,res)=>res.json(await payments.test()));

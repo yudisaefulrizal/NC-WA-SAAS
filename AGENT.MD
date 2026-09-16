@@ -74,3 +74,15 @@ Pemulihan session saat startup selesai dengan verifikasi pemilik MySQL; akun yat
 ## Handoff aktif — pekerjaan dihentikan atas permintaan pengguna
 
 Baca [HANDOFF.MD](HANDOFF.MD) sebelum melanjutkan. Implementasi sesi terbaru jauh melampaui status historis di atas; ROADMAP/SPEC belum diselaraskan. Ada perubahan terakhir yang belum diuji. Pengguna meminta menghindari pengulangan suite penuh: tes terarah saat diperlukan, satu suite penuh di akhir.
+
+## Status terbaru — tabel akun admin, 16 September 2026
+
+Halaman `/dashboard/admin/accounts` menampilkan nama paket aktif, sisa kredit, dan kedaluwarsa dalam WIB. Paket dasar menampilkan keterangan reset kredit tanggal 1 pukul 00.00 WIB. Endpoint admin mengambil saldo melalui layanan wallet yang sama dengan dashboard pengguna agar reset/expiry diterapkan sebelum ditampilkan.
+
+Verifikasi: pemeriksaan tipe, sintaks JavaScript, build, dan browser-check desktop/mobile lulus. Suite penuh: 44/45 lulus; tes downgrade session gagal karena mengharapkan `session_inactive`, sementara engine mengembalikan `session_suspended` (di luar perubahan tabel akun).
+
+Pembaruan permintaan pengguna: kolom Kedaluwarsa dihapus dari tabel akun admin; Paket aktif dan Sisa kredit tetap ditampilkan. Pemeriksaan sintaks JavaScript lulus.
+
+Pembaruan tabel pembayaran admin, 16 September 2026: `/dashboard/admin/payments` menampilkan Email menggantikan ID akun. Endpoint admin menyertakan `account_email` melalui LEFT JOIN akun agar baris pembayaran tetap ditampilkan. Pemeriksaan tipe, sintaks JavaScript, build, dan validasi query MySQL (LIMIT 0, tanpa menampilkan data pelanggan) lulus.
+
+Pembaruan tabel audit admin, 16 September 2026: `/dashboard/admin/health` menampilkan Email menggantikan ID akun. Endpoint audit menyertakan `account_email` melalui LEFT JOIN; audit tanpa akun tetap ditampilkan dengan tanda — pada email. Pemeriksaan tipe, sintaks JavaScript, build, dan validasi query MySQL (LIMIT 0) lulus.
