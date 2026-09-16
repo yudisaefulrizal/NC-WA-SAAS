@@ -32,15 +32,18 @@ export class Payments {
  async list(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT id,kind,credits,plan_id,plan_name,price,fee,total,status,environment,created_at,activated_at,expires_at,qr_url FROM payment_orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
  async order(account:string,id:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT id,kind,credits,plan_id,plan_name,price,fee,total,status,environment,created_at,activated_at,expires_at,qr_url FROM payment_orders WHERE account_id=? AND id=?',[account,id]);if(!rows[0])throw new ApiError(404,'order_not_found','Pembayaran tidak ditemukan');return rows[0];}
  protected async aiPrice(c:PoolConnection){const [rows]=await c.query<RowDataPacket[]>('SELECT credit_price FROM ai_settings WHERE id=1 FOR SHARE');return Number(rows[0]?.credit_price??0);}
- async create(account:string,planId:unknown,kind:'whatsapp'|'ai'='whatsapp'){
+ async create(account:string,planId:unknown,kind:'whatsapp'|'ai'='whatsapp',units:unknown=1){
   const selected=requiredString(planId,'planId',36);
+  const aiUnits=kind==='ai'?Number(units):1;
+  if(kind==='ai'&&(!Number.isSafeInteger(aiUnits)||aiUnits<1||aiUnits>100))throw new ApiError(400,'invalid_request','Jumlah unit kredit AI harus bilangan 1–100');
+  const effectivePlanId=kind==='ai'&&aiUnits>1?'ai-10000x'+aiUnits:selected;
   const [stale]=await db.execute<RowDataPacket[]>("SELECT id FROM payment_orders WHERE account_id=? AND status='pending' AND expires_at<=UTC_TIMESTAMP() LIMIT 1",[account]);
   if(stale[0]){await this.reconcile(stale[0].id);const previous=await this.order(account,stale[0].id);if(previous.status==='settlement'&&previous.kind===kind)return previous;}
   const config=await this.credential();const c=await db.getConnection();let id:string;
   try{await c.beginTransaction();await c.execute('SELECT id FROM accounts WHERE id=? FOR UPDATE',[account]);
    const [pending]=await c.execute<RowDataPacket[]>("SELECT id,plan_id,kind FROM payment_orders WHERE account_id=? AND status IN ('creating','pending','unknown') LIMIT 1",[account]);
-   if(pending[0]){if(pending[0].plan_id!==planId||pending[0].kind!==kind)throw new ApiError(409,'payment_pending','Selesaikan pembayaran sebelumnya terlebih dahulu');await c.commit();return this.order(account,pending[0].id);}
-    const [plans]=await c.execute<RowDataPacket[]>('SELECT * FROM plans WHERE id=? AND active=TRUE AND price>0 FOR SHARE',[selected]);let plan: {id:string;name:string;price:number;credits:number;session_limit:number}|undefined=plans[0] as any;if(kind==='ai'){const price=await this.aiPrice(c);if(selected!=='ai-10000'||!price)throw new ApiError(409,'ai_purchase_unavailable','Harga kredit AI belum ditetapkan pemilik');plan={id:selected,name:'10.000 Kredit AI',price,credits:10000,session_limit:0};}if(!plan)throw new ApiError(400,'plan_unavailable','Paket tidak dapat dibeli');
+   if(pending[0]){if(pending[0].plan_id!==effectivePlanId||pending[0].kind!==kind)throw new ApiError(409,'payment_pending','Selesaikan pembayaran sebelumnya terlebih dahulu');await c.commit();return this.order(account,pending[0].id);}
+    const [plans]=await c.execute<RowDataPacket[]>('SELECT * FROM plans WHERE id=? AND active=TRUE AND price>0 FOR SHARE',[selected]);let plan: {id:string;name:string;price:number;credits:number;session_limit:number}|undefined=plans[0] as any;if(kind==='ai'){const price=await this.aiPrice(c);if(selected!=='ai-10000'||!price)throw new ApiError(409,'ai_purchase_unavailable','Harga kredit AI belum ditetapkan pemilik');plan={id:effectivePlanId,name:new Intl.NumberFormat('id-ID').format(10000*aiUnits)+' Kredit AI',price:price*aiUnits,credits:10000*aiUnits,session_limit:0};}if(!plan)throw new ApiError(400,'plan_unavailable','Paket tidak dapat dibeli');
    id='ncwa-'+randomUUID();await c.execute('INSERT INTO payment_orders(id,account_id,plan_id,plan_name,price,fee,total,credits,session_limit,config_id,environment,kind) VALUES (?,?,?,?,?,0,?,?,?,?,?,?)',[id,account,plan.id,plan.name,plan.price,plan.price,plan.credits,plan.session_limit,config.id,config.environment,kind]);await c.commit();
   }catch(e){await c.rollback();throw e;}finally{c.release();}
   try{

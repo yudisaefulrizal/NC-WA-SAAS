@@ -111,3 +111,7 @@ Asisten menandai pesan dibaca sebelum generasi, mengirim composing setelah jawab
 ## Pembaruan ambil alih otomatis — 16 September 2026
 
 Event pesan keluar manual kini menjeda AI per pelanggan dan menyimpan balasan admin ke memori. Connector menentukan dan menyimpan ID sistem sebelum sendMessage; tabel `ai_message_origins` persisten mencegah pesan AI/API dan duplikat memicu jeda. History lama/grup/protokol diabaikan; nomor LID dipetakan bila tersedia. Migrasi lokal sudah dijalankan. Check/build, 21 tes AI/incoming, serta tes regresi incoming/outbound lulus. Uji HP/Web nyata belum dilakukan. Detail batas deteksi ada di plane-fitur-ai.md bagian 12.
+
+## Pembaruan pembelian unit kredit AI — 17 September 2026
+
+Dashboard AI kini menerima jumlah 1–100 unit saat membeli kredit; satu unit tetap 10.000 kredit sesuai harga satuan yang diatur pemilik. Total rupiah dan kredit dihitung serta disimpan sebagai snapshot order di server, sehingga nilai dari browser tidak dipercaya. Satu pembayaran pending dengan jumlah berbeda tetap harus diselesaikan terlebih dahulu. Pemeriksaan TypeScript, suite tes, dan browser desktop/mobile lulus. QRIS merchant nyata belum diuji.

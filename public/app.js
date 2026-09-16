@@ -112,11 +112,13 @@ let adjustment;
 form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment||adjustment.payload!==payload)adjustment={payload,id:crypto.randomUUID()};await api('/api/admin/accounts/'+encodeURIComponent(data.accountId)+'/credits','POST',{amount:Number(data.amount),reason:data.reason,requestId:adjustment.id});adjustment=undefined;await admin();$('adjustform-modal').close();$('adjustform').reset();$('message').textContent='Penyesuaian tersimpan.';});
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
+const aiUnits=document.createElement('input');aiUnits.id='ai-units';aiUnits.type='number';aiUnits.min='1';aiUnits.max='100';aiUnits.step='1';aiUnits.value='1';aiUnits.inputMode='numeric';const aiUnitsLabel=document.createElement('label');aiUnitsLabel.textContent='Jumlah unit kredit AI (1 unit = 10.000 kredit)';aiUnitsLabel.append(' ',aiUnits);$('ai-buy').before(aiUnitsLabel);
 
 async function loadAI(){
  const [w,rows,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/api/ai/usage'),api('/sessions')]);
  $('ai-balance').textContent=`${w.balance} kredit AI · Input ${w.input_rate} kredit/kata · Output ${w.output_rate} kredit/kata · Tidak kedaluwarsa`;
- $('ai-buy').disabled=!w.credit_price;$('ai-buy').textContent=w.credit_price?`Beli 10.000 kredit AI · ${money(w.credit_price)}`:'Pembelian AI belum tersedia';
+ const units=Number($('ai-units').value),validUnits=Number.isSafeInteger(units)&&units>=1&&units<=100;
+ $('ai-buy').disabled=!w.credit_price||!validUnits;$('ai-buy').textContent=w.credit_price&&validUnits?`Beli ${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(w.credit_price*units)}`:'Pembelian AI belum tersedia';
  const selected=$('ai-session').value;$('ai-session').replaceChildren(new Option('Pilih sesi',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-session').value=selected;
  table('ai-usage',['Waktu','Sesi','Pelanggan','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,({sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
  if(selected)await loadAssistant();
@@ -131,7 +133,8 @@ async function loadConversations(){const id=$('ai-session').value;if(!id)return;
 $('ai-session').onchange=()=>run(loadAssistant);
 form('ai-form',async data=>{if(!data.session)throw Error('Pilih sesi terlebih dahulu.');await api('/sessions/'+encodeURIComponent(data.session)+'/ai','PUT',{enabled:data.enabled==='on',knowledge:data.knowledge,behavior:data.behavior});$('message').textContent='Pengaturan asisten tersimpan.';});
 $('ai-refresh').onclick=()=>run(loadAI);
-$('ai-buy').onclick=()=>run(async()=>{const control=$('ai-buy');control.disabled=true;try{const order=await api('/api/ai/payments','POST');history.pushState(null,'','/dashboard/paket');navigate();await checkout(order.id);await paymentList();}finally{await loadAI();}});
+$('ai-units').oninput=()=>void run(loadAI);
+$('ai-buy').onclick=()=>run(async()=>{const control=$('ai-buy'),units=Number($('ai-units').value);if(!Number.isSafeInteger(units)||units<1||units>100)throw Error('Jumlah unit kredit AI harus bilangan 1–100.');control.disabled=true;try{const order=await api('/api/ai/payments','POST',{units});history.pushState(null,'','/dashboard/paket');navigate();await checkout(order.id);await paymentList();}finally{await loadAI();}});
 async function loadAIConfig(){const config=await api('/api/admin/ai');for(const name of ['endpoint','model','input_rate','output_rate','memory_limit','credit_price'])$('ai-config').elements[name].value=config[name];$('ai-config').elements.apiKey.value='';$('ai-config-status').textContent=config.configured?'API key tersimpan terenkripsi.':'Koneksi AI belum dikonfigurasi.';}
 form('ai-config',async data=>{for(const key of ['input_rate','output_rate','memory_limit','credit_price'])data[key]=Number(data[key]);await api('/api/admin/ai','PUT',data);await loadAIConfig();$('message').textContent='Pengaturan AI tersimpan. Batas memori berlaku untuk seluruh percakapan.';});
 $('ai-test').onclick=()=>run(async()=>{const b=$('ai-test');b.disabled=true;try{$('message').textContent=(await api('/api/admin/ai/test','POST')).message;}finally{b.disabled=false;}});
