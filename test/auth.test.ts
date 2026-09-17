@@ -43,3 +43,13 @@ test('Key rotation is atomic, revokes old credentials and denies another account
  assert.deepEqual(results.map(r=>r.status).sort(),[200,404]);const next=results.find(r=>r.status===200)!.body;await request(app).get('/api/client/me').set('X-API-Key',old.key).expect(401);await request(app).get('/api/client/me').set('X-API-Key',next.key).expect(200);
  assert.equal((await a.get('/api/keys').expect(200)).body.length,1);
 });
+
+test('Owner can replace a customer password, revoking their login sessions',async()=>{
+ const owner='test-'+randomUUID()+'@example.test',customer='test-'+randomUUID()+'@example.test',oldPassword='customer-password-old',newPassword='customer-password-new';emails.push(owner,customer);
+ await request(app).post('/api/auth/register').set('Origin',origin).send({email:owner,password:'owner-password-long'}).expect(201);await request(app).post('/api/auth/register').set('Origin',origin).send({email:customer,password:oldPassword}).expect(201);await db.execute("UPDATE accounts SET role='owner' WHERE email=?",[owner]);
+ const ownerAgent=request.agent(app),customerAgent=request.agent(app);await ownerAgent.post('/api/auth/login').set('Origin',origin).send({email:owner,password:'owner-password-long'}).expect(200);await customerAgent.post('/api/auth/login').set('Origin',origin).send({email:customer,password:oldPassword}).expect(200);
+ const [rows]=await db.execute<any[]>('SELECT id FROM accounts WHERE email=?',[customer]);const id=rows[0].id;
+ await ownerAgent.put('/api/admin/accounts/'+id+'/password').set('Origin',origin).send({password:'short'}).expect(400);await ownerAgent.put('/api/admin/accounts/'+id+'/password').set('Origin',origin).send({password:newPassword}).expect(200);
+ await customerAgent.get('/api/me').expect(401);await request(app).post('/api/auth/login').set('Origin',origin).send({email:customer,password:oldPassword}).expect(401);await request(app).post('/api/auth/login').set('Origin',origin).send({email:customer,password:newPassword}).expect(200);
+ const [ownerRow]=await db.execute<any[]>('SELECT id FROM accounts WHERE email=?',[owner]);await ownerAgent.put('/api/admin/accounts/'+ownerRow[0].id+'/password').set('Origin',origin).send({password:newPassword}).expect(409);await request(app).put('/api/admin/accounts/'+id+'/password').set('Origin',origin).send({password:newPassword}).expect(401);
+});

@@ -115,3 +115,7 @@ Event pesan keluar manual kini menjeda AI per pelanggan dan menyimpan balasan ad
 ## Pembaruan pembelian unit kredit AI — 17 September 2026
 
 Dashboard AI kini menerima jumlah 1–100 unit saat membeli kredit; satu unit tetap 10.000 kredit sesuai harga satuan yang diatur pemilik. Total rupiah dan kredit dihitung serta disimpan sebagai snapshot order di server, sehingga nilai dari browser tidak dipercaya. Satu pembayaran pending dengan jumlah berbeda tetap harus diselesaikan terlebih dahulu. Pemeriksaan TypeScript, suite tes, dan browser desktop/mobile lulus. QRIS merchant nyata belum diuji.
+
+## Pembaruan ganti password pelanggan — 17 September 2026
+
+Pemilik dapat mengganti password akun pelanggan dari tabel Akun pelanggan. Password dibatasi 6–128 karakter, di-hash server, dan seluruh sesi login pelanggan dicabut atomik setelah perubahan. Perubahan diaudit; akun pemilik tetap tidak dapat diubah melalui halaman ini. Pemeriksaan TypeScript, 66 tes, dan browser desktop/mobile lulus.

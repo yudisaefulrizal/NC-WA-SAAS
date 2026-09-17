@@ -76,6 +76,14 @@ app.put('/api/admin/accounts/:id/status',async(req,res)=>{
  await c.execute('UPDATE accounts SET suspended=? WHERE id=?',[req.body.suspended,req.params.id]);await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[res.locals.account.id,(req.body.suspended?'account_suspended:':'account_enabled:')+req.params.id]);await c.commit();
  }catch(e){await c.rollback();throw e;}finally{c.release();}gateway.revoke(req.params.id);await gateway.refresh();res.json({ok:true});
 });
+app.put('/api/admin/accounts/:id/password',async(req,res)=>{
+ const password=req.body?.password;
+ if(typeof password!=='string'||password.length<6||password.length>128)throw new ApiError(400,'invalid_request','Password harus 6–128 karakter');
+ const c=await db.getConnection();try{await c.beginTransaction();const [rows]=await c.execute<RowDataPacket[]>('SELECT role FROM accounts WHERE id=? FOR UPDATE',[req.params.id]);
+  if(!rows[0])throw new ApiError(404,'account_not_found','Akun tidak ditemukan');if(rows[0].role==='owner')throw new ApiError(409,'owner_protected','Password akun pemilik tidak dapat diubah dari halaman ini');
+  await c.execute('UPDATE accounts SET password_hash=? WHERE id=?',[await hashPassword(password),req.params.id]);await c.execute('DELETE FROM login_sessions WHERE account_id=?',[req.params.id]);await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[res.locals.account.id,'account_password_changed:'+req.params.id]);await c.commit();
+ }catch(e){await c.rollback();throw e;}finally{c.release();}gateway.revoke(req.params.id);res.json({ok:true});
+});
 app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
  const {amount,reason,requestId}=req.body??{};
  if(!Number.isSafeInteger(amount)||Math.abs(amount)>100000000||amount===0||typeof reason!=='string'||!reason.trim()||reason.length>200||typeof requestId!=='string'||! /^[a-zA-Z0-9_-]{1,64}$/.test(requestId))throw new ApiError(400,'invalid_request','Jumlah, alasan, dan ID penyesuaian wajib valid');
