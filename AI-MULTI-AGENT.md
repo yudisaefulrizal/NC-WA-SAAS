@@ -4,7 +4,7 @@ Engine internal TypeScript di NC-WA SaaS, tanpa n8n. Keputusan client terbaru me
 
 ## Alur dan konfigurasi
 
-WhatsApp → antrean pelanggan → reservasi kredit → router → satu spesialis → tools → jawaban → pengiriman WhatsApp → shared memory MySQL.
+WhatsApp → antrean pelanggan → reservasi kredit → router → satu spesialis → tools → jawaban → Context Agent → pengiriman WhatsApp → shared memory + konteks router MySQL.
 
 | Konfigurasi | Sumber | Digunakan oleh |
 | --- | --- | --- |
@@ -12,15 +12,26 @@ WhatsApp → antrean pelanggan → reservasi kredit → router → satu spesiali
 | Produk/Layanan | Tabel NC-WA, atau custom endpoint | Informasi, Konsultasi, Transaksi |
 | Order/Pesanan | Tabel NC-WA, atau custom endpoint | Transaksi, Dukungan, Keluhan |
 | Perilaku AI | Teks client | Seluruh agent, termasuk router |
-| Shared Memory | Otomatis oleh NC-WA | Seluruh agent, termasuk router |
+| Shared Memory | Otomatis oleh NC-WA | Delapan spesialis |
+| Router Context Memory | S-P-O terbaru dari Context Agent | Router |
 
 Sumber Produk dan Order dipilih secara independen. Semua kombinasi bawaan/custom didukung. Mode demo tidak lagi digunakan; tabel baru tidak diisi data klinik contoh. Knowledge diakses melalui tool, bukan disisipkan ke prompt seluruh agent. Fakta yang pernah dibahas tetap dapat muncul dalam shared memory.
 
-Router dan delapan spesialis ada di `src/ai-agents.ts`. Router membaca riwayat bersama untuk memahami lanjutan percakapan, lalu menghasilkan `sub_agent`, `s_p_o_konteks` (3 kata), dan `isi_pesan` (pesan terbaru apa adanya). Output klasifikasi tidak masuk memory. Agent pembuka, penutup, dan lainnya tidak mempunyai tools bisnis.
+Router dan delapan spesialis ada di `src/ai-agents.ts`. Router membaca pesan terbaru dan konteks S-P-O sebelumnya untuk memahami lanjutan percakapan, lalu menghasilkan `sub_agent`, `s_p_o_konteks` (3 kata), dan `isi_pesan` (pesan terbaru apa adanya). Output klasifikasi tidak masuk memory. Agent pembuka, penutup, dan lainnya tidak mempunyai tools bisnis.
 
 Spesialis menggunakan JSON `{"answer":"..."}` atau `{"tool":"nama","query":"string"}` melalui transport Chat Completions. Izin tool mengikuti tabel konfigurasi di atas: `get_knowledge`, `get_products`, `check_order`, dan `create_order`. Adapter `AIData` di `src/ai-data.ts` menentukan sumber tanpa memperlihatkan penyimpanan atau endpoint kepada model.
 
-Batas satu turn: satu router, lima panggilan spesialis, maksimal empat tool, query 2.000 karakter, hasil tool 16.000 karakter. Hasil validasi input tool dapat dikoreksi agent; error jaringan/infrastruktur menggagalkan generasi. Pembuatan order yang sudah berhasil tidak dieksekusi lagi dalam turn yang sama, meskipun model mengubah argumen pemanggilan berikutnya.
+Batas satu turn: satu router, satu Context Agent, lima panggilan spesialis, maksimal empat tool, query 2.000 karakter, hasil tool 16.000 karakter. Hasil validasi input tool dapat dikoreksi agent; error jaringan/infrastruktur menggagalkan generasi. Pembuatan order yang sudah berhasil tidak dieksekusi lagi dalam turn yang sama, meskipun model mengubah argumen pemanggilan berikutnya.
+
+Context Agent membaca pesan pelanggan dan jawaban final, lalu menghasilkan satu baris tiga kata `subjek-predikat-objek` (maksimal 200 karakter). Konteks disimpan di `ai_conversations.router_context` hanya setelah pengiriman berhasil dan revision masih sama, terpisah dari riwayat chat. Router menggunakan konteks ini untuk pesan seperti “ya”, “yang itu”, atau “cukup”, dan mengikuti intent baru bila topik berubah. Jika pembaruan konteks gagal/invalid, jawaban tetap dikirim dan konteks lama dikosongkan agar tidak menyesatkan. Takeover manual mengosongkan konteks router; Hapus konteks menghapus kedua memori. Dashboard menampilkan S-P-O terakhir. Migrasi `migrateAI` menambahkan kolom nullable secara idempoten; percakapan lama dimulai tanpa S-P-O.
+
+## Tiga tingkat model (khusus pemilik)
+
+Pengaturan `/dashboard/admin/ai` menyediakan model murah, sedang, dan cerdas dengan endpoint/API key bersama. Router, Context Agent, Pembuka, dan Penutup memakai murah; Informasi, Konsultasi, Transaksi, Dukungan, dan Keluhan memakai sedang; Lainnya memakai cerdas. Pembagian ini tetap berdasarkan peran, tanpa eskalasi atau fallback otomatis saat provider gagal. Tombol tes per tingkat menguji konfigurasi yang sudah disimpan.
+
+Migrasi menambahkan `model_cheap`, `model_medium`, `model_smart` nullable. Nilai yang belum diatur memakai model lama agar migrasi tidak mengganti provider/model aktif. Nama model di prototype tidak otomatis diaktifkan. Pemilik memilih nama model yang tersedia pada providernya. Konfigurasi diambil sekali per turn agar perubahan setting tidak mengganti model di tengah turn.
+
+`ai_usage.model_calls` mencatat peran, model aktual, dan status transport (`responded`/`failed`) setiap panggilan, termasuk pengulangan specialist untuk tools. Status responded bukan jaminan output valid; status permintaan menunjukkan hasil akhir. Kolom model lama menyimpan model specialist saat generasi berhasil. Riwayat ini tersedia hanya di `/api/admin/ai/usage` dan halaman pemilik. API penggunaan client tidak mengirim model atau trace. Tarif kredit client tetap sama; proses routing dan Context Agent tidak ditagihkan tambahan.
 
 ## Tabel bawaan dan UI
 
@@ -131,7 +142,7 @@ Sumber dalam PUT konfigurasi: `{"mode":"builtin"}` atau `{"mode":"endpoint","end
 
 `npm run migrate` menambah `ai_data_sources`, `ai_products`, `ai_orders`, serta metadata agent pada usage. Migrasi additive, aman diulang, dan tidak menghapus data lama. Kolom `demo_tools` dari versi prototype, bila sudah ada, tidak lagi dibaca. Jalankan migrasi sebelum runtime baru; `npm run build` menghasilkan `dist`.
 
-Tarif/reservasi lama dipertahankan: input yang ditagihkan adalah instruksi service/perilaku dan memory; output adalah jawaban final. Knowledge/produk/order yang diambil lewat tools, router, dan prompt tambahan merupakan proses internal tanpa potongan tambahan. Jawaban valid yang gagal dikirim tetap mengikuti aturan tagihan AI lama.
+Tarif/reservasi lama dipertahankan: input yang ditagihkan adalah instruksi service/perilaku dan memory; output adalah jawaban final. Knowledge/produk/order yang diambil lewat tools, router, Context Agent, dan prompt tambahan merupakan proses internal tanpa potongan tambahan. Jawaban valid yang gagal dikirim tetap mengikuti aturan tagihan AI lama.
 
 Tes: `test/ai-agents.test.ts`, `test/ai-data.test.ts`, `test/ai.test.ts`, suite `npm test`, serta `npm run test:browser` (CHROMIUM_PATH bila perlu). Pengujian mencakup data persisten, kombinasi sumber, tenant/session/customer, endpoint invalid, harga snapshot, idempotensi, takeover, routing/shared memory, dan UI desktop/mobile.
 

@@ -1,5 +1,6 @@
+import {modelTiers,tierConfig,type ModelRole} from './ai-models.js';
 import {publicSources,sourceInput,saveSource} from './ai-data.js';
-import {runAgents,defaultTools,type AITools} from './ai-agents.js';
+import {runAgents,updateRouterContext,defaultTools,type AITools} from './ai-agents.js';
 import {randomInt} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {request} from 'node:https';
@@ -14,7 +15,7 @@ import type {IncomingMessage} from './engine/incoming.js';
 import {basicWallet} from './plans.js';
 import {sendBilled} from './outbound.js';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
-export interface AIConfig {endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
+export interface AIConfig {model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
 export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 export const creditCost=(input:number,output:number,inputRate:number,outputRate:number)=>input*inputRate+output*outputRate;
@@ -49,22 +50,30 @@ export class AIService {
  private queues=new Map<string,Promise<void>>();
  private queued=0;
  constructor(private transport:AITransport=callAI,private wait:(milliseconds:number)=>Promise<void>=async milliseconds=>{await delay(milliseconds);},private tools:AITools=defaultTools){}
- async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');return rows[0]?{...defaults,...rows[0]}:defaults;}
+ async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0]}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;return config;}
  async configuration(){const {secret,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
  async configure(actor:string,body:unknown){const input=object(body),previous=await this.config();
-  const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model,100,'Model'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
+  const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model_medium??input.model,100,'Model sedang'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
+  for(const tier of modelTiers){const key=('model_'+tier) as 'model_cheap'|'model_medium'|'model_smart';config[key]=text(input[key]??(tier==='medium'?config.model:previous[key])??config.model,100,'Model '+tier);if(!config[key])throw fail('Model '+tier+' wajib diisi');}
   if(!config.model)throw fail('Model wajib diisi');await validatePublicUrl(config.endpoint);
   if(input.apiKey!==undefined&&input.apiKey!==''){const key=text(input.apiKey,512,'API key');if(!key||/[\r\n]/.test(key))throw fail('API key tidak valid');config.secret=encrypt(key);}
   if(!config.secret)throw fail('API key wajib diisi');
-  await transaction(async c=>{await c.execute('INSERT INTO ai_settings VALUES (1,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),credit_price=VALUES(credit_price)',[config.endpoint,config.model,config.secret,config.input_rate,config.output_rate,config.memory_limit,config.credit_price]);
+  await transaction(async c=>{await c.execute('INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,credit_price,model_cheap,model_medium,model_smart) VALUES (1,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart)',[config.endpoint,config.model,config.secret,config.input_rate,config.output_rate,config.memory_limit,config.credit_price,config.model_cheap??config.model,config.model_medium??config.model,config.model_smart??config.model]);
    // JSON slicing trims every tenant immediately without exposing conversation content.
    const [rows]=await c.query<RowDataPacket[]>('SELECT account_id,session_id,customer,messages FROM ai_conversations FOR UPDATE');
    for(const row of rows)await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(parseMemory(row.messages).slice(-config.memory_limit)),row.account_id,row.session_id,row.customer]);
    await c.execute("INSERT INTO audit_events(account_id,action) VALUES (?,'ai_settings_updated')",[actor]);});return this.configuration();
  }
- async test(){const config=await this.config();if(!config.secret)throw fail('AI belum dikonfigurasi');try{await this.transport(config,[{role:'user',content:'Balas hanya OK.'}],10);return {ok:true,message:'Koneksi dan model AI berhasil diuji.'};}catch{throw new ApiError(502,'ai_provider_failed','Koneksi atau model AI belum berhasil; periksa endpoint, key, dan model.');}}
+ async test(tier:unknown='medium'){
+  if(tier!=='cheap'&&tier!=='medium'&&tier!=='smart')throw fail('Tier model tidak valid');
+  const config=tierConfig(await this.config(),tier);if(!config.secret)throw fail('AI belum dikonfigurasi');
+  try{await this.transport(config,[{role:'user',content:'Balas hanya OK.'}],10);return {ok:true,tier,model:config.model,message:'Koneksi model '+tier+' ('+config.model+') berhasil diuji.'};}
+  catch{throw new ApiError(502,'ai_provider_failed','Koneksi model '+tier+' belum berhasil; periksa endpoint, key, dan model.');}
+ }
+ async modelUsage(){const [rows]=await db.query('SELECT account_id,session_id,request_id,status,agent,model_calls,created_at FROM ai_usage ORDER BY created_at DESC LIMIT 100');return rows;}
+
  async wallet(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);const config=await this.config();return {balance:rows[0]?.balance??0,input_rate:config.input_rate,output_rate:config.output_rate,credit_price:config.credit_price,unit:10000};}
- async usage(account:string){const [rows]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,model,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
+ async usage(account:string){const [rows]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
  async assistant(account:string,session:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);return {enabled:Boolean(rows[0]?.enabled),knowledge:String(rows[0]?.knowledge??''),behavior:String(rows[0]?.behavior??''),revision:Number(rows[0]?.revision??0),...await publicSources(account,session)};}
  async saveAssistant(account:string,session:string,body:unknown){
   const input=object(body);if(typeof input.enabled!=='boolean')throw fail('Status asisten wajib valid');
@@ -92,12 +101,12 @@ export class AIService {
    const [rows]=await c.execute<RowDataPacket[]>('SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);
    const content=(message.type==='text'?message.text:`[Pesan ${message.type} manual] ${message.text}`).trim().slice(0,4000);
    const memory=[...parseMemory(rows[0].messages),...(content?[{role:'assistant' as const,content}]:[])].slice(-limit);
-   await c.execute('UPDATE ai_conversations SET paused=TRUE,revision=revision+1,messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);
+   await c.execute('UPDATE ai_conversations SET paused=TRUE,revision=revision+1,router_context=NULL,messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);
   });
  }
  async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_data_sources','ai_products','ai_orders'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
- async conversations(account:string,session:string){const [rows]=await db.execute('SELECT customer,paused,JSON_LENGTH(messages) AS message_count FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',[account,session]);return rows;}
- async conversation(account:string,session:string,customer:string,body:unknown){if(!/^[0-9]{5,20}$/.test(customer))throw fail('Nomor pelanggan tidak valid');const input=object(body);if(typeof input.paused!=='boolean'||(input.clear!==undefined&&typeof input.clear!=='boolean'))throw fail('Status percakapan tidak valid');await transaction(async c=>{await lockAccount(c,account);await c.execute("INSERT INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,?,'[]') ON DUPLICATE KEY UPDATE paused=VALUES(paused),messages=IF(?,JSON_ARRAY(),messages),revision=revision+1",[account,session,customer,Boolean(input.paused),input.clear===true]);});return {ok:true};}
+ async conversations(account:string,session:string){const [rows]=await db.execute('SELECT customer,paused,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',[account,session]);return rows;}
+ async conversation(account:string,session:string,customer:string,body:unknown){if(!/^[0-9]{5,20}$/.test(customer))throw fail('Nomor pelanggan tidak valid');const input=object(body);if(typeof input.paused!=='boolean'||(input.clear!==undefined&&typeof input.clear!=='boolean'))throw fail('Status percakapan tidak valid');await transaction(async c=>{await lockAccount(c,account);await c.execute("INSERT INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,?,'[]') ON DUPLICATE KEY UPDATE paused=VALUES(paused),router_context=IF(?,NULL,router_context),messages=IF(?,JSON_ARRAY(),messages),revision=revision+1",[account,session,customer,Boolean(input.paused),input.clear===true,input.clear===true]);});return {ok:true};}
  async adjust(actor:string,account:string,body:unknown){const input=object(body),amount=integer(input.amount,-100000000,100000000,'Jumlah'),reason=text(input.reason,200,'Alasan'),id=text(input.requestId,64,'ID');if(!amount||!reason||! /^[A-Za-z0-9_-]{1,64}$/.test(id))throw fail('Jumlah, alasan, dan ID wajib valid');await transaction(async c=>{await lockAccount(c,account);const [old]=await c.execute<RowDataPacket[]>('SELECT amount,reason FROM ai_adjustments WHERE account_id=? AND request_id=?',[account,id]);if(old[0]){if(old[0].amount!==amount||old[0].reason!==reason)throw new ApiError(409,'idempotency_conflict','ID sudah digunakan');return;}await c.execute('INSERT IGNORE INTO ai_wallets VALUES (?,0)',[account]);const [rows]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);if(rows[0].balance+amount<0||rows[0].balance+amount>1000000000)throw fail('Saldo di luar batas');await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[amount,account]);await c.execute('INSERT INTO ai_adjustments(account_id,request_id,actor_id,amount,reason) VALUES (?,?,?,?,?)',[account,id,actor,amount,reason]);await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[actor,'ai_credit_adjusted:'+account]);});return this.wallet(account);}
  incoming(account:string,manager:SessionManager,session:string,message:IncomingMessage){
   if(message.isGroup||message.type!=='text'||!message.text.trim()||!/^\d{5,20}$/.test(message.from))return Promise.resolve();
@@ -120,7 +129,7 @@ export class AIService {
    const [current]=await c.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);if(!current[0]?.enabled)return;
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
    await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,message.from]);
-   const [conversations]=await c.execute<RowDataPacket[]>('SELECT paused,messages,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);if(conversations[0].paused)return;
+   const [conversations]=await c.execute<RowDataPacket[]>('SELECT paused,messages,revision,router_context FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);if(conversations[0].paused)return;
    if(message.text.length>4000)return;
    const memory=[...parseMemory(conversations[0].messages),{role:'user' as const,content:message.text}].slice(-(limits[0]?.memory_limit??config.memory_limit));
    await c.execute('INSERT IGNORE INTO ai_wallets VALUES (?,0)',[account]);const [wallet]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);
@@ -133,18 +142,26 @@ export class AIService {
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
    await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,?,'generating',?,?,?,?,?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string};
+   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string};
   });if(!prepared)return;
   const jid=message.from+'@s.whatsapp.net';
   // Read/presence are best effort and never add a message or a credit charge.
   await manager.read(session,jid,message.messageId).catch(()=>{});
   const guard=async()=>{const enabled=await this.assistant(account,session);const [rows]=await db.execute<RowDataPacket[]>('SELECT paused,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',[account,session,message.from]);
    if(!enabled.enabled||enabled.revision!==prepared.assistantRevision||rows[0]?.paused||rows[0]?.revision!==prepared.revision)throw new ApiError(409,'ai_cancelled','Asisten atau konteks percakapan telah berubah');};
+  const modelCalls:{role:ModelRole|undefined;model:string;status:string}[]=[];
+  const trackedTransport:AITransport=async(selected,messages,maxWords)=>{
+   const entry={role:selected.call_role,model:selected.model,status:'failed'};modelCalls.push(entry);
+   const result=await this.transport(selected,messages,maxWords);entry.status='responded';return result;
+  };
   let answer:string,agent:string;
-  try{const result=await runAgents(this.transport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior},{execute:async(name,query,context)=>{await guard();return this.tools.execute(name,query,context);}});answer=result.answer;agent=result.agent;if(!answer.trim()||answer.length>8000||countWords(answer)>prepared.maxWords)throw new Error('ai_output_limit');}
-  catch{await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved,account]);await c.execute("UPDATE ai_usage SET status='provider_failed',reserved=0 WHERE account_id=? AND request_id=? AND status='generating'",[account,id]);});return;}
+  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior},{execute:async(name,query,context)=>{await guard();return this.tools.execute(name,query,context);}},prepared.routerContext);answer=result.answer;agent=result.agent;if(!answer.trim()||answer.length>8000||countWords(answer)>prepared.maxWords)throw new Error('ai_output_limit');}
+  catch{await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved,account]);await c.execute("UPDATE ai_usage SET status='provider_failed',reserved=0,model_calls=? WHERE account_id=? AND request_id=? AND status='generating'",[JSON.stringify(modelCalls),account,id]);});return;}
+  // Context is internal and never billed. A failed summary clears stale context on a successful send.
+  let routerContext:string|null=null;
+  try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer);}catch{console.error('Pembaruan konteks router AI gagal.');}
   const outputWords=countWords(answer),charged=creditCost(prepared.inputWords,outputWords,config.input_rate,config.output_rate);
-  await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status='generated',output_words=?,charged=?,agent=?,reserved=0 WHERE account_id=? AND request_id=?",[outputWords,charged,agent,account,id]);});
+  await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status='generated',output_words=?,charged=?,agent=?,model_calls=?,model=?,reserved=0 WHERE account_id=? AND request_id=?",[outputWords,charged,agent,JSON.stringify(modelCalls),modelCalls.find(call=>call.role===agent)?.model??config.model,account,id]);});
   let status='sent',typingStarted=false;
   try{
    await guard();typingStarted=true;
@@ -157,7 +174,7 @@ export class AIService {
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');const [rows]=await c.execute<RowDataPacket[]>('SELECT messages,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);
    if(!rows[0]||rows[0].revision!==prepared.revision)return;
    const memory=[...parseMemory(rows[0].messages),{role:'assistant' as const,content:answer}].slice(-(limits[0]?.memory_limit??defaults.memory_limit));
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);}});
+   await c.execute('UPDATE ai_conversations SET messages=?,router_context=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),routerContext,account,session,message.from]);}});
  }
 }
 export const ai=new AIService();

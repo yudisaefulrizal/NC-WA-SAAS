@@ -14,6 +14,7 @@ async function fixture(call:AITransport=async()=> 'Jawaban bisnis',sendFail=fals
  const id=randomUUID();ids.push(id);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[id,id+'@test.invalid','unused']);await basicWallet(id);
  const service=new FixtureAI(raw?call:async(c,m,max)=>{
   if(m[0]?.content.startsWith('Anda adalah ROUTER'))return JSON.stringify({s_p_o_konteks:'Pelanggan meminta bantuan',sub_agent:'informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+  if(m[0]?.content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-informasi';
   return JSON.stringify({answer:await call(c,m,max)});
  },wait,tools);await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});await service.saveAssistant(id,'shop',{enabled:true,knowledge:'Produk tersedia',behavior:'Gunakan bahasa Indonesia'});
  let sent=0;const manager=new SessionManager(async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){},async exists(){return !sendFail;},async read(jid,messageId){events.push('read:'+jid+':'+messageId);if(presenceFail)throw Error('read unavailable');},async typing(_jid,state){events.push(state);if(presenceFail)throw Error('presence unavailable');},async send(){events.push('send');sent++;return 'reply-'+sent;}};});managers.push(manager);await manager.create('shop');
@@ -123,6 +124,7 @@ test('Manual media pauses conversation, but groups and disabled assistants are i
 test('Multi-agent WhatsApp flow switches agents, persists shared memory across restart, and isolates identical customer IDs',async()=>{
  const observed:{input:string;history:AIMessage[]}[]=[];
  const transport:AITransport=async(_config,m)=>{
+  if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-layanan';
   const input=m.filter(x=>x.role==='user').at(-1)!.content;
   const agent=input.startsWith('info')?'informasi':input.startsWith('saran')?'konsultasi':input.startsWith('pesan')?'transaksi':'dukungan';
   if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan meminta layanan',isi_pesan:input});
@@ -151,6 +153,7 @@ test('Tool calls use authenticated tenant context and cannot run after manual ta
  const executed:string[]=[];
  const tools:AITools={async execute(name,_query,scope){executed.push(scope.account);assert.equal(scope.session,'shop');assert.equal(scope.customer,'628123456789');assert.equal(name,'get_knowledge');return {knowledge:scope.knowledge};}};
  const transport:AITransport=async(_c,m)=>{
+  if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-pesanan';
   if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
   return m.some(x=>x.content.startsWith('Tool result'))?JSON.stringify({answer:'Informasi tersedia'}):JSON.stringify({tool:'get_knowledge',query:''});
  };
@@ -175,12 +178,13 @@ test('Malformed router output refunds reservation without sending or leaking JSO
 test('WhatsApp transaction creates a built-in order, support reads it using shared memory, and Knowledge stays behind its tool',async()=>{
  const {aiData}=await import('../src/ai-data.js');let orderId='';
  const transport:AITransport=async(_c,m)=>{
+  if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-pesanan';
   const input=m.filter(x=>x.role==='user').at(-1)!.content,checking=input==='Bagaimana statusnya?';
   assert.ok(!JSON.stringify(m).includes('KNOWLEDGE_PRIVATE'));
-  if(m[0].content.startsWith('Anda adalah ROUTER')){if(checking)assert.ok(m.some(x=>x.content.includes(orderId)));return JSON.stringify({sub_agent:checking?'dukungan':'transaksi',s_p_o_konteks:'Pelanggan meminta pesanan',isi_pesan:input});}
+  if(m[0].content.startsWith('Anda adalah ROUTER')){if(checking)assert.ok(m[1].content.includes('pelanggan-menunggu-pesanan'));return JSON.stringify({sub_agent:checking?'dukungan':'transaksi',s_p_o_konteks:'Pelanggan meminta pesanan',isi_pesan:input});}
   const result=m.find(x=>x.content.startsWith('Tool result '+(checking?'check_order':'create_order')));
   if(result){const data=JSON.parse(result.content.slice(result.content.indexOf('{')));orderId=data.order.id;return JSON.stringify({answer:checking?'Status '+data.order.status:'Pesanan '+orderId+' tercatat'});}
-  if(checking)return JSON.stringify({tool:'check_order',query:orderId});
+  if(checking){assert.ok(m.some(x=>x.content.includes(orderId)));return JSON.stringify({tool:'check_order',query:orderId});}
   if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_id:'P-REAL',quantity:2}],notes:'Pesanan pelanggan'})});
   return JSON.stringify({tool:'get_products',query:'P-REAL'});
  };
@@ -191,4 +195,73 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
  assert.ok(orderId);assert.equal((await aiData.orders(f.id,'shop'))[0].total,200000);
  await f.service.incoming(f.id,f.manager,'shop',f.message('order-check','Bagaimana statusnya?'));
  assert.equal(f.sent(),2);assert.equal((await aiData.orders(f.id,'shop')).length,1);
+});
+
+test('Router context persists, feeds next turn, stays isolated and clears with memory',async()=>{
+ const seen:AIMessage[][]=[];
+ const transport:AITransport=async(_c,m)=>{
+  if(m[0].content.startsWith('Anda adalah ROUTER')){seen.push(m);return JSON.stringify({sub_agent:'transaksi',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.at(-1)!.content});}
+  if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-mengonfirmasi-pesanan';
+  return JSON.stringify({answer:'Ingin memesan produk ini?'});
+ };
+ const f=await fixture(transport,false,async()=>{},[],false,true);
+ await f.service.incoming(f.id,f.manager,'shop',f.message('first'));
+ const restarted=new FixtureAI(transport,async()=>{});
+ await restarted.incoming(f.id,f.manager,'shop',f.message('next','ya'));
+ assert.equal(seen[0][1].content,'Konteks S-P-O sebelumnya: null');
+ assert.equal(seen[1][1].content,'Konteks S-P-O sebelumnya: "pelanggan-mengonfirmasi-pesanan"');
+ assert.equal(seen[1].at(-1)!.content,'ya');assert.equal(seen[1].length,3);
+ await restarted.incoming(f.id,f.manager,'shop',f.message('other','ya','628999999999'));
+ assert.equal(seen[2][1].content,'Konteks S-P-O sebelumnya: null');
+ const [stored]=await db.execute<any[]>('SELECT messages,router_context FROM ai_conversations WHERE account_id=? AND customer=?',[f.id,'628123456789']);
+ assert.equal(stored[0].router_context,'pelanggan-mengonfirmasi-pesanan');assert.ok(!JSON.stringify(stored[0].messages).includes('pelanggan-mengonfirmasi-pesanan'));
+ await restarted.conversation(f.id,'shop','628123456789',{paused:false,clear:true});
+ const cleared=(await restarted.conversations(f.id,'shop') as any[]).find(r=>r.customer==='628123456789');assert.equal(cleared.router_context,null);assert.equal(cleared.message_count,0);
+});
+
+test('Failed delivery, failed context updates and manual takeover cannot leave misleading context',async()=>{
+ const failed=await fixture(undefined,true);
+ await failed.service.incoming(failed.id,failed.manager,'shop',failed.message('failed'));
+ assert.equal((await failed.service.conversations(failed.id,'shop') as any[])[0].router_context,null);
+ let failContext=false;
+ const f=await fixture(async(_c,m)=>{
+  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.at(-1)!.content});
+  if(m[0].content.startsWith('Anda adalah Context Agent')){if(failContext)throw Error('timeout');return 'pelanggan-menunggu-informasi';}
+  return JSON.stringify({answer:'Jawaban pelanggan'});
+ },false,async()=>{},[],false,true);
+ await f.service.incoming(f.id,f.manager,'shop',f.message('first'));
+ assert.equal((await f.service.conversations(f.id,'shop') as any[])[0].router_context,'pelanggan-menunggu-informasi');
+ failContext=true;await f.service.incoming(f.id,f.manager,'shop',f.message('second'));
+ assert.equal(f.sent(),2);assert.equal((await f.service.conversations(f.id,'shop') as any[])[0].router_context,null);
+ failContext=false;await f.service.incoming(f.id,f.manager,'shop',f.message('third'));
+ await f.service.manualOutgoing(f.id,'shop',f.message('manual','Admin mengambil alih'));
+ const row=(await f.service.conversations(f.id,'shop') as any[])[0];assert.equal(row.router_context,null);assert.equal(Boolean(row.paused),true);
+});
+
+test('Owner model configuration persists, legacy fallback works, tests select each tier, and client usage hides models',async()=>{
+ const f=await fixture();const [saved]=await db.query<any[]>('SELECT * FROM ai_settings WHERE id=1');
+ const calls:string[]=[];const service=new AIService(async c=>{calls.push(c.model);return 'OK';});
+ try{
+  await service.configure(f.id,{...defaults,endpoint:'https://8.8.8.8/v1/chat/completions',apiKey:'fixture-only',model_cheap:'cheap-fixture',model_medium:'medium-fixture',model_smart:'smart-fixture'});
+  const config=await new AIService().configuration();assert.equal(config.model_cheap,'cheap-fixture');assert.equal(config.model_medium,'medium-fixture');assert.equal(config.model_smart,'smart-fixture');assert.ok(!JSON.stringify(config).includes('fixture-only'));
+  for(const tier of ['cheap','medium','smart'])await service.test(tier);
+  assert.deepEqual(calls,['cheap-fixture','medium-fixture','smart-fixture']);await assert.rejects(service.test('invalid'));
+  await assert.rejects(service.configure(f.id,{...defaults,model_medium:'',model_cheap:'x',model_smart:'z'}));
+  await service.configure(f.id,{...defaults,endpoint:'https://8.8.8.8/v1/chat/completions',model:'legacy-updated'});
+  assert.equal((await service.config()).model_medium,'legacy-updated');assert.equal((await service.config()).model_cheap,'cheap-fixture');
+  await db.query('UPDATE ai_settings SET model_cheap=NULL,model_medium=NULL,model_smart=NULL WHERE id=1');
+  const legacy=await service.config();assert.equal(legacy.model_cheap,legacy.model);assert.equal(legacy.model_smart,legacy.model);
+ }finally{
+  await db.query('DELETE FROM ai_settings WHERE id=1');
+  if(saved[0]){const keys=Object.keys(saved[0]);await db.execute('INSERT INTO ai_settings ('+keys.join(',')+') VALUES ('+keys.map(()=>'?').join(',')+')',keys.map(k=>saved[0][k]));}
+ }
+ const tiered=await fixture();Object.assign(tiered.service.settings,{model_cheap:'cheap-fixture',model_medium:'medium-fixture',model_smart:'smart-fixture'});
+ await tiered.service.incoming(tiered.id,tiered.manager,'shop',tiered.message('tiered'));
+ const usage=(await rows(tiered.id))[0];const trace=typeof usage.model_calls==='string'?JSON.parse(usage.model_calls):usage.model_calls;
+ assert.deepEqual(trace.map((c:any)=>[c.role,c.model]),[['router','cheap-fixture'],['informasi','medium-fixture'],['context','cheap-fixture']]);assert.equal(usage.model,'medium-fixture');
+ const client=await tiered.service.usage(tiered.id) as any[];assert.equal(client[0].model,undefined);assert.equal(client[0].model_calls,undefined);
+ const {createApp}=await import('../src/app.js');const token=randomUUID();await db.execute('INSERT INTO login_sessions VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR))',[digest(token),tiered.id]);
+ await request(createApp()).get('/api/admin/ai/usage').set('Cookie','ncwa_session='+token).expect(403);
+ await db.execute("UPDATE accounts SET role='owner' WHERE id=?",[tiered.id]);
+ const admin=await request(createApp()).get('/api/admin/ai/usage').set('Cookie','ncwa_session='+token).expect(200);assert.ok(admin.body.some((r:any)=>r.request_id===usage.request_id&&r.model_calls));
 });

@@ -1,15 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {agents,runAgents,defaultTools,permissions,type AgentName,type ToolContext} from '../src/ai-agents.js';
+import {agents,runAgents,updateRouterContext,defaultTools,permissions,type AgentName,type ToolContext} from '../src/ai-agents.js';
 import {defaults,type AIMessage,type AITransport} from '../src/ai.js';
 const context:ToolContext={account:'tenant-a',session:'shop',customer:'628123456789',requestId:'message-1',knowledge:'Bisnis A buka jam 9',behavior:'Ramah'};
 const messages:AIMessage[]=[{role:'system',content:'Bisnis A'},{role:'user',content:'Saya mencari frame ringan'},{role:'assistant',content:'Frame Basic tersedia'},{role:'user',content:'Saya ingin memesan itu'}];
 const route=(agent:AgentName,input=messages.at(-1)!.content)=>JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan memesan frame',isi_pesan:input});
-test('All eight specialists and router receive shared history and client behavior',async()=>{
+test('Specialists receive shared history while router receives only latest input and separate context',async()=>{
  for(const agent of Object.keys(agents) as AgentName[]){
   let calls=0;
   const result=await runAgents(async(_c,m)=>{
-   if(calls++===0){assert.deepEqual(m.slice(1),messages.filter(x=>x.role!=='system'));assert.ok(m[0].content.includes(context.behavior!));return route(agent);}
+   if(calls++===0){assert.deepEqual(m.slice(1),[{role:'user',content:'Konteks S-P-O sebelumnya: null'},messages.at(-1)]);assert.ok(m[0].content.includes(context.behavior!));return route(agent);}
    assert.deepEqual(m.slice(0,messages.length),messages);assert.ok(m.at(-1)!.content.startsWith(agents[agent]));return JSON.stringify({answer:'Baik, saya bantu.'});
   },defaults,messages,300,context);
   assert.equal(result.agent,agent);assert.equal(result.answer,'Baik, saya bantu.');assert.equal(calls,2);
@@ -59,4 +59,33 @@ test('A specialist can correct invalid order input without repeating a successfu
   return JSON.stringify({answer:'Pesanan tercatat'});
  },defaults,messages,300,context,{async execute(_name,query){if(query==='invalid')throw new ApiError(400,'invalid_request','Pilih produk dahulu');mutations++;return {order:{id:'ORD-1'}};}});
  assert.equal(result.answer,'Pesanan tercatat');assert.equal(mutations,1);
+});
+
+test('Short replies and topic changes are routed with previous SPO, without old chat history',async()=>{
+ for(const input of ['ya','yang itu','cukup','Saya ingin komplain']){
+  let calls=0;
+  await runAgents(async(_c,m)=>{
+   if(calls++===0){assert.equal(m.length,3);assert.equal(m[1].content,'Konteks S-P-O sebelumnya: "pelanggan-mengonfirmasi-pesanan"');assert.equal(m[2].content,input);return route('transaksi',input);}
+   return JSON.stringify({answer:'Baik'});
+  },defaults,[...messages,{role:'user',content:input}],300,context,defaultTools,'pelanggan-mengonfirmasi-pesanan');
+ }
+});
+test('Context Agent summarizes latest exchange and strictly validates SPO',async()=>{
+ const result=await updateRouterContext(async(_c,m)=>{assert.equal(m.length,2);assert.deepEqual(JSON.parse(m[1].content),{pesan_pelanggan:'ya',jawaban_agent:'Berapa jumlah pesanan?'});return 'pelanggan-menentukan-jumlah';},defaults,'ya','Berapa jumlah pesanan?');
+ assert.equal(result,'pelanggan-menentukan-jumlah');
+ for(const raw of ['', 'pelanggan memesan barang','a-b-c\npenjelasan','a-b','{"context":"a-b-c"}','a-'.repeat(101)+'b'])await assert.rejects(updateRouterContext(async()=>raw,defaults,'ya','Baik'),/ai_invalid_context/);
+});
+
+test('Three model tiers select by role across routing, specialist tools and context',async()=>{
+ const config={...defaults,model_cheap:'cheap-test',model_medium:'medium-test',model_smart:'smart-test'};
+ for(const agent of Object.keys(agents) as AgentName[]){
+  const selected:{model:string;role:string|undefined}[]=[];let calls=0;
+  const transport:AITransport=async(c)=>{selected.push({model:c.model,role:c.call_role});if(c.call_role==='context')return 'pelanggan-menunggu-layanan';if(calls++===0)return route(agent);if(agent==='transaksi'&&calls===2)return JSON.stringify({tool:'get_products',query:''});return JSON.stringify({answer:'Baik'});};
+  await runAgents(transport,config,messages,300,context,{execute:async()=>[]});
+  await updateRouterContext(transport,config,'ya','Baik');
+  assert.deepEqual(selected[0],{model:'cheap-test',role:'router'});
+  assert.deepEqual(selected.at(-1),{model:'cheap-test',role:'context'});
+  const expected=agent==='lainnya'?'smart-test':['pembuka','penutup'].includes(agent)?'cheap-test':'medium-test';
+  assert.ok(selected.slice(1,-1).every(c=>c.model===expected&&c.role===agent));
+ }
 });

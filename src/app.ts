@@ -106,8 +106,9 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
 });
 app.get('/api/admin/payments',async(_req,res)=>{const [rows]=await db.query('SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT 100');res.json(rows);});
 app.get('/api/admin/ai',async(_req,res)=>res.json(await ai.configuration()));
+app.get('/api/admin/ai/usage',async(_req,res)=>res.json(await ai.modelUsage()));
 app.put('/api/admin/ai',async(req,res)=>res.json(await ai.configure(res.locals.account.id,req.body)));
-app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(_req,res)=>res.json(await ai.test()));
+app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res.json(await ai.test(req.body?.tier)));
 app.post('/api/admin/accounts/:id/ai-credits',async(req,res)=>res.json(await ai.adjust(res.locals.account.id,req.params.id,req.body)));
 app.get('/api/admin/midtrans',async(_req,res)=>res.json(await payments.configuration()));
 app.put('/api/admin/midtrans',async(req,res)=>res.json(await payments.configure(res.locals.account.id,req.body)));
