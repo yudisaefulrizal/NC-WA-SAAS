@@ -1,3 +1,4 @@
+import {aiData,orderInput,record,customerNumber} from './ai-data.js';
 import {ai as defaultAI} from './ai.js';
 import express from 'express';
 import {TenantWebhooks} from './webhooks.js';
@@ -94,6 +95,11 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  });
  router.get('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.assistant(res.locals.accountId,req.params.id));});
  router.put('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.saveAssistant(res.locals.accountId,req.params.id,req.body));});
+ router.get('/sessions/:id/ai/products',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.products(res.locals.accountId,req.params.id));});
+ router.put('/sessions/:id/ai/products/:product',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.saveProduct(res.locals.accountId,req.params.id,{...record(req.body),id:req.params.product}));});
+ router.get('/sessions/:id/ai/orders',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.orders(res.locals.accountId,req.params.id));});
+ router.post('/sessions/:id/ai/orders',async(req,res)=>{res.locals.manager.detail(req.params.id);const input=record(req.body),key=req.get('Idempotency-Key');if(!key||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw new ApiError(400,'invalid_request','Idempotency-Key wajib diisi');res.json(await aiData.createOrder({account:res.locals.accountId,session:req.params.id,customer:customerNumber(input.customer),requestId:'manual_'+key,knowledge:''},orderInput({items:input.items,notes:input.notes})));});
+ router.put('/sessions/:id/ai/orders/:order',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.updateOrder(res.locals.accountId,req.params.id,req.params.order,req.body));});
  router.get('/sessions/:id/ai/conversations',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversations(res.locals.accountId,req.params.id));});
  router.put('/sessions/:id/ai/conversations/:customer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversation(res.locals.accountId,req.params.id,req.params.customer,req.body));});
  router.get('/sessions/:id',(req,res)=>res.json((res.locals.manager as SessionManager).detail(req.params.id)));

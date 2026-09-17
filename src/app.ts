@@ -41,6 +41,14 @@ app.get('/api/client/me',async(req,res)=>{
 app.use('/api',async(req,res,next)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT a.id,a.email,a.role FROM login_sessions s JOIN accounts a ON a.id=s.account_id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP() AND a.suspended=FALSE',[digest(cookie(req))]);if(!rows[0]){res.status(401).json({error:'unauthorized'});return;}res.locals.account=rows[0];next();});
 app.get('/api/me',(_req,res)=>res.json(res.locals.account));
 app.post('/api/auth/logout',async(req,res)=>{await db.execute('DELETE FROM login_sessions WHERE token_hash=?',[digest(cookie(req))]);gateway.revoke(res.locals.account.id,digest(cookie(req)));res.clearCookie('ncwa_session',{path:'/'}).json({ok:true});});
+app.put('/api/auth/password',async(req,res)=>{
+ const currentPassword=req.body?.currentPassword,password=req.body?.password;
+ if(typeof currentPassword!=='string'||typeof password!=='string'||password.length<6||password.length>128)throw new ApiError(400,'invalid_request','Password baru harus 6–128 karakter');
+ const tokenHash=digest(cookie(req)),c=await db.getConnection();try{await c.beginTransaction();const [rows]=await c.execute<RowDataPacket[]>('SELECT password_hash FROM accounts WHERE id=? FOR UPDATE',[res.locals.account.id]);
+  if(!rows[0]||!await verifyPassword(currentPassword,rows[0].password_hash))throw new ApiError(401,'unauthorized','Password saat ini tidak sesuai');
+  await c.execute('UPDATE accounts SET password_hash=? WHERE id=?',[await hashPassword(password),res.locals.account.id]);await c.execute('DELETE FROM login_sessions WHERE account_id=? AND token_hash<>?',[res.locals.account.id,tokenHash]);await c.execute("INSERT INTO audit_events(account_id,action) VALUES (?,'password_changed_self')",[res.locals.account.id]);await c.commit();
+ }catch(e){await c.rollback();throw e;}finally{c.release();}res.json({ok:true});
+});
 app.get('/api/usage',async(_req,res)=>{const [rows]=await db.execute('SELECT r.request_id,r.status,r.created_at,o.message_id FROM credit_reservations r LEFT JOIN outbound_results o ON o.account_id=r.account_id AND o.request_id=r.request_id WHERE r.account_id=? ORDER BY r.created_at DESC LIMIT 100',[res.locals.account.id]);res.json(rows);});
 app.get('/api/keys',async(_req,res)=>{const [rows]=await db.execute('SELECT id,created_at FROM api_keys WHERE account_id=?',[res.locals.account.id]);res.json(rows);});
 app.post('/api/keys',async(req,res)=>{const {id,key}=await createKey(res.locals.account.id,digest(cookie(req)));res.status(201).json({id,key});});

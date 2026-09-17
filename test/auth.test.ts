@@ -53,3 +53,10 @@ test('Owner can replace a customer password, revoking their login sessions',asyn
  await customerAgent.get('/api/me').expect(401);await request(app).post('/api/auth/login').set('Origin',origin).send({email:customer,password:oldPassword}).expect(401);await request(app).post('/api/auth/login').set('Origin',origin).send({email:customer,password:newPassword}).expect(200);
  const [ownerRow]=await db.execute<any[]>('SELECT id FROM accounts WHERE email=?',[owner]);await ownerAgent.put('/api/admin/accounts/'+ownerRow[0].id+'/password').set('Origin',origin).send({password:newPassword}).expect(409);await request(app).put('/api/admin/accounts/'+id+'/password').set('Origin',origin).send({password:newPassword}).expect(401);
 });
+
+test('An account can change its own password and retains only its current session',async()=>{
+ const email='test-'+randomUUID()+'@example.test',oldPassword='self-password-old',newPassword='self-password-new';emails.push(email);await request(app).post('/api/auth/register').set('Origin',origin).send({email,password:oldPassword}).expect(201);
+ const active=request.agent(app),other=request.agent(app);await active.post('/api/auth/login').set('Origin',origin).send({email,password:oldPassword}).expect(200);await other.post('/api/auth/login').set('Origin',origin).send({email,password:oldPassword}).expect(200);
+ await active.put('/api/auth/password').set('Origin',origin).send({currentPassword:'wrong-password',password:newPassword}).expect(401);await active.put('/api/auth/password').set('Origin',origin).send({currentPassword:oldPassword,password:newPassword}).expect(200);
+ await active.get('/api/me').expect(200);await other.get('/api/me').expect(401);const [rows]=await db.execute<any[]>('SELECT password_hash FROM accounts WHERE email=?',[email]);assert.equal(await verifyPassword(oldPassword,rows[0].password_hash),false);assert.equal(await verifyPassword(newPassword,rows[0].password_hash),true);
+});

@@ -73,3 +73,13 @@ Pemeriksaan tipe berikutnya menemukan TS2322 karena produk AI sintetis diberi ti
 Review isolasi AI menemukan query pengambilan memori belum menyertakan predikat customer meskipun parameternya dikirim. Diperbaiki dengan predikat lengkap akun/session/customer. Fixture diubah memakai nomor pelanggan kedua yang urutan sort-nya lebih besar, agar kesalahan pemilihan baris pertama tidak bisa lolos karena baris baru berada di urutan pertama.
 
 Pemeriksaan akhir pertama: suite 55/56 lulus. Tes batas body pembuatan API key gagal (mengharapkan 413, menerima 201) karena ukuran JSON diperbesar global untuk isian AI. Diperbaiki dengan parser 64 KiB hanya pada PUT pengaturan asisten per session; endpoint lain tetap 16 KiB. Browser AI timeout saat memeriksa isian sesudah reload: respons loadAssistant dapat menimpa ketikan baru. Isian kini dinonaktifkan selama pemuatan, dan respons lama diabaikan saat pilihan nomor berubah. Hanya tes terdampak diulang sesudah perbaikan.
+
+## Multi-agent — 17 September 2026
+
+Smoke test penyedia nyata pertama gagal dengan `ai_provider_failed` sebelum turn pertama selesai; seluruh tes lokal dan browser lulus. Transport lama menyamarkan status HTTP sehingga penyebab belum teridentifikasi. Tambahkan klasifikasi error tanpa body/kredensial sebelum menguji ulang.
+
+Setelah klasifikasi error ditambahkan, smoke test menunjukkan `ai_provider_http_401`. Kredensial tersimpan ditolak endpoint. Tidak ada perubahan kredensial atau retry lanjutan; uji penyedia perlu API key valid. Tidak ada isi respons penyedia atau secret dicatat. Pengujian engine dengan transport tiruan dan browser tetap lulus.
+
+## Tabel produk/order dan endpoint — 17 September 2026
+
+Pemeriksaan tipe awal menemukan `unknown` dari JSON diteruskan ke parameter SQL dalam callback dan spread `RowDataPacket` tidak memberikan bentuk respons assistant yang pasti. Diperbaiki dengan normalisasi boolean/string dan pemetaan field respons eksplisit; check berikutnya lulus. Tidak ada perubahan kredensial provider. Tes terarah 36/36 dan browser desktop/mobile lulus setelah penambahan tabel, endpoint, serta alur order persisten.

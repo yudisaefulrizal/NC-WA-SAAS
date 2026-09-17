@@ -119,3 +119,21 @@ Dashboard AI kini menerima jumlah 1–100 unit saat membeli kredit; satu unit te
 ## Pembaruan ganti password pelanggan — 17 September 2026
 
 Pemilik dapat mengganti password akun pelanggan dari tabel Akun pelanggan. Password dibatasi 6–128 karakter, di-hash server, dan seluruh sesi login pelanggan dicabut atomik setelah perubahan. Perubahan diaudit; akun pemilik tetap tidak dapat diubah melalui halaman ini. Pemeriksaan TypeScript, 66 tes, dan browser desktop/mobile lulus.
+
+## Pembaruan ganti password mandiri — 17 September 2026
+
+Setiap akun dapat mengganti password dari tombol Ganti password di header dashboard dengan memasukkan password saat ini dan konfirmasi password baru. Sesi browser yang melakukan perubahan dipertahankan, sesi login lain dicabut, dan perubahan dicatat dalam audit. Pemeriksaan TypeScript, 67 tes, dan browser desktop/mobile lulus.
+
+## Multi-agent internal — 17 September 2026
+
+Asisten sekarang menggunakan router delapan kategori → satu spesialis → tools dengan shared memory MySQL per akun/session/pelanggan. Source `src/ai-agents.ts`, integrasi `src/ai.ts`; tidak memakai n8n. Migrasi lokal menambah mode demo per asisten dan agent pada riwayat penggunaan, mempertahankan data/pengaturan lama. UI menyediakan mode demo eksplisit serta kolom agent. Adapter `AITools` dapat diganti untuk database/API nyata; tools pesanan saat ini hanya simulasi bila demo aktif.
+
+Verifikasi: TypeScript/build, 76/76 tes regresi, serta browser desktop/mobile lulus. Smoke test provider nyata gagal HTTP 401; key lokal sama dengan key tersimpan, keduanya tidak diubah atau dicetak. Perlu key valid untuk menguji model nyata; HP WhatsApp belum diuji untuk engine baru. Detail dan perintah ada di AI-MULTI-AGENT.md. Perubahan pengguna yang sudah ada dipertahankan; tidak ada commit/push/deploy.
+
+## Keputusan client dan implementasi sumber data — 17 September 2026
+
+Konfigurasi aktif kini Knowledge, Produk/Layanan, Order/Pesanan, dan Perilaku AI. Produk dan Order masing-masing default tabel bawaan, dapat diganti independen menjadi endpoint HTTPS client. Mode demo prototype dihentikan. Knowledge hanya melalui tool agent Informasi/Konsultasi/Dukungan/Keluhan; Perilaku dan shared memory dipakai seluruh agent termasuk router, mengikuti keputusan pengguna terbaru.
+
+`src/ai-data.ts` menyediakan tabel/adapter, validasi, snapshot harga order, idempotensi persisten, token terenkripsi, dan pengamanan endpoint. UI mencakup tambah/edit/nonaktifkan produk, pencatatan order, status/catatan, pemilihan sumber, serta panduan endpoint. Tabel terikat akun/session; pembacaan order oleh agent juga dibatasi pelanggan. Data lokal tetap tersedia ketika endpoint dipilih; tidak ada sinkronisasi otomatis ke remote.
+
+Migrasi lokal, build, 86/86 tes regresi, dan browser desktop/mobile termasuk validasi error formulir lulus. Order merupakan pencatatan permintaan berstatus baru; belum dibayar dan tidak mengurangi stok otomatis. Endpoint client nyata dan HP WhatsApp belum diuji; provider terakhir 401 belum berubah. Dokumen aktif: AI-MULTI-AGENT.md. Tidak ada commit/push/deploy.

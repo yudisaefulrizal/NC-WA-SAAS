@@ -1,3 +1,4 @@
+import {type AITools} from '../src/ai-agents.js';
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -8,10 +9,13 @@ import {SessionManager,ApiError} from '../src/engine/sessions.js';
 import {basicWallet} from '../src/plans.js';
 import {digest} from '../src/security.js';
 const ids:string[]=[],managers:SessionManager[]=[];
-class FixtureAI extends AIService {settings={...defaults,secret:'fixture'};override async config(){return {...this.settings};}}
-async function fixture(call:AITransport=async()=> 'Jawaban bisnis',sendFail=false,wait:(ms:number)=>Promise<void>=async()=>{},events:string[]=[],presenceFail=false){
+class FixtureAI extends AIService {settings={...defaults,memory_limit:3,secret:'fixture'};override async config(){return {...this.settings};}}
+async function fixture(call:AITransport=async()=> 'Jawaban bisnis',sendFail=false,wait:(ms:number)=>Promise<void>=async()=>{},events:string[]=[],presenceFail=false,raw=false,tools?:AITools){
  const id=randomUUID();ids.push(id);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[id,id+'@test.invalid','unused']);await basicWallet(id);
- const service=new FixtureAI(call,wait);await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});await service.saveAssistant(id,'shop',{enabled:true,knowledge:'Produk tersedia',behavior:'Gunakan bahasa Indonesia'});
+ const service=new FixtureAI(raw?call:async(c,m,max)=>{
+  if(m[0]?.content.startsWith('Anda adalah ROUTER'))return JSON.stringify({s_p_o_konteks:'Pelanggan meminta bantuan',sub_agent:'informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+  return JSON.stringify({answer:await call(c,m,max)});
+ },wait,tools);await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});await service.saveAssistant(id,'shop',{enabled:true,knowledge:'Produk tersedia',behavior:'Gunakan bahasa Indonesia'});
  let sent=0;const manager=new SessionManager(async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){},async exists(){return !sendFail;},async read(jid,messageId){events.push('read:'+jid+':'+messageId);if(presenceFail)throw Error('read unavailable');},async typing(_jid,state){events.push(state);if(presenceFail)throw Error('presence unavailable');},async send(){events.push('send');sent++;return 'reply-'+sent;}};});managers.push(manager);await manager.create('shop');
  const message=(messageId:string,text='Halo pelanggan',from='628123456789')=>({messageId,text,from,sender:from,isGroup:false,groupId:null,type:'text' as const,timestamp:1});
  return {id,service,manager,message,sent:()=>sent};
@@ -26,7 +30,7 @@ test('Word billing is deterministic for whitespace, punctuation, URLs, emoji and
 test('Duplicate messages charge and send once; rates are snapshotted and latest input appears once',async()=>{
  let seen:AIMessage[]=[];const f=await fixture(async(_config,messages)=>{seen=messages;f.service.settings.input_rate=19;f.service.settings.output_rate=29;return 'Jawaban bisnis';});
  await Promise.all([f.service.incoming(f.id,f.manager,'shop',f.message('one')),f.service.incoming(f.id,f.manager,'shop',f.message('one'))]);
- const usage=await rows(f.id);assert.equal(usage.length,1);assert.equal(f.sent(),1);assert.equal(usage[0].status,'sent');assert.equal(usage[0].input_rate,1);assert.equal(usage[0].output_rate,2);assert.equal(usage[0].input_words,seen.reduce((n,m)=>n+countWords(m.content),0));assert.equal(seen.filter(m=>m.content==='Halo pelanggan').length,1);assert.equal(usage[0].charged,usage[0].input_words+4);assert.equal((await f.service.wallet(f.id)).balance,10000-usage[0].charged);assert.equal((await basicWallet(f.id)).balance,99);
+ const usage=await rows(f.id);assert.equal(usage.length,1);assert.equal(f.sent(),1);assert.equal(usage[0].status,'sent');assert.equal(usage[0].input_rate,1);assert.equal(usage[0].output_rate,2);assert.equal(usage[0].input_words,seen.slice(0,-1).reduce((n,m)=>n+countWords(m.content),0));assert.equal(seen.filter(m=>m.content==='Halo pelanggan').length,1);assert.equal(usage[0].charged,usage[0].input_words+4);assert.equal((await f.service.wallet(f.id)).balance,10000-usage[0].charged);assert.equal((await basicWallet(f.id)).balance,99);
 });
 test('Memory holds individual messages within the global limit and is isolated by tenant/session/customer',async()=>{
  const calls:AIMessage[][]=[];const f=await fixture(async(_c,m)=>{calls.push(m);return 'Balasan';});
@@ -114,4 +118,77 @@ test('Manual media pauses conversation, but groups and disabled assistants are i
  const f=await fixture();await f.service.manualOutgoing(f.id,'shop',{...f.message('group'),isGroup:true});assert.equal((await f.service.conversations(f.id,'shop')).length,0);
  await f.service.manualOutgoing(f.id,'shop',{...f.message('image','Foto produk'),type:'image'});assert.equal((await f.service.conversations(f.id,'shop') as any[])[0].paused,1);
  await f.service.saveAssistant(f.id,'shop',{enabled:false,knowledge:'',behavior:''});await f.service.manualOutgoing(f.id,'shop',f.message('disabled','Halo','628999999999'));assert.equal((await f.service.conversations(f.id,'shop')).length,1);
+});
+
+test('Multi-agent WhatsApp flow switches agents, persists shared memory across restart, and isolates identical customer IDs',async()=>{
+ const observed:{input:string;history:AIMessage[]}[]=[];
+ const transport:AITransport=async(_config,m)=>{
+  const input=m.filter(x=>x.role==='user').at(-1)!.content;
+  const agent=input.startsWith('info')?'informasi':input.startsWith('saran')?'konsultasi':input.startsWith('pesan')?'transaksi':'dukungan';
+  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan meminta layanan',isi_pesan:input});
+  observed.push({input,history:m.filter(x=>x.role!=='system')});
+  return JSON.stringify({answer:'Balasan '+agent});
+ };
+ const f=await fixture(transport,false,async()=>{},[],false,true);
+ await Promise.all(['info produk','saran produk','pesan produk'].map((input,i)=>f.service.incoming(f.id,f.manager,'shop',f.message('switch-'+i,input))));
+ assert.deepEqual(observed.map(x=>x.input),['info produk','saran produk','pesan produk']);
+ assert.ok(observed[2].history.some(x=>x.content==='Balasan konsultasi'));
+ const restarted=new FixtureAI(transport,async()=>{});
+ await restarted.incoming(f.id,f.manager,'shop',f.message('restart','status pesanan'));
+ assert.ok(observed[3].history.some(x=>x.content==='Balasan transaksi'));
+ assert.deepEqual((await rows(f.id)).map(x=>x.agent).sort(),['dukungan','informasi','konsultasi','transaksi']);
+ const g=await fixture(transport,false,async()=>{},[],false,true);
+ await g.service.saveAssistant(g.id,'shop',{enabled:true,knowledge:'Tenant B only',behavior:'',products_source:{mode:'endpoint',endpoint:'https://8.8.8.8/products'},orders_source:{mode:'builtin'}});
+ await g.service.incoming(g.id,g.manager,'shop',g.message('switch-0','info tenant B'));
+ assert.deepEqual(observed.at(-1)!.history,[{role:'user',content:'info tenant B'}]);
+ assert.equal((await f.service.assistant(f.id,'shop')).products_source.mode,'builtin');
+ assert.equal((await g.service.assistant(g.id,'shop')).products_source.mode,'endpoint');
+ const [stored]=await db.execute<any[]>('SELECT messages FROM ai_conversations WHERE account_id=?',[f.id]);
+ const json=JSON.stringify(stored);assert.ok(!json.includes('s_p_o_konteks'));assert.ok(!json.includes('sub_agent'));assert.ok(!json.includes('Tenant B'));
+});
+
+test('Tool calls use authenticated tenant context and cannot run after manual takeover',async()=>{
+ const executed:string[]=[];
+ const tools:AITools={async execute(name,_query,scope){executed.push(scope.account);assert.equal(scope.session,'shop');assert.equal(scope.customer,'628123456789');assert.equal(name,'get_knowledge');return {knowledge:scope.knowledge};}};
+ const transport:AITransport=async(_c,m)=>{
+  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+  return m.some(x=>x.content.startsWith('Tool result'))?JSON.stringify({answer:'Informasi tersedia'}):JSON.stringify({tool:'get_knowledge',query:''});
+ };
+ const f=await fixture(transport,false,async()=>{},[],false,true,tools),g=await fixture(transport,false,async()=>{},[],false,true,tools);
+ await Promise.all([f.service.incoming(f.id,f.manager,'shop',f.message('tool')),g.service.incoming(g.id,g.manager,'shop',g.message('tool'))]);
+ assert.deepEqual(executed.sort(),[f.id,g.id].sort());
+ const paused=await fixture(async(c,m,max)=>{
+  if(!m[0].content.startsWith('Anda adalah ROUTER'))await paused.service.manualOutgoing(paused.id,'shop',paused.message('manual-takeover','Admin membantu'));
+  return transport(c,m,max);
+ },false,async()=>{},[],false,true,tools);
+ await paused.service.incoming(paused.id,paused.manager,'shop',paused.message('paused-tool'));
+ assert.ok(!executed.includes(paused.id));assert.equal(paused.sent(),0);assert.equal((await paused.service.wallet(paused.id)).balance,10000);
+});
+
+test('Malformed router output refunds reservation without sending or leaking JSON into memory',async()=>{
+ const f=await fixture(async()=>'{"sub_agent":"invalid"}',false,async()=>{},[],false,true);
+ await f.service.incoming(f.id,f.manager,'shop',f.message('invalid-route'));
+ assert.equal(f.sent(),0);assert.equal((await f.service.wallet(f.id)).balance,10000);
+ assert.equal((await rows(f.id))[0].status,'provider_failed');
+});
+
+test('WhatsApp transaction creates a built-in order, support reads it using shared memory, and Knowledge stays behind its tool',async()=>{
+ const {aiData}=await import('../src/ai-data.js');let orderId='';
+ const transport:AITransport=async(_c,m)=>{
+  const input=m.filter(x=>x.role==='user').at(-1)!.content,checking=input==='Bagaimana statusnya?';
+  assert.ok(!JSON.stringify(m).includes('KNOWLEDGE_PRIVATE'));
+  if(m[0].content.startsWith('Anda adalah ROUTER')){if(checking)assert.ok(m.some(x=>x.content.includes(orderId)));return JSON.stringify({sub_agent:checking?'dukungan':'transaksi',s_p_o_konteks:'Pelanggan meminta pesanan',isi_pesan:input});}
+  const result=m.find(x=>x.content.startsWith('Tool result '+(checking?'check_order':'create_order')));
+  if(result){const data=JSON.parse(result.content.slice(result.content.indexOf('{')));orderId=data.order.id;return JSON.stringify({answer:checking?'Status '+data.order.status:'Pesanan '+orderId+' tercatat'});}
+  if(checking)return JSON.stringify({tool:'check_order',query:orderId});
+  if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_id:'P-REAL',quantity:2}],notes:'Pesanan pelanggan'})});
+  return JSON.stringify({tool:'get_products',query:'P-REAL'});
+ };
+ const f=await fixture(transport,false,async()=>{},[],false,true);
+ await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'KNOWLEDGE_PRIVATE',behavior:'Ramah'});
+ await aiData.saveProduct(f.id,'shop',{id:'P-REAL',name:'Produk asli tenant',description:'Produk harian',type:'product',price:100000,stock:5,active:true});
+ await f.service.incoming(f.id,f.manager,'shop',f.message('order-create','Pesankan dua produk'));
+ assert.ok(orderId);assert.equal((await aiData.orders(f.id,'shop'))[0].total,200000);
+ await f.service.incoming(f.id,f.manager,'shop',f.message('order-check','Bagaimana statusnya?'));
+ assert.equal(f.sent(),2);assert.equal((await aiData.orders(f.id,'shop')).length,1);
 });
