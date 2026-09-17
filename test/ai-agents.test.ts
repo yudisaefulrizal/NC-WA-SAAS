@@ -28,7 +28,7 @@ test('Tool loop passes trusted scope, shares results, and deduplicates identical
 });
 test('Invalid routes cannot dispatch agents or tools',async()=>{
  for(const raw of ['not JSON',route('informasi','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'too short',isi_pesan:messages.at(-1)!.content})]){
-  let calls=0;await assert.rejects(runAgents(async()=>{calls++;return raw;},defaults,messages,300,context));assert.equal(calls,1);
+  let calls=0;await assert.rejects(runAgents(async()=>{calls++;return raw;},defaults,messages,300,context));assert.equal(calls,2);
  }
 });
 test('Tool permissions and strict arguments reject attempts to change tenant identity',async()=>{
@@ -88,4 +88,24 @@ test('Three model tiers select by role across routing, specialist tools and cont
   const expected=agent==='lainnya'?'smart-test':['pembuka','penutup'].includes(agent)?'cheap-test':'medium-test';
   assert.ok(selected.slice(1,-1).every(c=>c.model===expected&&c.role===agent));
  }
+});
+
+test('Invalid router and specialist output is repaired once without replaying a successful order',async()=>{
+ let routerCalls=0,specialistCalls=0,mutations=0;
+ const result=await runAgents(async(c,m)=>{
+  if(c.call_role==='router'){if(routerCalls++===0)return 'invalid';assert.ok(m.at(-1)!.content.includes('Output sebelumnya'));return route('transaksi');}
+  specialistCalls++;
+  if(specialistCalls===1)return JSON.stringify({tool:'create_order',query:'one'});
+  if(specialistCalls===2)return '{broken';
+  assert.ok(m.some(x=>x.content.includes('ORD-1')));assert.ok(m.at(-1)!.content.includes('Output sebelumnya'));
+  return JSON.stringify({answer:'Pesanan tercatat'});
+ },defaults,messages,300,context,{execute:async()=>{mutations++;return {id:'ORD-1'};}});
+ assert.equal(result.answer,'Pesanan tercatat');assert.equal(routerCalls,2);assert.equal(specialistCalls,3);assert.equal(mutations,1);
+});
+
+test('Context repair retains the customer exchange and stops after one correction',async()=>{
+ let calls=0;
+ const result=await updateRouterContext(async(_c,m)=>{calls++;if(calls===1)return 'invalid';assert.equal(JSON.parse(m[1].content).pesan_pelanggan,'ya');return 'pelanggan-menunggu-pesanan';},defaults,'ya','Baik');
+ assert.equal(calls,2);assert.equal(result,'pelanggan-menunggu-pesanan');
+ calls=0;await assert.rejects(updateRouterContext(async()=>{calls++;return 'invalid';},defaults,'ya','Baik'));assert.equal(calls,2);
 });

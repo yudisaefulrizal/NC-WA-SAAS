@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import request from 'supertest';
 import {db} from '../src/db.js';
-import {AIService,countWords,creditCost,defaults,chatEndpoint,type AITransport,type AIMessage} from '../src/ai.js';
+import {AIService,aiFallback,countWords,creditCost,defaults,chatEndpoint,type AITransport,type AIMessage} from '../src/ai.js';
 import {SessionManager,ApiError} from '../src/engine/sessions.js';
 import {basicWallet} from '../src/plans.js';
 import {digest} from '../src/security.js';
@@ -44,7 +44,7 @@ test('Memory holds individual messages within the global limit and is isolated b
 });
 test('WhatsApp failure still charges AI; provider failure and invalid output release the reservation',async()=>{
  const f=await fixture(undefined,true);await f.service.incoming(f.id,f.manager,'shop',f.message('failure'));let usage=await rows(f.id);assert.equal(usage[0].status,'send_failed');assert.ok(usage[0].charged>0);assert.equal((await basicWallet(f.id)).balance,100);
- for(const output of ['', 'kata '.repeat(301), null]){const g=await fixture(async()=>{if(output===null)throw Error('timeout');return output;});await g.service.incoming(g.id,g.manager,'shop',g.message('error'));await g.service.incoming(g.id,g.manager,'shop',g.message('error'));usage=await rows(g.id);assert.equal(usage.length,1);assert.equal(usage[0].status,'provider_failed');assert.equal(usage[0].charged,0);assert.equal(usage[0].reserved,0);assert.equal((await g.service.wallet(g.id)).balance,10000);assert.equal(g.sent(),0);}
+ for(const output of ['', 'kata '.repeat(301), null]){const g=await fixture(async()=>{if(output===null)throw Error('timeout');return output;});await g.service.incoming(g.id,g.manager,'shop',g.message('error'));await g.service.incoming(g.id,g.manager,'shop',g.message('error'));usage=await rows(g.id);assert.equal(usage.length,1);assert.equal(usage[0].status,'fallback_sent');assert.equal(usage[0].charged,0);assert.equal(usage[0].reserved,0);assert.equal((await g.service.wallet(g.id)).balance,10000);assert.equal(g.sent(),1);assert.equal((await basicWallet(g.id)).balance,99);}
 });
 test('Concurrent customers cannot overspend, groups/media and disabled/paused assistants never invoke AI',async()=>{
  let calls=0;const f=await fixture(async()=>{calls++;return 'OK';});await f.service.adjust(f.id,f.id,{amount:-9950,reason:'small budget',requestId:'small'});
@@ -67,7 +67,7 @@ test('AI wallet adjustments are idempotent and HTTP owner configuration is priva
 test('Consecutive customer messages after provider errors trim oldest messages rather than pairs',async()=>{
  const inputs:AIMessage[][]=[];const f=await fixture(async(_c,m)=>{inputs.push(m);throw Error('provider unavailable');});
  for(let i=1;i<=4;i++)await f.service.incoming(f.id,f.manager,'shop',f.message('failure-'+i,'Pelanggan '+i));
- assert.deepEqual(inputs[3].filter(m=>m.role==='user').map(m=>m.content),['Pelanggan 2','Pelanggan 3','Pelanggan 4']);assert.equal((await f.service.wallet(f.id)).balance,10000);
+ assert.deepEqual(inputs[3].filter(m=>m.role==='user').map(m=>m.content),['Pelanggan 3','Pelanggan 4']);assert.ok(inputs[3].some(m=>m.content===aiFallback));assert.equal((await f.service.wallet(f.id)).balance,10000);
 });
 test('Gateway assistant routes verify session ownership and account isolation',async()=>{
  const {mkdtemp,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path');const {createGateway}=await import('../src/gateway.js');const {createApp}=await import('../src/app.js');
@@ -168,11 +168,11 @@ test('Tool calls use authenticated tenant context and cannot run after manual ta
  assert.ok(!executed.includes(paused.id));assert.equal(paused.sent(),0);assert.equal((await paused.service.wallet(paused.id)).balance,10000);
 });
 
-test('Malformed router output refunds reservation without sending or leaking JSON into memory',async()=>{
+test('Malformed router output refunds reservation and sends one safe fallback without leaking JSON',async()=>{
  const f=await fixture(async()=>'{"sub_agent":"invalid"}',false,async()=>{},[],false,true);
  await f.service.incoming(f.id,f.manager,'shop',f.message('invalid-route'));
- assert.equal(f.sent(),0);assert.equal((await f.service.wallet(f.id)).balance,10000);
- assert.equal((await rows(f.id))[0].status,'provider_failed');
+ assert.equal(f.sent(),1);assert.equal((await f.service.wallet(f.id)).balance,10000);
+ assert.equal((await rows(f.id))[0].status,'fallback_sent');
 });
 
 test('WhatsApp transaction creates a built-in order, support reads it using shared memory, and Knowledge stays behind its tool',async()=>{
@@ -236,6 +236,59 @@ test('Failed delivery, failed context updates and manual takeover cannot leave m
  failContext=false;await f.service.incoming(f.id,f.manager,'shop',f.message('third'));
  await f.service.manualOutgoing(f.id,'shop',f.message('manual','Admin mengambil alih'));
  const row=(await f.service.conversations(f.id,'shop') as any[])[0];assert.equal(row.router_context,null);assert.equal(Boolean(row.paused),true);
+});
+
+test('Transient provider failures retry with backoff, retain billing and record each attempt',async()=>{
+ let calls=0;const delays:number[]=[];
+ const f=await fixture(async()=>{if(++calls<3)throw Error('ai_provider_http_503');return 'Jawaban';},false,async ms=>{delays.push(ms);});
+ await f.service.incoming(f.id,f.manager,'shop',f.message('retry'));
+ assert.equal(calls,3);assert.equal(f.sent(),1);assert.ok(delays[0]>=500&&delays[0]<=750);assert.ok(delays[1]>=1000&&delays[1]<=1250);
+ const usage=(await rows(f.id))[0],trace=typeof usage.model_calls==='string'?JSON.parse(usage.model_calls):usage.model_calls;
+ assert.deepEqual(trace.filter((c:any)=>c.role==='informasi').map((c:any)=>[c.status,c.attempt]),[['failed',1],['failed',2],['responded',3]]);
+ assert.equal(usage.charged,usage.input_words+2);assert.equal(usage.status,'sent');
+});
+
+test('Permanent provider errors do not retry; exhausted retries send a single fallback',async()=>{
+ for(const code of ['ai_provider_http_401','ai_provider_http_403','ai_provider_http_404','ai_provider_http_429']){
+  let calls=0;const f=await fixture(async()=>{calls++;throw Error(code);});
+  await f.service.incoming(f.id,f.manager,'shop',f.message('failed'));
+  await f.service.incoming(f.id,f.manager,'shop',f.message('failed'));
+  assert.equal(calls,code.endsWith('429')?3:1);assert.equal(f.sent(),1);assert.equal((await f.service.wallet(f.id)).balance,10000);
+ }
+});
+
+test('Pause during retry cancels further calls and suppresses fallback',async()=>{
+ let calls=0;const f=await fixture(async()=>{calls++;throw Error('ai_provider_http_503');},false,async()=>{await f.service.conversation(f.id,'shop','628123456789',{paused:true});});
+ await f.service.incoming(f.id,f.manager,'shop',f.message('cancel-retry'));
+ assert.equal(calls,1);assert.equal(f.sent(),0);assert.equal((await rows(f.id))[0].status,'cancelled');assert.equal((await f.service.wallet(f.id)).balance,10000);
+});
+
+test('Read tools retry once but uncertain order mutations are never replayed',async()=>{
+ for(const name of ['get_products','create_order'] as const){
+  let executions=0;const f=await fixture(async(c,m)=>{
+   if(c.call_role==='router')return JSON.stringify({sub_agent:'transaksi',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+   if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
+   if(m.some(x=>x.content.startsWith('Tool result')))return JSON.stringify({answer:'Baik'});
+   return JSON.stringify({tool:name,query:''});
+  },false,async()=>{},[],false,true,{execute:async()=>{if(++executions===1)throw Error('endpoint_http_503');return [];}});
+  await f.service.incoming(f.id,f.manager,'shop',f.message('tool-retry'));
+  assert.equal(executions,name==='get_products'?2:1);assert.equal(f.sent(),1);assert.equal((await rows(f.id))[0].status,name==='get_products'?'sent':'fallback_sent');
+ }
+});
+
+test('Full auto persists per conversation, survives manual replies, and explicit pause disables it',async()=>{
+ const f=await fixture(),customer='628123456789';
+ await f.service.conversation(f.id,'shop',customer,{paused:false,full_auto:true});
+ const restarted=new FixtureAI();await restarted.manualOutgoing(f.id,'shop',f.message('manual-auto','Admin membantu'));
+ let row=(await f.service.conversations(f.id,'shop') as any[])[0];assert.equal(row.paused,0);assert.equal(row.full_auto,1);
+ await f.service.incoming(f.id,f.manager,'shop',f.message('after-manual'));assert.equal(f.sent(),1);
+ await f.service.manualOutgoing(f.id,'shop',f.message('other-manual','Admin membantu','628999999999'));
+ row=(await f.service.conversations(f.id,'shop') as any[]).find(r=>r.customer==='628999999999');assert.equal(row.paused,1);assert.equal(row.full_auto,0);
+ await f.service.conversation(f.id,'shop',customer,{paused:false,clear:true});row=(await f.service.conversations(f.id,'shop') as any[]).find(r=>r.customer===customer);assert.equal(row.full_auto,1);assert.equal(row.message_count,0);
+ await f.service.conversation(f.id,'shop',customer,{paused:true});await f.service.manualOutgoing(f.id,'shop',f.message('manual-paused'));row=(await f.service.conversations(f.id,'shop') as any[]).find(r=>r.customer===customer);assert.equal(row.paused,1);assert.equal(row.full_auto,0);
+ await assert.rejects(f.service.conversation(f.id,'shop',customer,{paused:false,full_auto:'yes'}));await assert.rejects(f.service.conversation(f.id,'shop',customer,{paused:true,full_auto:true}));
+ await f.service.conversation(f.id,'shop',customer,{paused:false,full_auto:true});await f.service.conversation(f.id,'shop',customer,{paused:false,full_auto:false});
+ await f.service.manualOutgoing(f.id,'shop',f.message('manual-normal'));row=(await f.service.conversations(f.id,'shop') as any[]).find(r=>r.customer===customer);assert.equal(row.paused,1);
 });
 
 test('Owner model configuration persists, legacy fallback works, tests select each tier, and client usage hides models',async()=>{

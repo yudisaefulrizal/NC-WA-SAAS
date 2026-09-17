@@ -122,7 +122,7 @@ async function loadAI(){
  const units=Number($('ai-units').value),validUnits=Number.isSafeInteger(units)&&units>=1&&units<=100;
  $('ai-buy').disabled=!w.credit_price||!validUnits;$('ai-buy').textContent=w.credit_price&&validUnits?`Beli ${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(w.credit_price*units)}`:'Pembelian AI belum tersedia';
  const selected=$('ai-session').value;$('ai-session').replaceChildren(new Option('Pilih sesi',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-session').value=selected;
- table('ai-usage',['Waktu','Sesi','Pelanggan','Agent','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,r.agent||'—',({sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
+ table('ai-usage',['Waktu','Sesi','Pelanggan','Agent','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,r.agent||'—',({fallback_sent:'Pesan bantuan terkirim',fallback_generated:'Menyiapkan pesan bantuan',fallback_send_failed:'Pesan bantuan gagal terkirim',fallback_send_unknown:'Pengiriman bantuan belum pasti',sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
  if(selected)await loadAssistant();
 }
 let assistantLoad=0;
@@ -150,7 +150,18 @@ let orderRequest;
 $('ai-order-add').onclick=()=>{$('ai-order-form').reset();orderRequest=undefined;$('ai-order-dialog').showModal();};
 aiDataForm('ai-order-form',async data=>{const id=$('ai-session').value,payload={customer:data.customer,items:[{product_id:data.product_id,quantity:Number(data.quantity)}],notes:data.notes};const signature=JSON.stringify([id,payload]);if(!orderRequest||orderRequest.signature!==signature)orderRequest={signature,key:crypto.randomUUID()};await api('/sessions/'+encodeURIComponent(id)+'/ai/orders','POST',payload,{'Idempotency-Key':orderRequest.key});$('ai-order-dialog').close();orderRequest=undefined;await loadAIData();$('message').textContent='Pesanan tercatat untuk diproses.';});
 aiDataForm('ai-order-edit-form',async data=>{await api('/sessions/'+encodeURIComponent($('ai-session').value)+'/ai/orders/'+encodeURIComponent(data.id),'PUT',{status:data.status,notes:data.notes});$('ai-order-edit-dialog').close();await loadAIData();$('message').textContent='Pesanan diperbarui.';});
-async function loadConversations(){const id=$('ai-session').value,generation=assistantLoad;if(!id)return;const rows=await api('/sessions/'+encodeURIComponent(id)+'/ai/conversations');if(id!==$('ai-session').value||generation!==assistantLoad)return;table('ai-conversations',['Pelanggan','Memori','Konteks S-P-O','Status','Tindakan'],rows,r=>{const actions=document.createElement('div');actions.className='row-actions';const update=body=>api('/sessions/'+encodeURIComponent(id)+'/ai/conversations/'+encodeURIComponent(r.customer),'PUT',body);actions.append(button(r.paused?'Lanjutkan AI':'Jeda AI',async()=>{await update({paused:!r.paused});await loadConversations();}),button('Hapus konteks',async()=>{if(!confirm('Hapus memori AI pelanggan ini? Chat WhatsApp tetap tersimpan.'))return;await update({paused:Boolean(r.paused),clear:true});await loadConversations();}));return [r.customer,r.message_count,r.router_context||'—',r.paused?'Dijeda':'Aktif',actions];});}
+async function loadConversations(){
+ const id=$('ai-session').value,generation=assistantLoad;if(!id)return;
+ const rows=await api('/sessions/'+encodeURIComponent(id)+'/ai/conversations');if(id!==$('ai-session').value||generation!==assistantLoad)return;
+ table('ai-conversations',['Pelanggan','Memori','Konteks S-P-O','Status','Tindakan'],rows,r=>{
+  const actions=document.createElement('div');actions.className='row-actions';
+  const update=async body=>{await api('/sessions/'+encodeURIComponent(id)+'/ai/conversations/'+encodeURIComponent(r.customer),'PUT',body);await loadConversations();};
+  actions.append(button(r.paused?'Lanjutkan AI':'Jeda AI',()=>update({paused:!r.paused,full_auto:false})),
+   button(r.full_auto?'Nonaktifkan full auto':'Full auto',()=>update({paused:false,full_auto:!r.full_auto})),
+   button('Hapus konteks',async()=>{if(!confirm('Hapus memori AI pelanggan ini? Chat WhatsApp tetap tersimpan.'))return;await update({paused:Boolean(r.paused),clear:true});}));
+  return [r.customer,r.message_count,r.router_context||'—',r.paused?'Dijeda':r.full_auto?'Full auto':'Aktif',actions];
+ });
+}
 $('ai-session').onchange=()=>run(loadAssistant);
 form('ai-form',async data=>{if(!data.session)throw Error('Pilih sesi terlebih dahulu.');const payload={enabled:data.enabled==='on',knowledge:data.knowledge,behavior:data.behavior};for(const kind of sourceKinds)payload[kind+'_source']={mode:data[kind+'_mode'],endpoint:data[kind+'_endpoint'],token:data[kind+'_token'],clear_token:data[kind+'_clear_token']==='on'};await api('/sessions/'+encodeURIComponent(data.session)+'/ai','PUT',payload);await loadAssistant();$('message').textContent='Pengaturan asisten tersimpan.';});
 $('ai-refresh').onclick=()=>run(loadAI);

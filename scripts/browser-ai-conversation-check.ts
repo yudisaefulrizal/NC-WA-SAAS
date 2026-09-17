@@ -1,0 +1,51 @@
+import {chromium} from 'playwright';
+import {randomUUID} from 'node:crypto';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import net from 'node:net';
+import assert from 'node:assert/strict';
+import {db} from '../src/db.js';
+import {digest} from '../src/security.js';
+import {ai} from '../src/ai.js';
+import {createGateway} from '../src/gateway.js';
+
+const temporary=await mkdtemp(join(tmpdir(),'ncwa-conversation-browser-'));
+const slot=net.createServer();await new Promise<void>(r=>slot.listen(0,'127.0.0.1',r));
+const port=(slot.address() as net.AddressInfo).port;await new Promise<void>(r=>slot.close(()=>r()));
+const origin='http://127.0.0.1:'+port;process.env.APP_ORIGIN=origin;
+const {createApp}=await import('../src/app.js');
+const gateway=createGateway(()=>async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){}};},temporary);
+const server=createApp(gateway).listen(port,'127.0.0.1');
+const account=randomUUID(),token=randomUUID(),customer='628123456789';
+let browser;
+try{
+ await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);
+ await db.execute('INSERT INTO login_sessions VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR))',[digest(token),account]);
+ browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
+ const context=await browser.newContext({viewport:{width:1280,height:900}});
+ await context.addCookies([{name:'ncwa_session',value:token,url:origin}]);
+ assert.equal((await context.request.post(origin+'/sessions',{headers:{Origin:origin},data:{id:'shop'}})).status(),200);
+ await ai.saveAssistant(account,'shop',{enabled:true,knowledge:'',behavior:''});
+ await ai.conversation(account,'shop',customer,{paused:true});
+ const page=await context.newPage(),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(origin+'/dashboard/ai');
+ await page.locator('#ai-session option[value="shop"]').waitFor({state:'attached'});await page.locator('#ai-session').selectOption('shop');
+ const table=page.locator('#ai-conversations');await table.getByText(customer,{exact:true}).waitFor();
+ await table.getByRole('button',{name:'Full auto',exact:true}).click();
+ await table.getByRole('button',{name:'Nonaktifkan full auto',exact:true}).waitFor();
+ await page.reload();await page.locator('#ai-session').selectOption('shop');await table.getByRole('button',{name:'Nonaktifkan full auto',exact:true}).waitFor();
+ await ai.manualOutgoing(account,'shop',{messageId:'manual',from:customer,sender:customer,text:'Admin membantu',type:'text',isGroup:false,groupId:null,timestamp:1});
+ await page.reload();await page.locator('#ai-session').selectOption('shop');await table.getByText('Full auto',{exact:true}).waitFor();
+ page.once('dialog',d=>void d.accept());await Promise.all([page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/ai/conversations')),table.getByRole('button',{name:'Hapus konteks',exact:true}).click()]);
+ assert.equal((await ai.conversations(account,'shop') as any[])[0].full_auto,1);
+ await table.getByRole('button',{name:'Jeda AI',exact:true}).click();await table.getByText('Dijeda',{exact:true}).waitFor();
+ await table.getByRole('button',{name:'Lanjutkan AI',exact:true}).click();await table.getByText('Aktif',{exact:true}).waitFor();
+ const rows=await ai.conversations(account,'shop') as any[];assert.equal(rows[0].paused,0);assert.equal(rows[0].full_auto,0);assert.equal(rows[0].message_count,0);
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ assert.deepEqual(errors,[]);console.log('Full auto, pause, resume and clear context browser checks passed');
+}finally{
+ await browser?.close();await gateway.stop();await new Promise<void>(r=>server.close(()=>r()));
+ await db.execute('DELETE FROM audit_events WHERE account_id=?',[account]);await db.execute('DELETE FROM accounts WHERE id=?',[account]);
+ await db.end();await rm(temporary,{recursive:true,force:true});
+}

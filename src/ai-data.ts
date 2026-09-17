@@ -40,7 +40,7 @@ export const callEndpoint:EndpointTransport=async(config,payload,idempotencyKey)
  return new Promise((resolve,reject)=>{const req=request(url,{method:'POST',agent:false,signal:AbortSignal.timeout(15000),headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'Idempotency-Key':idempotencyKey,...(config.secret?{Authorization:'Bearer '+decrypt(config.secret)}:{})},lookup:(_host,options,callback)=>{if(options.all)callback(null,addresses);else callback(null,addresses[0].address,addresses[0].family);}},res=>{
   const chunks:Buffer[]=[];let size=0;
   res.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>32000){res.destroy(Error('endpoint_response_limit'));return;}chunks.push(chunk);});
-  res.on('error',()=>reject(Error('endpoint_failed')));
+  res.on('error',error=>reject(Error(error.message==='endpoint_response_limit'?'endpoint_response_limit':'endpoint_failed')));
   res.on('end',()=>{if(res.statusCode!==200){reject(Error('endpoint_http_'+res.statusCode));return;}try{resolve(JSON.parse(Buffer.concat(chunks).toString()));}catch{reject(Error('endpoint_invalid_json'));}});
  });req.on('error',()=>reject(Error('endpoint_failed')));req.end(body);});
 };
