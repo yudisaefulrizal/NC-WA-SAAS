@@ -192,7 +192,7 @@ export class AIService {
    await c.execute('INSERT IGNORE INTO ai_wallets VALUES (?,0)',[account]);const [wallet]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);
    const [pending]=await c.execute<RowDataPacket[]>('SELECT id,question FROM ai_fallbacks WHERE account_id=? AND session_id=? AND customer=? AND status=\'waiting\' ORDER BY created_at DESC LIMIT 5',[account,session,message.from]);
    const fallbackNumber=String(current[0].fallback_number??'');
-   const system:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika informasi belum tersedia, minta klarifikasi atau gunakan fallback tim bila tersedia. Balas maksimal 300 kata.'},...(pending.map(row=>({role:'system' as const,content:'Konfirmasi tim masih menunggu untuk '+row.id+': '+row.question+'. Jangan membuat tiket duplikat untuk topik yang sama.'}))),...([current[0].behavior] as string[]).filter(Boolean).map(content=>({role:'system' as const,content}))];
+   const system:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika informasi belum tersedia, minta klarifikasi atau gunakan fallback tim bila tersedia. Balas maksimal 300 kata.'},...([current[0].behavior] as string[]).filter(Boolean).map(content=>({role:'system' as const,content}))];
    const messages=[...system,...memory],inputWords=messages.reduce((sum,m)=>sum+countWords(m.content),0);
    // The system instruction is counted too; replacing its numeric limit does not change its word count.
    const maxWords=Math.min(300,Math.floor((wallet[0].balance-inputWords*config.input_rate)/config.output_rate));
@@ -201,7 +201,7 @@ export class AIService {
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
    await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,?,'generating',?,?,?,?,?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string,fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
+   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
   });if(!prepared)return;
   const jid=message.from+'@s.whatsapp.net';
   // Read/presence are best effort and never add a message or a credit charge.
@@ -221,7 +221,7 @@ export class AIService {
    throw Error('ai_retry_limit');
   };
   let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
-  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true},{execute:async(name,query,context)=>{
+  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
    await guard();
    try{return await this.tools.execute(name,query,context);}catch(error){
     if(name==='create_order'||!transientAIError(error)||Date.now()>=deadline)throw error;

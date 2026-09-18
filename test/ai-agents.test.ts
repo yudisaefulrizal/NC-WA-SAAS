@@ -5,6 +5,31 @@ import {defaults,type AIMessage,type AITransport} from '../src/ai.js';
 const context:ToolContext={account:'tenant-a',session:'shop',customer:'628123456789',requestId:'message-1',knowledge:'Bisnis A buka jam 9',behavior:'Ramah'};
 const messages:AIMessage[]=[{role:'system',content:'Bisnis A'},{role:'user',content:'Saya mencari frame ringan'},{role:'assistant',content:'Frame Basic tersedia'},{role:'user',content:'Saya ingin memesan itu'}];
 const route=(agent:AgentName,input=messages.at(-1)!.content)=>JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan memesan frame',isi_pesan:input});
+test('Router selects pending tickets and only selected questions reach the specialist',async()=>{
+ const pendingFallbacks=[{id:'FB-A',question:'Persetujuan diskon khusus'},{id:'FB-B',question:'Penggantian bingkai rusak'}];
+ for(const selected of [[],['FB-A']]){
+  await runAgents(async(c,m)=>{
+   if(c.call_role==='router'){
+    assert.ok(m[1].content.includes('FB-A'));assert.ok(m[1].content.includes('FB-B'));
+    return JSON.stringify({...JSON.parse(route('informasi')),fallback_terkait:selected});
+   }
+   const prompt=m.map(x=>x.content).join('\n');
+   assert.equal(prompt.includes('Persetujuan diskon khusus'),selected.length>0);
+   assert.equal(prompt.includes('Penggantian bingkai rusak'),false);
+   return JSON.stringify({answer:'Baik'});
+  },defaults,messages,300,{...context,pendingFallbacks});
+ }
+});
+test('Router cannot reference unavailable tickets, duplicate IDs, or omit selection with pending tickets',async()=>{
+ for(const selected of [['FB-OTHER'],['FB-A','FB-A'],'FB-A',undefined]){
+  let calls=0;
+  await assert.rejects(runAgents(async(c)=>{
+   assert.equal(c.call_role,'router');calls++;
+   return JSON.stringify({...JSON.parse(route('informasi')),fallback_terkait:selected});
+  },defaults,messages,300,{...context,pendingFallbacks:[{id:'FB-A',question:'Diskon'}]}),/ai_invalid_route/);
+  assert.equal(calls,2);
+ }
+});
 test('Specialists receive shared history while router receives only latest input and separate context',async()=>{
  for(const agent of Object.keys(agents) as AgentName[]){
   let calls=0;

@@ -160,6 +160,10 @@ Router memakai JSON Schema tetap dengan enum `pembuka`, `informasi`, `konsultasi
 
 ## Fallback tim
 
+Pada setiap pesan, aplikasi membaca maksimal lima tiket `waiting` terbaru dengan filter account, session, dan pelanggan. Ringkasan ID dan pertanyaan diberikan kepada Router bersama konteks S-P-O. Output Router menyertakan `fallback_terkait` berupa array ID tiket relevan; `[]` berarti tidak terkait. Validator menolak ID di luar daftar dan ID duplikat. Hanya tiket terpilih ditambahkan ke prompt specialist; daftar lengkap tidak dimasukkan ke shared memory. Jejak `router/routed` di AI Studio menampilkan properti tersebut. Status tiket tetap bersumber dari database pada setiap pesan, bukan disalin ke konteks S-P-O permanen.
+
+Prompt lama yang menghilangkan `fallback_terkait` masih diterima sebagai `[]` hanya ketika tidak ada tiket menunggu. Jika ada kandidat tiket, properti ini wajib dan output tidak valid mendapat koreksi terbatas. Pemilihan relevansi dan pencegahan duplikat semantik tetap bergantung pada model; perubahan ini tidak menjamin penghematan total token karena ringkasan tiket kini dibaca Router.
+
 Setiap sesi dapat menyimpan nomor WhatsApp fallback di halaman Asisten AI. Saat specialist mengeluarkan fallback karena data tidak tersedia atau perlu keputusan manusia, sistem membuat tiket `ai_fallbacks` yang terikat pada account, session, pelanggan, pesan sumber, konteks, dan snapshot riwayat. Pelanggan menerima konfirmasi singkat, sedangkan tim menerima pertanyaan dengan ID tiket. AI tetap aktif untuk pertanyaan pelanggan lain.
 
 Tim membalas notifikasi WhatsApp menggunakan Reply, atau menulis ID tiket pada balasan. Sistem mencari tiket hanya dalam account dan session yang menerima balasan, lalu meneruskan jawaban tim kepada pelanggan dan menutup tiket. Endpoint `GET /sessions/:id/ai/fallbacks` menampilkan tiket untuk sesi tersebut saja.
