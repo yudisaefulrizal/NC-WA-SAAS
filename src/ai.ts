@@ -79,11 +79,13 @@ export class AIService {
  }
  async modelUsage(){const [rows]=await db.query('SELECT account_id,session_id,request_id,status,agent,model_calls,created_at FROM ai_usage ORDER BY created_at DESC LIMIT 100');return rows;}
  async trial(account:string,body:unknown){
-  const question=text(object(body).question,2000,'Pertanyaan');if(!question)throw fail('Pertanyaan wajib diisi');
-  const config=tierConfig(await this.config(),'cheap');if(!config.secret)throw fail('AI belum dikonfigurasi');
-  const id=digest(JSON.stringify(['trial',account,randomUUID()]));
-  const messages:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis yang membantu menguji coba kemampuan AI. Balas ringkas dan jelas, maksimal 300 kata.'},{role:'user',content:question}];
-  const inputWords=messages.reduce((sum,m)=>sum+countWords(m.content),0);
+  const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
+  if(!question)throw fail('Pertanyaan wajib diisi');if(!session)throw fail('Pilih nomor layanan yang akan diuji');
+  const config=await this.config();if(!config.secret)throw fail('AI belum dikonfigurasi');
+  const assistant=await this.assistant(account,session);
+  const id=digest(JSON.stringify(['trial',account,session,randomUUID()]));
+  const messages:AIMessage[]=[{role:'user',content:question}];
+  const inputWords=countWords(question);
   const prepared=await transaction(async c=>{
    await lockAccount(c,account);
    await c.execute('INSERT IGNORE INTO ai_wallets VALUES (?,0)',[account]);
@@ -92,16 +94,18 @@ export class AIService {
    if(maxWords<1)throw new ApiError(402,'insufficient_credit','Kredit AI tidak cukup untuk uji coba');
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
-   await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,'trial','trial','generating',?,?,?,?,?)",[account,id,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
+   await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,'trial','generating',?,?,?,?,?)",[account,id,session,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
    return {reserved,maxWords};
   });
-  let answer:string,generationFailed=false;
-  try{answer=await this.transport(config,messages,prepared.maxWords);}
-  catch{generationFailed=true;answer=aiFallback;}
+  let answer:string,agent:string|null=null,generationFailed=false;
+  try{
+   const result=await runAgents(this.transport,config,messages,prepared.maxWords,{account,session,customer:'628000000000',requestId:id,knowledge:assistant.knowledge,behavior:assistant.behavior,fallbackEnabled:false},this.tools,null);
+   answer=result.answer;agent=result.agent;
+  }catch{generationFailed=true;answer=aiFallback;}
   const outputWords=generationFailed?0:countWords(answer),charged=generationFailed?0:creditCost(inputWords,outputWords,config.input_rate,config.output_rate);
-  const wallet=await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status=?,output_words=?,charged=?,reserved=0 WHERE account_id=? AND request_id=?",[generationFailed?'failed':'generated',outputWords,charged,account,id]);const [rows]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);return rows[0].balance as number;});
+  const wallet=await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status=?,output_words=?,charged=?,agent=?,reserved=0 WHERE account_id=? AND request_id=?",[generationFailed?'failed':'generated',outputWords,charged,agent,account,id]);const [rows]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);return rows[0].balance as number;});
   if(generationFailed)throw new ApiError(502,'ai_provider_failed','AI belum berhasil menjawab; periksa konfigurasi AI.');
-  return {answer,balance:wallet};
+  return {answer,agent,balance:wallet};
  }
 
  async wallet(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);const config=await this.config();return {balance:rows[0]?.balance??0,input_rate:config.input_rate,output_rate:config.output_rate,credit_price:config.credit_price,unit:10000};}
