@@ -38,7 +38,7 @@ try{
  const context=await browser.newContext({viewport:{width:1440,height:1100}});await context.addCookies([{name:'ncwa_session',value:ownerToken,url:origin}]);
  const page=await context.newPage(),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/dashboard/admin/ai-studio');await page.locator('#studio').waitFor();
- assert.equal(await page.locator('[data-node]').count(),19);
+ assert.equal(await page.locator('[data-node]').count(),20);
  await page.getByRole('button',{name:'Node Router',exact:true}).click();
  assert.ok((await page.locator('#router-schema').textContent())?.includes('enum'));
  await page.locator('#node-structured-output').check();

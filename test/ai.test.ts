@@ -28,6 +28,20 @@ test('Word billing is deterministic for whitespace, punctuation, URLs, emoji and
  assert.equal(creditCost(countWords('kata '.repeat(500)),countWords('jawab '.repeat(100)),1,2),700);
  assert.equal(chatEndpoint('https://ai.sumopod.com'),'https://ai.sumopod.com/v1/chat/completions');assert.equal(chatEndpoint('https://ai.sumopod.com/v1/'),'https://ai.sumopod.com/v1/chat/completions');assert.throws(()=>chatEndpoint('http://localhost'));assert.throws(()=>chatEndpoint('https://key@example.com'));
 });
+test('Fallback ticket stays scoped to its session and forwards a team reply to the right customer',async()=>{
+ const f=await fixture(async(c)=>{
+  if(c.call_role==='router')return JSON.stringify({s_p_o_konteks:'pelanggan meminta keputusan',sub_agent:'lainnya',isi_pesan:'Bisa diskon khusus?'});
+  if(c.call_role==='context')return 'pelanggan-menunggu-konfirmasi';
+  return JSON.stringify({fallback:'Diskon perlu persetujuan','question':'Apakah diskon khusus dapat diberikan?'});
+ },false,async()=>{},[],false,true);
+ await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'',behavior:'',fallback_number:'628999999999'});
+ await f.service.incoming(f.id,f.manager,'shop',f.message('fallback-one','Bisa diskon khusus?'));
+ const [tickets]=await db.execute<any[]>('SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=?',[f.id,'shop']);
+ assert.equal(tickets.length,1);assert.equal(tickets[0].customer,'628123456789');assert.equal(tickets[0].status,'waiting');assert.ok(tickets[0].notification_message_id);assert.equal(f.sent(),2);
+ await f.service.incoming(f.id,f.manager,'shop',{...f.message('team-one',tickets[0].id,'628999999999'),quotedMessageId:tickets[0].notification_message_id});
+ const [resolved]=await db.execute<any[]>('SELECT status,staff_answer FROM ai_fallbacks WHERE id=?',[tickets[0].id]);
+ assert.deepEqual(resolved[0],{status:'resolved',staff_answer:tickets[0].id});assert.equal(f.sent(),3);
+});
 test('Duplicate messages charge and send once; rates are snapshotted and latest input appears once',async()=>{
  let seen:AIMessage[]=[];const f=await fixture(async(_config,messages)=>{seen=messages;f.service.settings.input_rate=19;f.service.settings.output_rate=29;return 'Jawaban bisnis';});
  await Promise.all([f.service.incoming(f.id,f.manager,'shop',f.message('one')),f.service.incoming(f.id,f.manager,'shop',f.message('one'))]);

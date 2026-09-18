@@ -10,6 +10,7 @@ export interface IncomingMessage {
   type: 'text' | MediaType;
   text: string;
   timestamp: number;
+  quotedMessageId?: string;
   mimetype?: string;
   download?: () => Promise<Readable>;
 }
@@ -30,6 +31,7 @@ export function parseIncoming(message: WAMessage): IncomingMessage | undefined {
     messageId: key.id, from: address(remote), isGroup,
     groupId: isGroup ? key.remoteJid : null, sender: address(sender),
     timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)),
+    quotedMessageId: content.extendedTextMessage?.contextInfo?.stanzaId ?? undefined,
   };
   if (content.conversation != null || content.extendedTextMessage?.text != null) {
     return { ...common, type: 'text', text: content.conversation ?? content.extendedTextMessage!.text! };

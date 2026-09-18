@@ -101,6 +101,7 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  router.post('/sessions/:id/ai/orders',async(req,res)=>{res.locals.manager.detail(req.params.id);const input=record(req.body),key=req.get('Idempotency-Key');if(!key||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw new ApiError(400,'invalid_request','Idempotency-Key wajib diisi');res.json(await aiData.createOrder({account:res.locals.accountId,session:req.params.id,customer:customerNumber(input.customer),requestId:'manual_'+key,knowledge:''},orderInput({items:input.items,notes:input.notes})));});
  router.put('/sessions/:id/ai/orders/:order',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.updateOrder(res.locals.accountId,req.params.id,req.params.order,req.body));});
  router.get('/sessions/:id/ai/conversations',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversations(res.locals.accountId,req.params.id));});
+ router.get('/sessions/:id/ai/fallbacks',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.fallbacks(res.locals.accountId,req.params.id));});
  router.put('/sessions/:id/ai/conversations/:customer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversation(res.locals.accountId,req.params.id,req.params.customer,req.body));});
  router.get('/sessions/:id',(req,res)=>res.json((res.locals.manager as SessionManager).detail(req.params.id)));
  router.get('/sessions/:id/qr',(req,res)=>res.json((res.locals.manager as SessionManager).qr(req.params.id)));

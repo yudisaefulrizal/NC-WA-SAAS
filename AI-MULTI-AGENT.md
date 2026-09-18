@@ -158,6 +158,12 @@ Sumber dalam PUT konfigurasi: `{"mode":"builtin"}` atau `{"mode":"endpoint","end
 
 Router memakai JSON Schema tetap dengan enum `pembuka`, `informasi`, `konsultasi`, `transaksi`, `dukungan`, `keluhan`, `penutup`, `lainnya`. Schema selalu disisipkan meskipun prompt router dikustomisasi. Instruksi router tetap mengarahkan konteks S-P-O tiga kata, tetapi validator hanya mensyaratkan ringkasan non-kosong maksimal 200 karakter. Validator tetap memeriksa enum, field wajib tanpa tambahan, dan kesamaan pesan asli; hasil tidak valid mendapat satu percobaan koreksi sebelum gagal.
 
+## Fallback tim
+
+Setiap sesi dapat menyimpan nomor WhatsApp fallback di halaman Asisten AI. Saat specialist mengeluarkan fallback karena data tidak tersedia atau perlu keputusan manusia, sistem membuat tiket `ai_fallbacks` yang terikat pada account, session, pelanggan, pesan sumber, konteks, dan snapshot riwayat. Pelanggan menerima konfirmasi singkat, sedangkan tim menerima pertanyaan dengan ID tiket. AI tetap aktif untuk pertanyaan pelanggan lain.
+
+Tim membalas notifikasi WhatsApp menggunakan Reply, atau menulis ID tiket pada balasan. Sistem mencari tiket hanya dalam account dan session yang menerima balasan, lalu meneruskan jawaban tim kepada pelanggan dan menutup tiket. Endpoint `GET /sessions/:id/ai/fallbacks` menampilkan tiket untuk sesi tersebut saja.
+
 Di AI Studio, pilih Router untuk melihat schema dan opsi **Gunakan Structured Outputs provider**. Opsi ini default nonaktif, termasuk pada draft lama. Aktifkan hanya setelah memastikan provider/model mendukung `response_format` JSON Schema strict; simpan untuk menguji draft, lalu terbitkan untuk produksi. Hanya panggilan router yang mengirim schema ke provider. Specialist dan Context Agent tetap memakai protokol masing-masing. Format mengikuti [dokumentasi Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Dukungan provider nyata perlu diuji menggunakan kredensial yang valid.
 
 `npm run migrate` menambah `ai_data_sources`, `ai_products`, `ai_orders`, serta metadata agent pada usage. Migrasi additive, aman diulang, dan tidak menghapus data lama. Kolom `demo_tools` dari versi prototype, bila sudah ada, tidak lagi dibaca. Jalankan migrasi sebelum runtime baru; `npm run build` menghasilkan `dist`.

@@ -4,7 +4,7 @@ import {activeWorkflow} from './ai-workflow.js';
 import {transientAIError} from './ai-retry.js';
 import {publicSources,sourceInput,saveSource} from './ai-data.js';
 import {runAgents,updateRouterContext,defaultTools,type AITools} from './ai-agents.js';
-import {randomInt} from 'node:crypto';
+import {randomInt,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {request} from 'node:https';
 import type {PoolConnection,RowDataPacket} from 'mysql2/promise';
@@ -21,7 +21,7 @@ export type AIMessage={role:'system'|'user'|'assistant';content:string};
 export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
 export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
-export const aiFallback='Maaf, saya sedang mengalami kendala memproses pesan Anda. Silakan hubungi admin untuk bantuan. Jika sedang memesan, mohon periksa status pesanan terlebih dahulu sebelum mengulang pemesanan.';
+export const aiFallback='Maaf, saya sedang mengalami kendala memproses pesan Anda. Silakan coba lagi beberapa saat. Jika terkait pesanan, mohon periksa status pesanan terlebih dahulu sebelum mengulang pemesanan.';
 export const creditCost=(input:number,output:number,inputRate:number,outputRate:number)=>input*inputRate+output*outputRate;
 const fail=(message:string)=>new ApiError(400,'invalid_request',message);
 function integer(value:unknown,min:number,max:number,name:string){if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)throw fail(name+' di luar batas');return Number(value);}
@@ -81,17 +81,41 @@ export class AIService {
 
  async wallet(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);const config=await this.config();return {balance:rows[0]?.balance??0,input_rate:config.input_rate,output_rate:config.output_rate,credit_price:config.credit_price,unit:10000};}
  async usage(account:string){const [rows]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
- async assistant(account:string,session:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);return {enabled:Boolean(rows[0]?.enabled),knowledge:String(rows[0]?.knowledge??''),behavior:String(rows[0]?.behavior??''),revision:Number(rows[0]?.revision??0),...await publicSources(account,session)};}
+ async assistant(account:string,session:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,fallback_number,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);return {enabled:Boolean(rows[0]?.enabled),knowledge:String(rows[0]?.knowledge??''),behavior:String(rows[0]?.behavior??''),fallback_number:String(rows[0]?.fallback_number??''),revision:Number(rows[0]?.revision??0),...await publicSources(account,session)};}
  async saveAssistant(account:string,session:string,body:unknown){
   const input=object(body);if(typeof input.enabled!=='boolean')throw fail('Status asisten wajib valid');
-  const knowledge=text(input.knowledge,8000,'Knowledge'),behavior=text(input.behavior,2000,'Perilaku AI');
+  const knowledge=text(input.knowledge,8000,'Knowledge'),behavior=text(input.behavior,2000,'Perilaku AI'),fallbackNumber=input.fallback_number===undefined?'':text(input.fallback_number,20,'Nomor fallback');
+  if(fallbackNumber&&!/^[1-9][0-9]{5,14}$/.test(fallbackNumber))throw fail('Nomor fallback harus nomor internasional tanpa +');
   const products=input.products_source===undefined?undefined:await sourceInput(input.products_source),orders=input.orders_source===undefined?undefined:await sourceInput(input.orders_source);
-  await transaction(async c=>{await lockAccount(c,account);await c.execute('INSERT INTO ai_assistants(account_id,session_id,enabled,knowledge,behavior) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),knowledge=VALUES(knowledge),behavior=VALUES(behavior),revision=revision+1',[account,session,Boolean(input.enabled),knowledge,behavior]);
+  await transaction(async c=>{await lockAccount(c,account);await c.execute('INSERT INTO ai_assistants(account_id,session_id,enabled,knowledge,behavior,fallback_number) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),knowledge=VALUES(knowledge),behavior=VALUES(behavior),fallback_number=VALUES(fallback_number),revision=revision+1',[account,session,Boolean(input.enabled),knowledge,behavior,fallbackNumber]);
    if(products)await saveSource(c,account,session,'products',products);if(orders)await saveSource(c,account,session,'orders',orders);
   });return this.assistant(account,session);
  }
  async registerSystemMessage(account:string,session:string,messageId:string){
   await db.execute("INSERT INTO ai_message_origins(account_id,session_id,message_id,origin) VALUES (?,?,?,'system')",[account,session,messageId]);
+ }
+ private async handleFallbackReply(account:string,manager:SessionManager,session:string,message:IncomingMessage){
+  const [settings]=await db.execute<RowDataPacket[]>('SELECT fallback_number FROM ai_assistants WHERE account_id=? AND session_id=? AND fallback_number=?',[account,session,message.from]);
+  if(!settings[0]?.fallback_number)return false;
+  const ticketId=message.text.match(/\b(FB-[A-Z0-9]{8,48})\b/i)?.[1]?.toUpperCase();
+  const ticket=await transaction(async c=>{
+   const [rows]=await c.execute<RowDataPacket[]>(`SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=? AND status='waiting' AND (notification_message_id=? OR id=?) FOR UPDATE`,[account,session,message.quotedMessageId??'',ticketId??'']);
+   const row=rows[0];if(!row)return;
+   await c.execute("UPDATE ai_fallbacks SET status='answered',staff_answer=?,answered_at=UTC_TIMESTAMP() WHERE id=?",[message.text.trim().slice(0,8000),row.id]);
+   return row;
+  });
+  if(!ticket)return true;
+  const answer='Berikut konfirmasi dari tim: '+message.text.trim();
+  let sent=false;
+  try{await sendBilled(account,manager,session,'text',{to:ticket.customer,text:answer},'fallback_resume_'+digest(message.messageId).slice(0,64));sent=true;}catch{}
+  await transaction(async c=>{
+   await c.execute('UPDATE ai_fallbacks SET status=?,resolved_at=IF(?,UTC_TIMESTAMP(),NULL) WHERE id=?',[sent?'resolved':'failed',sent,ticket.id]);
+   if(!sent)return;
+   const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
+   const [rows]=await c.execute<RowDataPacket[]>('SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,ticket.customer]);
+   if(rows[0])await c.execute('UPDATE ai_conversations SET messages=?,revision=revision+1 WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify([...parseMemory(rows[0].messages),{role:'assistant',content:answer}].slice(-(limits[0]?.memory_limit??defaults.memory_limit))),account,session,ticket.customer]);
+  });
+  return true;
  }
  async manualOutgoing(account:string,session:string,message:IncomingMessage){
   if(message.isGroup||! /^[1-9][0-9]{5,14}$/.test(message.from))return;
@@ -111,8 +135,9 @@ export class AIService {
    await c.execute('UPDATE ai_conversations SET paused=IF(full_auto,FALSE,TRUE),revision=revision+1,router_context=NULL,messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);
   });
  }
- async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_data_sources','ai_products','ai_orders'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
+ async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_data_sources','ai_products','ai_orders','ai_fallbacks'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
  async conversations(account:string,session:string){const [rows]=await db.execute('SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',[account,session]);return rows;}
+ async fallbacks(account:string,session:string){const [rows]=await db.execute('SELECT id,customer,status,agent,reason,question,created_at,answered_at,resolved_at FROM ai_fallbacks WHERE account_id=? AND session_id=? ORDER BY created_at DESC LIMIT 100',[account,session]);return rows;}
  async conversation(account:string,session:string,customer:string,body:unknown){
   if(!/^[0-9]{5,20}$/.test(customer))throw fail('Nomor pelanggan tidak valid');
   const input=object(body);if(typeof input.paused!=='boolean'||(input.clear!==undefined&&typeof input.clear!=='boolean')||(input.full_auto!==undefined&&typeof input.full_auto!=='boolean')||(input.paused&&input.full_auto===true))throw fail('Status percakapan tidak valid');
@@ -122,7 +147,7 @@ export class AIService {
  incoming(account:string,manager:SessionManager,session:string,message:IncomingMessage){
   if(message.isGroup||message.type!=='text'||!message.text.trim()||!/^\d{5,20}$/.test(message.from))return Promise.resolve();
   const key=JSON.stringify([account,session,message.from]);if(this.queued>=128)return Promise.resolve();this.queued++;
-  const task=(this.queues.get(key)??Promise.resolve()).then(()=>this.process(account,manager,session,message)).catch(()=>{console.error('Pemrosesan AI gagal; periksa riwayat penggunaan.');}).finally(()=>{this.queued--;if(this.queues.get(key)===task)this.queues.delete(key);});this.queues.set(key,task);return task;
+  const task=(this.queues.get(key)??Promise.resolve()).then(async()=>{if(!await this.handleFallbackReply(account,manager,session,message))await this.process(account,manager,session,message);}).catch(()=>{console.error('Pemrosesan AI gagal; periksa riwayat penggunaan.');}).finally(()=>{this.queued--;if(this.queues.get(key)===task)this.queues.delete(key);});this.queues.set(key,task);return task;
  }
  async stop(){await Promise.all(this.queues.values());}
  async recover(account?:string){
@@ -137,14 +162,16 @@ export class AIService {
   const id=digest(JSON.stringify([session,message.from,message.messageId]));
   const prepared=await transaction(async c=>{await lockAccount(c,account);
    const [existing]=await c.execute<RowDataPacket[]>('SELECT request_id FROM ai_usage WHERE account_id=? AND request_id=?',[account,id]);if(existing[0])return;
-   const [current]=await c.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);if(!current[0]?.enabled)return;
+   const [current]=await c.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,fallback_number,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);if(!current[0]?.enabled)return;
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
    await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,message.from]);
    const [conversations]=await c.execute<RowDataPacket[]>('SELECT paused,messages,revision,router_context FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);if(conversations[0].paused)return;
    if(message.text.length>4000)return;
    const memory=[...parseMemory(conversations[0].messages),{role:'user' as const,content:message.text}].slice(-(limits[0]?.memory_limit??config.memory_limit));
    await c.execute('INSERT IGNORE INTO ai_wallets VALUES (?,0)',[account]);const [wallet]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);
-   const system:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika tidak tahu, arahkan pelanggan ke admin. Balas maksimal 300 kata.'},...([current[0].behavior] as string[]).filter(Boolean).map(content=>({role:'system' as const,content}))];
+   const [pending]=await c.execute<RowDataPacket[]>('SELECT id,question FROM ai_fallbacks WHERE account_id=? AND session_id=? AND customer=? AND status=\'waiting\' ORDER BY created_at DESC LIMIT 5',[account,session,message.from]);
+   const fallbackNumber=String(current[0].fallback_number??'');
+   const system:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika informasi belum tersedia, minta klarifikasi atau gunakan fallback tim bila tersedia. Balas maksimal 300 kata.'},...(pending.map(row=>({role:'system' as const,content:'Konfirmasi tim masih menunggu untuk '+row.id+': '+row.question+'. Jangan membuat tiket duplikat untuk topik yang sama.'}))),...([current[0].behavior] as string[]).filter(Boolean).map(content=>({role:'system' as const,content}))];
    const messages=[...system,...memory],inputWords=messages.reduce((sum,m)=>sum+countWords(m.content),0);
    // The system instruction is counted too; replacing its numeric limit does not change its word count.
    const maxWords=Math.min(300,Math.floor((wallet[0].balance-inputWords*config.input_rate)/config.output_rate));
@@ -153,7 +180,7 @@ export class AIService {
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
    await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,?,'generating',?,?,?,?,?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string};
+   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string,fallbackNumber};
   });if(!prepared)return;
   const jid=message.from+'@s.whatsapp.net';
   // Read/presence are best effort and never add a message or a credit charge.
@@ -172,28 +199,31 @@ export class AIService {
    }
    throw Error('ai_retry_limit');
   };
-  let answer:string,agent:string|null=null,generationFailed=false;
-  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior},{execute:async(name,query,context)=>{
+  let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
+  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:Boolean(prepared.fallbackNumber)},{execute:async(name,query,context)=>{
    await guard();
    try{return await this.tools.execute(name,query,context);}catch(error){
     if(name==='create_order'||!transientAIError(error)||Date.now()>=deadline)throw error;
     await retryPause(0);return this.tools.execute(name,query,context);
    }
-  }},prepared.routerContext);answer=result.answer;agent=result.agent;}
+  }},prepared.routerContext);fallback=result.fallback;answer=fallback?'Baik, saya konfirmasi dulu ke tim terkait dan akan melanjutkan jawaban segera.':result.answer;agent=result.agent;}
   catch{generationFailed=true;answer=aiFallback;}
   // Context is internal and never billed. A failed summary clears stale context on a successful send.
   let routerContext:string|null=null;
   if(!generationFailed)try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer);}catch{console.error('Pembaruan konteks router AI gagal.');}
   const outputWords=generationFailed?0:countWords(answer),charged=generationFailed?0:creditCost(prepared.inputWords,outputWords,config.input_rate,config.output_rate);
-  await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status=?,output_words=?,charged=?,agent=?,model_calls=?,model=?,reserved=0 WHERE account_id=? AND request_id=?",[generationFailed?'fallback_generated':'generated',outputWords,charged,agent,JSON.stringify(modelCalls),modelCalls.find(call=>call.role===agent)?.model??config.model,account,id]);});
+  const fallbackId=fallback&&prepared.fallbackNumber?'FB-'+randomUUID().replaceAll('-','').slice(0,20).toUpperCase():undefined;
+  await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status=?,output_words=?,charged=?,agent=?,model_calls=?,model=?,reserved=0 WHERE account_id=? AND request_id=?",[generationFailed?'fallback_generated':'generated',outputWords,charged,agent,JSON.stringify(modelCalls),modelCalls.find(call=>call.role===agent)?.model??config.model,account,id]);
+   if(fallbackId&&fallback)await c.execute('INSERT IGNORE INTO ai_fallbacks(id,account_id,session_id,customer,fallback_number,agent,reason,question,router_context,messages,source_message_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[fallbackId,account,session,message.from,prepared.fallbackNumber,agent??'lainnya',fallback.reason,fallback.question,prepared.routerContext,JSON.stringify(prepared.messages),message.messageId]);});
   let status='sent',typingStarted=false;
   try{
    await guard();typingStarted=true;
    await manager.typing(session,jid,'composing').catch(()=>{});
    await this.wait(randomInt(1000,3001));
-   await guard();await sendBilled(account,manager,session,'text',{to:message.from,text:answer},'ai_'+id,undefined,guard);
+   await guard();const confirmation=await sendBilled(account,manager,session,'text',{to:message.from,text:answer},'ai_'+id,undefined,guard);if(fallbackId)await db.execute('UPDATE ai_fallbacks SET confirmation_message_id=? WHERE id=?',[confirmation.messageId,fallbackId]);
   }catch(error){status=error instanceof ApiError&&error.code==='ai_cancelled'?'cancelled':error instanceof ApiError&&error.code==='send_unknown'?'send_unknown':'send_failed';}
   finally{if(typingStarted)await manager.typing(session,jid,'paused').catch(()=>{});}
+  if(status==='sent'&&fallbackId&&fallback)try{const notification=await sendBilled(account,manager,session,'text',{to:prepared.fallbackNumber,text:'Konfirmasi diperlukan ['+fallbackId+']\\nPelanggan: '+message.from+'\\nPertanyaan: '+fallback.question+'\\nKonteks: '+(prepared.routerContext??'-')+'\\nBalas pesan ini atau awali balasan dengan '+fallbackId+'.'},'fallback_team_'+id);await db.execute('UPDATE ai_fallbacks SET notification_message_id=? WHERE id=?',[notification.messageId,fallbackId]);}catch{await db.execute("UPDATE ai_fallbacks SET status='failed' WHERE id=?",[fallbackId]);}
   await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_usage SET status=? WHERE account_id=? AND request_id=?',[generationFailed&&status!=='cancelled'?'fallback_'+status:status,account,id]);if(status==='sent'){
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');const [rows]=await c.execute<RowDataPacket[]>('SELECT messages,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);
    if(!rows[0]||rows[0].revision!==prepared.revision)return;
