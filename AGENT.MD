@@ -137,3 +137,13 @@ Konfigurasi aktif kini Knowledge, Produk/Layanan, Order/Pesanan, dan Perilaku AI
 `src/ai-data.ts` menyediakan tabel/adapter, validasi, snapshot harga order, idempotensi persisten, token terenkripsi, dan pengamanan endpoint. UI mencakup tambah/edit/nonaktifkan produk, pencatatan order, status/catatan, pemilihan sumber, serta panduan endpoint. Tabel terikat akun/session; pembacaan order oleh agent juga dibatasi pelanggan. Data lokal tetap tersedia ketika endpoint dipilih; tidak ada sinkronisasi otomatis ke remote.
 
 Migrasi lokal, build, 86/86 tes regresi, dan browser desktop/mobile termasuk validasi error formulir lulus. Order merupakan pencatatan permintaan berstatus baru; belum dibayar dan tidak mengurangi stok otomatis. Endpoint client nyata dan HP WhatsApp belum diuji; provider terakhir 401 belum berubah. Dokumen aktif: AI-MULTI-AGENT.md. Tidak ada commit/push/deploy.
+
+## Status Auto Share — 18 September 2026
+
+Auto Share diimplementasikan pada menu pengguna `/dashboard/auto-share`: daftar kontak/kelompok, template teks dengan sesi pengirim, kirim manual/jadwal sekali atau interval, serta riwayat per tujuan. Pintasan kontak AI hanya aktif jika nomor belum terdaftar. Pengiriman berkredit memakai mengetik 1 detik dan jeda acak 1–3 detik; snapshot run persisten, deduplikasi, dan recovery tanpa retry hasil tidak pasti. Migrasi lokal sudah dijalankan. Pengujian memakai runner MySQL sementara `scripts/test-auto-share.ts` agar tidak bersaing dengan dev scheduler. Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.
+
+Bukti akhir Auto Share: 5/5 tes backend dan browser desktop/mobile lulus, check/build/sintaks/diff lulus. Regresi penuh database sementara 118/119 lulus, dengan satu kegagalan batas memori AI di luar Auto Share (lihat DEBUG.MD). Navbar menyesuaikan tinggi aktual agar tambahan menu tidak menutupi judul pada ponsel. Perubahan lokal AI/paginasi yang sudah ada dipertahankan.
+
+### Refaktor Auto Share — 18 September 2026
+
+Template sekarang hanya konten (teks/link atau URL gambar/video/dokumen/audio). Pengiriman/jadwal pada auto_share_jobs menyimpan tujuan, sesi, urutan template, dan posisi rotasi; satu template untuk semua tujuan per jadwal. Manual memilih template tanpa mengubah rotasi. Migrasi mempertahankan data lama dan tidak menghidupkan lagi pengiriman yang dihapus. Media memakai jalur download publik dan billing existing. Tujuh tes backend serta browser desktop/mobile lulus; build TypeScript selesai. Pengiriman WhatsApp nyata belum diuji.

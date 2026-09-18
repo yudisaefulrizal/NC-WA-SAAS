@@ -23,8 +23,8 @@ app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY_HOPS?N
 app.post('/payments/midtrans/notification',rateLimit({windowMs:60000,limit:120}),async(req,res)=>{const result=await payments.notification(req.body);await gateway.refresh();res.json(result);});
 app.get('/public/plans',async(_req,res)=>{const [rows]=await db.query('SELECT id,name,price,credits,session_limit FROM plans WHERE active=TRUE');res.json(rows);});
 const origin=process.env.APP_ORIGIN ?? 'http://127.0.0.1:8067';
-app.use(['/sessions','/stats','/webhooks','/media','/events'],rateLimit({windowMs:60000,limit:120}));
-app.use((req,res,next)=>{if(['/stats','/sessions','/webhooks','/events'].includes(req.path)||['/sessions/','/webhooks/','/media/'].some(prefix=>req.path.startsWith(prefix))){gateway.router(req,res,next);}else next();});
+app.use(['/auto-share','/sessions','/stats','/webhooks','/media','/events'],rateLimit({windowMs:60000,limit:120}));
+app.use((req,res,next)=>{if(['/stats','/sessions','/webhooks','/events'].includes(req.path)||['/auto-share/','/sessions/','/webhooks/','/media/'].some(prefix=>req.path.startsWith(prefix))){gateway.router(req,res,next);}else next();});
 app.use(['/api','/sessions','/stats','/webhooks','/media','/events'],(_req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
 app.use('/api',rateLimit({windowMs:60000,limit:120}));
 app.use('/api', (req,res,next)=> {if(!['GET','HEAD','OPTIONS'].includes(req.method)&&req.get('origin')!==origin){res.status(403).json({error:'invalid_origin'});return;}next();});
@@ -149,7 +149,7 @@ app.put('/api/admin/plans/:id',async(req,res)=>{
  try {await connection.beginTransaction();await connection.execute('INSERT INTO plans VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),price=VALUES(price),credits=VALUES(credits),session_limit=VALUES(session_limit),active=VALUES(active)',[id,input.name,input.price,input.credits,input.session_limit,input.active]);await connection.execute('INSERT INTO audit_events (account_id,action) VALUES (?,?)',[res.locals.account.id,'plan_updated:'+id]);await connection.commit();res.json({ok:true});}catch(e){await connection.rollback();throw e;}finally{connection.release();}
 });
 app.use(express.static('public'));
-app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/health','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
+app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/health','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
 app.use((_req,res)=>res.status(404).json({error:'not_found'}));
 app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{if(res.headersSent){_next(err);return;}if(err instanceof ApiError){res.status(err.status).json({error:err.code,message:err.message});return;}const status=(err as {status?:number}).status;res.status(status===400||status===413?status:500).json({error:status===400||status===413?'invalid_request':'internal_error'});});
 

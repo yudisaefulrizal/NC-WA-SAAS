@@ -1,0 +1,57 @@
+import {db} from './db.js';
+export async function migrateAutoShare(){
+ await db.query(`CREATE TABLE IF NOT EXISTS daftar_kontak (
+ id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, nomor VARCHAR(100) NOT NULL,
+ kelompkontak VARCHAR(100) NOT NULL DEFAULT '', UNIQUE KEY contact_unique(account_id,nomor),
+ INDEX contact_group(account_id,kelompkontak), FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB`);
+ await db.query(`CREATE TABLE IF NOT EXISTS auto_share_templates (
+ id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, name VARCHAR(100) NOT NULL,
+ session_id VARCHAR(64) NOT NULL, message TEXT NOT NULL, contacts JSON NOT NULL, groups_json JSON NOT NULL,
+ enabled BOOLEAN NOT NULL DEFAULT FALSE, next_at DATETIME(3), interval_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+ created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX schedule_due(enabled,next_at),
+ FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB`);
+ await db.query(`CREATE TABLE IF NOT EXISTS auto_share_runs (
+ id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, template_id CHAR(36) NOT NULL,
+ template_name VARCHAR(100) NOT NULL, session_id VARCHAR(64) NOT NULL, message TEXT NOT NULL,
+ source VARCHAR(16) NOT NULL, status VARCHAR(32) NOT NULL DEFAULT 'queued',
+ created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), finished_at DATETIME(3),
+ INDEX run_queue(status,created_at), INDEX run_account(account_id,created_at),
+ FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB`);
+ await db.query("ALTER TABLE auto_share_runs MODIFY status VARCHAR(32) NOT NULL DEFAULT 'queued'");
+ await db.query(`CREATE TABLE IF NOT EXISTS auto_share_deliveries (
+ id CHAR(36) PRIMARY KEY, run_id CHAR(36) NOT NULL, nomor VARCHAR(100) NOT NULL,
+ position INT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'pending', error VARCHAR(500), message_id VARCHAR(255),
+ UNIQUE KEY run_recipient(run_id,nomor), FOREIGN KEY(run_id) REFERENCES auto_share_runs(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB`);
+ async function column(table:string,name:string,definition:string){
+  const [rows]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,name]);
+  if(!rows.length)await db.query(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+ }
+ await column('auto_share_templates','media_type',"VARCHAR(16) NOT NULL DEFAULT 'text'");
+ await column('auto_share_templates','media_url','VARCHAR(4096) NULL');
+ await column('auto_share_templates','filename','VARCHAR(255) NULL');
+ await column('auto_share_templates','content_migrated','BOOLEAN NOT NULL DEFAULT FALSE');
+ await column('auto_share_runs','job_id','CHAR(36) NULL');
+ await column('auto_share_runs','job_name','VARCHAR(100) NULL');
+ await column('auto_share_runs','media_type',"VARCHAR(16) NOT NULL DEFAULT 'text'");
+ await column('auto_share_runs','media_url','VARCHAR(4096) NULL');
+ await column('auto_share_runs','filename','VARCHAR(255) NULL');
+ await db.query(`CREATE TABLE IF NOT EXISTS auto_share_jobs (
+ id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,name VARCHAR(100) NOT NULL,session_id VARCHAR(64) NOT NULL,
+ contacts JSON NOT NULL,groups_json JSON NOT NULL,template_ids JSON NOT NULL,rotation_index INT UNSIGNED NOT NULL DEFAULT 0,
+ enabled BOOLEAN NOT NULL DEFAULT FALSE,next_at DATETIME(3),interval_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+ created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,INDEX job_due(enabled,next_at),
+ FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
+ const c=await db.getConnection();
+ try{await c.beginTransaction();
+  await c.query(`INSERT IGNORE INTO auto_share_jobs(id,account_id,name,session_id,contacts,groups_json,template_ids,enabled,next_at,interval_minutes,created_at)
+   SELECT id,account_id,name,session_id,contacts,groups_json,JSON_ARRAY(id),enabled,next_at,interval_minutes,created_at FROM auto_share_templates WHERE content_migrated=FALSE`);
+  await c.query(`UPDATE auto_share_runs r JOIN auto_share_templates t ON t.id=r.template_id AND t.account_id=r.account_id SET r.job_id=t.id,r.job_name=t.name WHERE t.content_migrated=FALSE AND r.job_id IS NULL`);
+  await c.query('UPDATE auto_share_templates SET content_migrated=TRUE,enabled=FALSE WHERE content_migrated=FALSE');
+  await c.commit();
+ }catch(e){await c.rollback();throw e;}finally{c.release();}
+
+}

@@ -9,7 +9,7 @@ import {acquireEngineLock} from './runtime.js';
 const lock=await acquireEngineLock();
 try {
  await recoverReservations();await ai.recover();
- await gateway.restore();gateway.start();
+ await gateway.restore();await gateway.autoShare.recover();gateway.start();
 }catch{console.error('Pemulihan engine gagal; periksa metadata dan penyimpanan.');await gateway.stop();await lock.release();await db.end();process.exit(1);}
 const stopScheduler=startBasicScheduler();
 let paymentWork:Promise<void>|undefined;

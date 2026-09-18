@@ -83,3 +83,11 @@ Setelah klasifikasi error ditambahkan, smoke test menunjukkan `ai_provider_http_
 ## Tabel produk/order dan endpoint — 17 September 2026
 
 Pemeriksaan tipe awal menemukan `unknown` dari JSON diteruskan ke parameter SQL dalam callback dan spread `RowDataPacket` tidak memberikan bentuk respons assistant yang pasti. Diperbaiki dengan normalisasi boolean/string dan pemetaan field respons eksplisit; check berikutnya lulus. Tidak ada perubahan kredensial provider. Tes terarah 36/36 dan browser desktop/mobile lulus setelah penambahan tabel, endpoint, serta alur order persisten.
+
+## Auto Share — 18 September 2026
+
+Tes awal menemukan `completed_with_errors` lebih panjang daripada kolom status 20 karakter; diperbaiki menjadi 32 karakter dengan migrasi idempoten. Tes pemulihan terarah kemudian lulus. Browser menemukan dialog simpan kontak tidak terlihat dari halaman AI karena berada di dalam section Auto Share yang hidden; dialog dipindahkan ke luar section. Proses dev aktif juga menjalankan scheduler pada database lokal, sehingga verifikasi antrean berikutnya memakai MySQL sementara terisolasi agar tidak bersaing dengan worker aplikasi.
+
+Suite penuh pertama pada database terisolasi: 117/118 lulus; tes memori AI gagal pada batas global yang juga diubah suite AI lain secara paralel. Runner terisolasi diubah menjalankan file tes secara serial (`--test-concurrency=1`), tanpa mengubah implementasi AI atau ekspektasi tes tersebut.
+
+Eksekusi serial tetap menghasilkan kegagalan tes memori AI yang sama (118/119 lulus); dugaan persaingan antarsuite tidak menjelaskan kegagalan. Tes memakai config tiruan `memory_limit=3`, sementara penulisan balasan membaca ai_settings/default database. Tidak mengubah perilaku AI dalam pekerjaan Auto Share. Tes Auto Share 5/5 lulus. Browser kemudian menemukan tab Auto Share tidak membungkus di viewport 390 px; ditambahkan flex-wrap untuk baris tab.

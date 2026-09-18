@@ -1,3 +1,4 @@
+import {migrateAutoShare} from './auto-share-schema.js';
 import {migrateAI} from './ai-schema.js';
 import { db } from './db.js';
 try {
@@ -32,5 +33,6 @@ await db.query(`CREATE TABLE IF NOT EXISTS credit_adjustments (account_id CHAR(3
 await column('payment_orders','expires_at','DATETIME NULL');
 await column('payment_orders','kind',"VARCHAR(16) NOT NULL DEFAULT 'whatsapp'");
 await migrateAI();
+await migrateAutoShare();
 console.log('Migrasi fondasi dan AI selesai.');
 } finally { await db.end(); }

@@ -65,3 +65,25 @@ Verifikasi akhir multi-agent: 76/76 tes regresi, build TypeScript, sintaks JavaS
 - [ ] Verifikasi endpoint client nyata dan HP WhatsApp (pengujian otomatis memakai transport tiruan).
 
 Keputusan ini menggantikan mode demo pada catatan sebelumnya. Kontrak endpoint dan batas pencatatan order dijelaskan di AI-MULTI-AGENT.md.
+
+## Auto Share — 18 September 2026
+
+- [x] Menu Auto Share: kontak/kelompok, template pesan teks, dan riwayat 100 pengiriman terakhir.
+- [x] Tabel `daftar_kontak` dan tabel template/run/tujuan, isolasi tenant dan deduplikasi nomor/ID grup.
+- [x] Simpan kontak yang belum terdaftar dari Ambil alih percakapan AI.
+- [x] Kirim manual dan jadwal sekali/berulang; sesi pengirim dipilih pada template.
+- [x] Antrean persisten, snapshot tujuan/pesan, pengiriman berkredit berurutan, mengetik 1 detik dan jeda acak 1–3 detik.
+- [x] Pemulihan restart tanpa retry hasil tidak pasti; status per tujuan dan kegagalan tidak menghentikan tujuan berikutnya.
+- [ ] Uji pengiriman dan tampilan mengetik pada HP WhatsApp/grup nyata (otomatis menggunakan transport tiruan).
+
+Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser desktop/mobile lulus untuk pintasan AI, template, jadwal aktif/nonaktif, kirim manual, detail riwayat, dan pencegahan origin tidak valid. TypeScript check/build, sintaks JavaScript, dan diff whitespace lulus. Regresi penuh pada database baru: 118/119 lulus; satu kegagalan tes batas memori AI dicatat di DEBUG.MD dan tidak diubah dalam fitur ini.
+
+## Pemisahan konten dan jadwal Auto Share — 18 September 2026
+
+- [x] Template konten independen dari sesi, tujuan, dan jadwal; tab Pengiriman/Jadwal terpisah.
+- [x] Rotasi template persisten per jadwal, urutan dapat diubah, satu template per eksekusi untuk semua tujuan.
+- [x] Kirim manual memilih template tanpa menggeser rotasi; template yang dipakai pengiriman dilindungi dari penghapusan.
+- [x] Teks/link serta gambar/video/dokumen/audio melalui URL media publik; snapshot jenis/URL/caption pada riwayat.
+- [x] Migrasi lama ke tabel auto_share_jobs, mempertahankan jadwal dan konten serta idempoten setelah pengiriman dihapus.
+- [x] Tujuh tes backend terisolasi, alur browser desktop/mobile, TypeScript dan build lulus.
+- [ ] Verifikasi media dan rotasi pada perangkat WhatsApp nyata (pengujian menggunakan transport/unduhan tiruan).
