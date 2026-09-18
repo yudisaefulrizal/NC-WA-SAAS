@@ -22,6 +22,16 @@ async function fixture(call:AITransport=async()=> 'Jawaban bisnis',sendFail=fals
  return {id,service,manager,message,sent:()=>sent};
 }
 async function rows(id:string){return await db.execute<any[]>('SELECT * FROM ai_usage WHERE account_id=? ORDER BY created_at,request_id',[id]).then(r=>r[0]);}
+test('AI history pagination separates accounts and provides stable pages and bounds',async()=>{
+ const f=await fixture(),other=await fixture();
+ for(let i=0;i<21;i++)await db.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_rate,output_rate,model,created_at) VALUES (?,?,'shop','628123456789','sent',1,2,'fixture','2026-01-01 00:00:00')",[f.id,String(i).padStart(64,'0')]);
+ const first=await f.service.usagePage(f.id,'1'),last=await f.service.usagePage(f.id,'2');
+ assert.equal(first.total,21);assert.equal(first.pages,2);assert.equal((first.items as any[]).length,20);assert.equal((last.items as any[]).length,1);
+ assert.equal(new Set([...(first.items as any[]),...(last.items as any[])].map(r=>r.request_id)).size,21);
+ assert.equal((await f.service.usagePage(f.id,'999')).page,2);
+ assert.equal((await other.service.usagePage(other.id,'1')).total,0);
+ for(const page of ['0','-1','1.5','x',['1']])await assert.rejects(f.service.usagePage(f.id,page));
+});
 after(async()=>{for(const m of managers)await m.stop();for(const id of ids){await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);await db.execute('DELETE FROM accounts WHERE id=?',[id]);}await db.end();});
 test('Word billing is deterministic for whitespace, punctuation, URLs, emoji and unspaced language',()=>{
  assert.equal(countWords(' \n\t '),0);assert.equal(countWords('Halo,  dunia!\nhttps://example.com 🙂 中文'),5);

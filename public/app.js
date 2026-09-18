@@ -116,15 +116,26 @@ document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 const aiUnits=document.createElement('input');aiUnits.id='ai-units';aiUnits.type='number';aiUnits.min='1';aiUnits.max='100';aiUnits.step='1';aiUnits.value='1';aiUnits.inputMode='numeric';const aiUnitsLabel=document.createElement('label');aiUnitsLabel.textContent='Jumlah unit kredit AI (1 unit = 10.000 kredit)';aiUnitsLabel.append(' ',aiUnits);$('ai-credit-actions').prepend(aiUnitsLabel);
 
+let aiUsagePage=1,aiUsageLoading=false;
 async function loadAI(){
- const [w,rows,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/api/ai/usage'),api('/sessions')]);
+ const [w,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/sessions'),loadAIUsage()]);
  $('ai-balance').textContent=`${w.balance} kredit AI · Input ${w.input_rate} kredit/kata · Output ${w.output_rate} kredit/kata · Tidak kedaluwarsa`;
  const units=Number($('ai-units').value),validUnits=Number.isSafeInteger(units)&&units>=1&&units<=100;
  $('ai-buy').disabled=!w.credit_price||!validUnits;$('ai-buy').textContent=w.credit_price&&validUnits?`Beli ${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(w.credit_price*units)}`:'Pembelian AI belum tersedia';
  const selected=$('ai-session').value;$('ai-session').replaceChildren(new Option('Pilih sesi',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-session').value=selected;
- table('ai-usage',['Waktu','Sesi','Pelanggan','Agent','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,r.agent||'—',({fallback_sent:'Pesan bantuan terkirim',fallback_generated:'Menyiapkan pesan bantuan',fallback_send_failed:'Pesan bantuan gagal terkirim',fallback_send_unknown:'Pengiriman bantuan belum pasti',sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
+
  if(selected)await loadAssistant();
 }
+async function loadAIUsage(page=aiUsagePage){
+ if(aiUsageLoading)return;aiUsageLoading=true;$('ai-usage-prev').disabled=$('ai-usage-next').disabled=true;
+ try{const result=await api('/api/ai/usage?page='+page);aiUsagePage=result.page;const rows=result.items;
+ table('ai-usage',['Waktu','Sesi','Pelanggan','Agent','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,r.agent||'—',({fallback_sent:'Pesan bantuan terkirim',fallback_generated:'Menyiapkan pesan bantuan',fallback_send_failed:'Pesan bantuan gagal terkirim',fallback_send_unknown:'Pengiriman bantuan belum pasti',sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
+ $('ai-usage-page').textContent='Halaman '+result.page+' dari '+result.pages+' · '+result.total+' riwayat';
+ $('ai-usage-prev').disabled=result.page<=1;$('ai-usage-next').disabled=result.page>=result.pages;
+ }catch(error){$('ai-usage-prev').disabled=aiUsagePage<=1;$('ai-usage-next').disabled=false;throw error;}finally{aiUsageLoading=false;}
+}
+$('ai-usage-prev').onclick=()=>run(()=>loadAIUsage(aiUsagePage-1));
+$('ai-usage-next').onclick=()=>run(()=>loadAIUsage(aiUsagePage+1));
 let assistantLoad=0;
 const sourceKinds=['products','orders'];
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;}}

@@ -81,6 +81,14 @@ export class AIService {
 
  async wallet(account:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);const config=await this.config();return {balance:rows[0]?.balance??0,input_rate:config.input_rate,output_rate:config.output_rate,credit_price:config.credit_price,unit:10000};}
  async usage(account:string){const [rows]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC LIMIT 100',[account]);return rows;}
+ async usagePage(account:string,value:unknown){
+  if(typeof value!=='string'||!/^\d{1,9}$/.test(value)||Number(value)<1)throw fail('Halaman tidak valid');
+  const size=20;
+  const [counts]=await db.execute<RowDataPacket[]>('SELECT COUNT(*) AS total FROM ai_usage WHERE account_id=?',[account]);
+  const total=Number(counts[0].total),pages=Math.max(1,Math.ceil(total/size)),page=Math.min(Number(value),pages);
+  const [items]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC,request_id DESC LIMIT '+size+' OFFSET '+((page-1)*size),[account]);
+  return {items,page,pages,total,page_size:size};
+ }
  async assistant(account:string,session:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,fallback_number,fallback_notify,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);return {enabled:Boolean(rows[0]?.enabled),knowledge:String(rows[0]?.knowledge??''),behavior:String(rows[0]?.behavior??''),fallback_number:String(rows[0]?.fallback_number??''),fallback_notify:Boolean(rows[0]?.fallback_notify),revision:Number(rows[0]?.revision??0),...await publicSources(account,session)};}
  async saveAssistant(account:string,session:string,body:unknown){
   const input=object(body);if(typeof input.enabled!=='boolean')throw fail('Status asisten wajib valid');
