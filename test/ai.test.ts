@@ -34,13 +34,20 @@ test('Fallback ticket stays scoped to its session and forwards a team reply to t
   if(c.call_role==='context')return 'pelanggan-menunggu-konfirmasi';
   return JSON.stringify({fallback:'Diskon perlu persetujuan','question':'Apakah diskon khusus dapat diberikan?'});
  },false,async()=>{},[],false,true);
- await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'',behavior:'',fallback_number:'628999999999'});
+ await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'',behavior:'',fallback_number:'628999999999',fallback_notify:true});
  await f.service.incoming(f.id,f.manager,'shop',f.message('fallback-one','Bisa diskon khusus?'));
  const [tickets]=await db.execute<any[]>('SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=?',[f.id,'shop']);
  assert.equal(tickets.length,1);assert.equal(tickets[0].customer,'628123456789');assert.equal(tickets[0].status,'waiting');assert.ok(tickets[0].notification_message_id);assert.equal(f.sent(),2);
  await f.service.incoming(f.id,f.manager,'shop',{...f.message('team-one',tickets[0].id,'628999999999'),quotedMessageId:tickets[0].notification_message_id});
  const [resolved]=await db.execute<any[]>('SELECT status,staff_answer FROM ai_fallbacks WHERE id=?',[tickets[0].id]);
  assert.deepEqual(resolved[0],{status:'resolved',staff_answer:tickets[0].id});assert.equal(f.sent(),3);
+});
+test('Web-only fallback creates a ticket without team notification and can resolve it',async()=>{
+ const f=await fixture(async(c)=>c.call_role==='router'?JSON.stringify({s_p_o_konteks:'pelanggan meminta keputusan',sub_agent:'lainnya',isi_pesan:'Butuh persetujuan'}):c.call_role==='context'?'pelanggan-menunggu-konfirmasi':JSON.stringify({fallback:'Butuh keputusan','question':'Setujui permintaan pelanggan?'}),false,async()=>{},[],false,true);
+ await f.service.incoming(f.id,f.manager,'shop',f.message('fallback-web','Butuh persetujuan'));
+ const tickets=await f.service.fallbacks(f.id,'shop') as any[];assert.equal(tickets.length,1);assert.equal(f.sent(),1);
+ assert.deepEqual(await f.service.answerFallback(f.id,f.manager,'shop',tickets[0].id,{answer:'Permintaan disetujui.'}),{ok:true,status:'resolved'});assert.equal(f.sent(),2);
+ const applied=await f.service.applyFallbackKnowledge(f.id,'shop',tickets[0].id,{content:'Persetujuan khusus diproses setelah konfirmasi tim.'});assert.ok(applied.knowledge.includes('Persetujuan khusus'));
 });
 test('Duplicate messages charge and send once; rates are snapshotted and latest input appears once',async()=>{
  let seen:AIMessage[]=[];const f=await fixture(async(_config,messages)=>{seen=messages;f.service.settings.input_rate=19;f.service.settings.output_rate=29;return 'Jawaban bisnis';});
