@@ -1,4 +1,6 @@
 import {ai} from './ai.js';
+import {studio as defaultStudio} from './ai-studio.js';
+import {workflowState,changeWorkflow} from './ai-workflow.js';
 import {createKey} from './keys.js';
 import {payments as defaultPayments} from './payments.js';
 import express from 'express';
@@ -11,13 +13,13 @@ import {credentials,digest,hashPassword,verifyPassword} from './security.js';
 import {basicWallet,ensureBasic,planInput} from './plans.js';
 import {gateway as defaultGateway} from './gateway.js';
 import {ApiError} from './engine/sessions.js';
-export function createApp(gateway=defaultGateway,payments=defaultPayments){
+export function createApp(gateway=defaultGateway,payments=defaultPayments,studio=defaultStudio){
 const app=express();
 const configuredOrigin=new URL(process.env.APP_ORIGIN??'http://127.0.0.1:8067');
 if(configuredOrigin.origin!==(process.env.APP_ORIGIN??'http://127.0.0.1:8067')||!['http:','https:'].includes(configuredOrigin.protocol))throw new Error('APP_ORIGIN harus berupa origin HTTP/HTTPS tanpa path');
 if(process.env.NODE_ENV==='production'&&configuredOrigin.protocol!=='https:')throw new Error('Produksi memerlukan APP_ORIGIN HTTPS');
 if(process.env.TRUST_PROXY_HOPS&&!/^[0-3]$/.test(process.env.TRUST_PROXY_HOPS))throw new Error('TRUST_PROXY_HOPS harus 0–3');
-app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY_HOPS?Number(process.env.TRUST_PROXY_HOPS):false); app.use(helmet());const normalJson=express.json({limit:'16kb'}),assistantJson=express.json({limit:'64kb'});app.use((req,res,next)=>(req.method==='PUT'&&/^\/sessions\/[A-Za-z0-9_-]+\/ai$/.test(req.path)?assistantJson:normalJson)(req,res,next));
+app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY_HOPS?Number(process.env.TRUST_PROXY_HOPS):false); app.use(helmet());const normalJson=express.json({limit:'16kb'}),assistantJson=express.json({limit:'64kb'}),studioJson=express.json({limit:'128kb'});app.use((req,res,next)=>(req.path.startsWith('/api/admin/ai/studio')?studioJson:req.method==='PUT'&&/^\/sessions\/[A-Za-z0-9_-]+\/ai$/.test(req.path)?assistantJson:normalJson)(req,res,next));
 app.post('/payments/midtrans/notification',rateLimit({windowMs:60000,limit:120}),async(req,res)=>{const result=await payments.notification(req.body);await gateway.refresh();res.json(result);});
 app.get('/public/plans',async(_req,res)=>{const [rows]=await db.query('SELECT id,name,price,credits,session_limit FROM plans WHERE active=TRUE');res.json(rows);});
 const origin=process.env.APP_ORIGIN ?? 'http://127.0.0.1:8067';
@@ -105,7 +107,20 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
  await c.commit();res.json({ok:true});}catch(e){await c.rollback();throw e;}finally{c.release();}
 });
 app.get('/api/admin/payments',async(_req,res)=>{const [rows]=await db.query('SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT 100');res.json(rows);});
+app.get('/dashboard/admin/ai-studio',(_req,res)=>res.sendFile('ai-studio.html',{root:'public'}));
 app.get('/api/admin/ai',async(_req,res)=>res.json(await ai.configuration()));
+app.get('/api/admin/ai/studio',async(_req,res)=>res.json({...await workflowState(),models:await ai.configuration()}));
+app.put('/api/admin/ai/studio',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.body)));
+app.post('/api/admin/ai/studio/publish',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.body,true)));
+app.post('/api/admin/ai/studio/run',rateLimit({windowMs:60000,limit:10}),async(req,res)=>{
+ const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
+ await studio.run(res.locals.account.id,req.body,event=>{
+  if(res.destroyed)return;
+  if(!res.headersSent)res.set({'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});
+  res.write(JSON.stringify(event)+'\n');
+ },controller.signal);
+ res.end();
+});
 app.get('/api/admin/ai/usage',async(_req,res)=>res.json(await ai.modelUsage()));
 app.put('/api/admin/ai',async(req,res)=>res.json(await ai.configure(res.locals.account.id,req.body)));
 app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res.json(await ai.test(req.body?.tier)));

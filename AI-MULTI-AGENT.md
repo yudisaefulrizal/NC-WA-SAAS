@@ -39,6 +39,18 @@ Migrasi menambahkan `model_cheap`, `model_medium`, `model_smart` nullable. Nilai
 
 ## Tabel bawaan dan UI
 
+### AI Studio (pemilik)
+
+`/dashboard/admin/ai-studio` menyediakan kanvas node tetap, zoom, inspector, chat uji, dan trace langsung. Menu tersedia pada navigasi pemilik. Router, delapan specialist, dan Context Agent dapat diubah prompt, tingkat model, model khusus opsional, dan subset tools yang diizinkan. Model khusus memakai endpoint/API key global yang sama. Node memory, tools, input, dan output hanya untuk inspeksi; topology dan batas izin tools tetap dikendalikan server.
+
+`ai_workflow` menyimpan draft, konfigurasi aktif, revision draft, dan versi aktivasi. Simpan draft tidak mengubah pelayanan. Aktivasi menyalin draft tersimpan secara atomik; engine mengambil snapshot konfigurasi aktif saat memulai setiap turn. Revision wajib cocok untuk save/publish agar tab atau pemilik lain tidak menimpa perubahan. Aktivitas save/publish masuk audit. Migrasi menambahkan tabel, sementara instalasi tanpa versi aktif tetap menggunakan prompt/pembagian model bawaan.
+
+Playground menjalankan `runAgents`, validasi/repair, dan Context Agent yang sama dengan engine layanan. Trace NDJSON menampilkan input/output model, routing, model terpilih, durasi, retry, tools simulasi, dan konteks sebelum/sesudah. Panggilan provider nyata dapat menimbulkan biaya provider, tetapi tidak memotong kredit client, mengirim WhatsApp, memanggil endpoint bisnis, ataupun menulis produk/order produksi. Data Knowledge, Perilaku AI, dan katalog sandbox diisi terpisah. `create_order` hanya menghasilkan order SIM dalam sesi; `check_order` hanya membaca order SIM sesi itu. Kegagalan uji terlihat di trace, tanpa pesan bantuan WhatsApp.
+
+Sesi sandbox hanya di memori proses: maksimal 5 per pemilik, 100 total, kedaluwarsa setelah 30 menit tidak digunakan, dan maksimal 50 pesanan per sesi. Satu pengujian aktif per pemilik. Restart server mengakhiri sesi uji; pada deployment multi-process diperlukan sticky routing untuk meneruskan sesi. Perubahan revision/data uji/model memerlukan percakapan uji baru. Stop/putus koneksi membatalkan request model aktif dan mencegah tool/panggilan berikutnya. Riwayat trace ditampilkan per pengujian di browser, bukan disimpan sebagai log percakapan client.
+
+API Studio berada di `/api/admin/ai/studio`: GET membaca draft/aktif, PUT menyimpan, POST `/publish` mengaktifkan, dan POST `/run` mengalirkan trace. Semua membutuhkan cookie pemilik; write wajib origin aplikasi. Kredensial provider tidak masuk respons/trace. Payload dibatasi 128 KB dan pengujian dibatasi 10 permintaan/menit. Uji: `test/ai-studio.test.ts` dan `npx tsx --env-file=.env scripts/browser-ai-studio-check.ts` memakai provider tiruan; tangkapan desktop/mobile tersedia di `data/browser-check/studio-*.png`.
+
 Di halaman Asisten AI, client dapat:
 
 - Mengisi Knowledge dan Perilaku AI.
@@ -143,6 +155,10 @@ Seluruh route mendukung autentikasi gateway yang sudah ada, dan memverifikasi ke
 Sumber dalam PUT konfigurasi: `{"mode":"builtin"}` atau `{"mode":"endpoint","endpoint":"https://...","token":"opsional","clear_token":false}`. GET hanya mengembalikan `mode`, `endpoint`, `has_token` untuk masing-masing sumber. Field sumber yang tidak dikirim dipertahankan.
 
 ## Migrasi dan verifikasi
+
+Router memakai JSON Schema tetap dengan enum `pembuka`, `informasi`, `konsultasi`, `transaksi`, `dukungan`, `keluhan`, `penutup`, `lainnya`. Schema selalu disisipkan meskipun prompt router dikustomisasi. Instruksi router tetap mengarahkan konteks S-P-O tiga kata, tetapi validator hanya mensyaratkan ringkasan non-kosong maksimal 200 karakter. Validator tetap memeriksa enum, field wajib tanpa tambahan, dan kesamaan pesan asli; hasil tidak valid mendapat satu percobaan koreksi sebelum gagal.
+
+Di AI Studio, pilih Router untuk melihat schema dan opsi **Gunakan Structured Outputs provider**. Opsi ini default nonaktif, termasuk pada draft lama. Aktifkan hanya setelah memastikan provider/model mendukung `response_format` JSON Schema strict; simpan untuk menguji draft, lalu terbitkan untuk produksi. Hanya panggilan router yang mengirim schema ke provider. Specialist dan Context Agent tetap memakai protokol masing-masing. Format mengikuti [dokumentasi Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs). Dukungan provider nyata perlu diuji menggunakan kredensial yang valid.
 
 `npm run migrate` menambah `ai_data_sources`, `ai_products`, `ai_orders`, serta metadata agent pada usage. Migrasi additive, aman diulang, dan tidak menghapus data lama. Kolom `demo_tools` dari versi prototype, bila sudah ada, tidak lagi dibaca. Jalankan migrasi sebelum runtime baru; `npm run build` menghasilkan `dist`.
 

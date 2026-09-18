@@ -1,0 +1,79 @@
+const $=id=>document.getElementById(id);
+const names={input:'Pesan masuk',router:'Router',pembuka:'Pembuka',informasi:'Informasi',konsultasi:'Konsultasi',transaksi:'Transaksi',dukungan:'Dukungan',keluhan:'Keluhan',penutup:'Penutup',lainnya:'Lainnya',context:'Context Agent',output:'Jawaban',memory:'Shared Memory',router_memory:'Router Context',get_knowledge:'Knowledge',get_products:'Produk',check_order:'Cek pesanan',create_order:'Buat pesanan',models:'Model provider'};
+const specialists=['pembuka','informasi','konsultasi','transaksi','dukungan','keluhan','penutup','lainnya'];
+const positions={input:[35,368],router:[285,368],...Object.fromEntries(specialists.map((id,i)=>[id,[570,70+i*91]])),context:[1060,368],output:[1290,368],memory:[565,870],router_memory:[1040,870],models:[55,870],get_knowledge:[360,1010],get_products:[595,1010],check_order:[830,1010],create_order:[1065,1010]};
+const edges=[['input','router'],...specialists.flatMap(id=>[['router',id],[id,'context']]),['context','output'],...specialists.map(id=>['memory',id]),['router_memory','router'],['context','router_memory'],['models','router'],['models','context'],...specialists.map(id=>['models',id]),['informasi','get_knowledge'],['informasi','get_products'],['konsultasi','get_products'],['konsultasi','get_knowledge'],['transaksi','get_products'],['transaksi','check_order'],['transaksi','create_order'],['dukungan','get_knowledge'],['dukungan','check_order'],['keluhan','get_knowledge'],['keluhan','check_order']];
+let state,selected='router',dirty=false,running=false,session=null,zoom=.7,controller,trace=[],nodeEvents={},selectedAgent=null,models={};
+const path='/api/admin/ai/studio';
+const describe={input:'Pesan pelanggan dari chat uji.',context:'Memperbarui konteks S-P-O setelah specialist menjawab.',router:'Memilih satu specialist dari pesan terbaru dan konteks sebelumnya.',memory:'Riwayat pelanggan dan jawaban digunakan bersama oleh delapan specialist. Dikelola otomatis, mengikuti batas memori global.',router_memory:'Ringkasan S-P-O terakhir. Dibaca router untuk memahami pesan lanjutan.',models:'Nama model mengikuti Pengaturan AI. Setiap agent dapat memilih tingkat atau model khusus.',output:'Jawaban specialist untuk pelanggan. Dalam sandbox, jawaban hanya tampil di chat uji.',get_knowledge:'Membaca Knowledge simulasi di bagian Data bisnis untuk pengujian.',get_products:'Mencari produk dari katalog simulasi.',check_order:'Membaca pesanan SIM yang dibuat dalam percakapan uji ini.',create_order:'Membuat pesanan SIM di memori sesi uji. Tidak membuat pesanan client.'};
+const statusNames={running:'Berjalan',responded:'Respons model',done:'Selesai',routed:'Agent dipilih',retry:'Retry / koreksi',error:'Gagal',invalid:'Output tidak valid'};
+function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);}
+async function api(url,method='GET',body){const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const data=await res.json().catch(()=>({message:'Respons server tidak dapat dibaca.'}));if(!res.ok)throw Error(data.message||data.error||'Permintaan gagal.');return data;}
+function pretty(value){return JSON.stringify(value,null,2);}
+function clearConversation(){session=null;$('chat-log').replaceChildren();$('context-value').textContent='Belum ada konteks';}
+function versions(){if(!state)return;$('version').textContent=`Draft r${state.revision}${dirty?' · belum disimpan':''} / Aktif v${state.active_version}`;$('save').disabled=running||!dirty;$('publish').disabled=running||dirty||state.revision===state.published_revision;$('send').disabled=running||dirty;}
+function markDirty(){dirty=true;clearConversation();versions();notice('Ada perubahan lokal. Simpan draft sebelum menguji.');}
+function nodeButton(id){return document.querySelector(`[data-node="${id}"]`);}
+function draw(){
+ const svg=$('connections');svg.replaceChildren();
+ for(const [from,to] of edges){const [x,y]=positions[from],[tx,ty]=positions[to],p=document.createElementNS('http://www.w3.org/2000/svg','path');const support=['memory','router_memory','models'].includes(from)||['router_memory','get_knowledge','get_products','check_order','create_order'].includes(to);p.setAttribute('d',`M ${x+186} ${y+37} C ${x+230} ${y+37}, ${tx-50} ${ty+37}, ${tx} ${ty+37}`);p.setAttribute('class','edge'+(support?' support':''));p.dataset.from=from;p.dataset.to=to;svg.append(p);}
+ $('nodes').replaceChildren();
+ for(const [id,[x,y]] of Object.entries(positions)){
+  const b=document.createElement('button');b.type='button';b.className='flow-node'+(['memory','router_memory','models'].includes(id)?' support-node':id.startsWith('get_')||['check_order','create_order'].includes(id)?' tool-node':'');b.style.left=x+'px';b.style.top=y+'px';b.dataset.node=id;b.setAttribute('aria-label','Node '+names[id]);
+  const icon=document.createElement('span');icon.className='node-icon';icon.textContent=id==='router'?'⑂':id==='context'?'◈':state.draft.nodes[id]?'✦':id==='input'?'↗':id==='output'?'✓':'◇';
+  const text=document.createElement('span'),title=document.createElement('strong'),subtitle=document.createElement('small');title.textContent=names[id];subtitle.textContent=state.draft.nodes[id]?({cheap:'Model murah',medium:'Model sedang',smart:'Model cerdas'})[state.draft.nodes[id].tier]:['memory','router_memory'].includes(id)?'Memori bersama':id==='models'?'Konfigurasi pemilik':id==='input'||id==='output'?'Percakapan uji':'Tool simulasi';text.append(title,subtitle);b.append(icon,text);b.onclick=()=>selectNode(id);$('nodes').append(b);
+ }
+ for(const [text,x,y] of [['01 / MASUK & ROUTING',35,26],['02 / SATU SPECIALIST',570,26],['03 / KONTEKS & JAWABAN',1060,26],['MODEL & MEMORI',55,825],['TOOLS BISNIS / SIMULASI',360,977]]){const label=document.createElement('span');label.className='canvas-label';label.textContent=text;label.style.left=x+'px';label.style.top=y+'px';$('nodes').append(label);}
+ selectNode(selected);setZoom(zoom);
+}
+function setZoom(value){zoom=Math.max(.25,Math.min(1.25,value));$('canvas').style.transform=`scale(${zoom})`;$('canvas-size').style.width=1500*zoom+'px';$('canvas-size').style.height=1080*zoom+'px';$('zoom-value').textContent=Math.round(zoom*100)+'%';}
+function selectNode(id){selected=id;document.querySelectorAll('[data-node]').forEach(b=>{b.classList.toggle('selected',b.dataset.node===id);b.setAttribute('aria-pressed',String(b.dataset.node===id));});$('node-id').textContent=id.toUpperCase();$('node-title').textContent=names[id];$('node-description').textContent=describe[id]||'Pengaturan instruksi, model, dan tools untuk agent '+names[id]+'.';const node=state.draft.nodes[id];$('node-form').hidden=!node;$('node-readonly').hidden=Boolean(node);$('node-kind').textContent=node?'Agent':'Komponen tetap';
+ $('router-settings').hidden=id!=='router';$('router-schema').textContent=pretty(state.routerSchema);$('node-structured-output').checked=node?.structured_output===true;
+ if(node){$('node-prompt').value=node.prompt;$('node-tier').value=node.tier;$('node-model').value=node.model;$('node-tools').replaceChildren();const allowed=state.allowedTools[id]||[];for(const tool of allowed){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=tool;input.checked=node.tools.includes(tool);input.disabled=running;input.onchange=()=>updateNode();label.append(input,document.createTextNode(tool));$('node-tools').append(label);}if(!allowed.length)$('node-tools').textContent='Node ini tidak menggunakan tools bisnis.';resolvedModel();}
+ else $('node-readonly').textContent=id==='models'?`Murah: ${models.model_cheap} · Sedang: ${models.model_medium} · Cerdas: ${models.model_smart}`:'Komponen dikelola otomatis oleh NC-WA.';
+ $('node-output').textContent=nodeEvents[id]?pretty(nodeEvents[id]):'Belum dijalankan.';
+}
+function resolvedModel(){const node=state.draft.nodes[selected];if(node)$('resolved-model').textContent='Model yang digunakan: '+(node.model||models['model_'+node.tier]||models.model||'Belum dikonfigurasi');}
+function updateNode(){if(running)return;const node=state.draft.nodes[selected];if(!node)return;if(selected==='router')node.structured_output=$('node-structured-output').checked;node.prompt=$('node-prompt').value;node.tier=$('node-tier').value;node.model=$('node-model').value;node.tools=[...$('node-tools').querySelectorAll('input:checked')].map(i=>i.value);nodeButton(selected).querySelector('small').textContent=({cheap:'Model murah',medium:'Model sedang',smart:'Model cerdas'})[node.tier];resolvedModel();markDirty();}
+function bubble(content,kind){const p=document.createElement('p');p.className='bubble '+kind;p.textContent=content;$('chat-log').append(p);$('chat-log').scrollTop=$('chat-log').scrollHeight;}
+function onEvent(event){trace.push(event);nodeEvents[event.node]=event;if(event.session)session=event.session;const b=nodeButton(event.node);if(b)b.dataset.state=event.state;
+ if(event.node==='input')$('context-value').textContent=event.context||'Belum ada konteks';
+ if(event.node==='router'&&event.state==='routed'){selectedAgent=event.output.sub_agent;document.querySelectorAll('.edge').forEach(p=>{if(p.dataset.from==='router')p.classList.toggle('active',p.dataset.to===selectedAgent);});}
+ if(event.state==='running'||event.state==='done')document.querySelectorAll('.edge').forEach(p=>{if(p.dataset.to===event.node&&(!specialists.includes(p.dataset.from)||p.dataset.from===selectedAgent))p.classList.add('active');});
+ if(event.node===selected)$('node-output').textContent=pretty(event);
+ const row=document.createElement('button');row.type='button';const left=document.createElement('span'),right=document.createElement('span');left.textContent=`${String(trace.length).padStart(2,'0')} · ${names[event.node]||event.node} · ${statusNames[event.state]||event.state}`;right.textContent=event.duration_ms===undefined?'':event.duration_ms+' ms';row.append(left,right);row.onclick=()=>{$('trace-detail').textContent=pretty(event);if(positions[event.node])selectNode(event.node);};$('trace-list').append(row);$('trace-list').scrollTop=$('trace-list').scrollHeight;$('trace-detail').textContent=pretty(event);
+ if(event.node==='output'){
+  $('run-status').textContent=event.state==='done'?'Selesai · '+event.duration_ms+' ms':'Pengujian gagal';
+  if(event.state==='done'){bubble(event.output.answer,'assistant');$('context-value').textContent=event.output.context||'Konteks belum berhasil diperbarui';}
+  else bubble('Pengujian gagal: '+event.error+'. Periksa jejak eksekusi.','error');
+ }
+}
+function busy(value){running=value;$('stop').hidden=!value;$('reload').disabled=value;$('reset').disabled=value;for(const id of ['node-prompt','node-tier','node-model','node-structured-output','test-knowledge','test-behavior','test-products','chat-input'])$(id).disabled=value;$('node-tools').querySelectorAll('input').forEach(i=>i.disabled=value);versions();}
+async function load(){const result=await api(path);state=result;models=result.models;dirty=false;clearConversation();trace=[];nodeEvents={};$('trace-list').replaceChildren();$('trace-detail').textContent='Belum ada proses.';draw();versions();notice('Draft siap. Konfigurasi aktif tetap dipakai layanan sampai Anda mengaktifkan draft.');}
+$('node-form').onsubmit=e=>e.preventDefault();for(const id of ['node-prompt','node-tier','node-model','node-structured-output'])$(id).addEventListener('input',updateNode);
+$('zoom-in').onclick=()=>setZoom(zoom+.1);$('zoom-out').onclick=()=>setZoom(zoom-.1);$('fit').onclick=()=>setZoom(($('canvas-viewport').clientWidth-20)/1500);
+$('reload').onclick=async()=>{if(dirty&&!confirm('Buang perubahan lokal dan muat draft tersimpan?'))return;try{await load();}catch(e){notice(e.message,true);}};
+$('save').onclick=async()=>{busy(true);try{state=await api(path,'PUT',{revision:state.revision,draft:state.draft});dirty=false;clearConversation();notice('Draft tersimpan. Jalankan pengujian sebelum mengaktifkan.');}catch(e){notice(e.message,true);}finally{busy(false);}};
+$('publish').onclick=()=>{$('publish-summary').textContent=`Draft r${state.revision} akan menjadi versi aktif v${state.active_version+1} untuk seluruh layanan.`;$('publish-dialog').showModal();};
+$('cancel-publish').onclick=()=>$('publish-dialog').close();
+$('confirm-publish').onclick=async()=>{const button=$('confirm-publish');button.disabled=true;try{state=await api(path+'/publish','POST',{revision:state.revision});$('publish-dialog').close();versions();notice('Versi aktif diperbarui. Pesan baru menggunakan konfigurasi ini.');}catch(e){notice(e.message,true);$('publish-dialog').close();}finally{button.disabled=false;}};
+$('reset').onclick=()=>{clearConversation();notice('Percakapan uji baru. Riwayat dan pesanan simulasi dimulai ulang.');};
+for(const id of ['test-knowledge','test-behavior','test-products'])$(id).addEventListener('input',()=>{clearConversation();notice('Data uji berubah. Pengujian berikutnya memakai percakapan baru.');});
+$('stop').onclick=()=>controller?.abort();
+$('chat-form').onsubmit=async e=>{
+ e.preventDefault();if(running||dirty)return;const message=$('chat-input').value.trim();if(!message)return;
+ let products;try{products=JSON.parse($('test-products').value);}catch{notice('JSON produk simulasi tidak valid.',true);return;}
+ controller=new AbortController();busy(true);notice('Pengujian berjalan…');$('run-status').textContent='Sedang berjalan';trace=[];nodeEvents={};selectedAgent=null;$('trace-list').replaceChildren();document.querySelectorAll('[data-node]').forEach(b=>delete b.dataset.state);document.querySelectorAll('.edge').forEach(p=>p.classList.remove('active'));document.querySelector('.empty-chat')?.remove();bubble(message,'user');$('chat-input').value='';
+ try{
+  const res=await fetch(path+'/run',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message,session,revision:state.revision,knowledge:$('test-knowledge').value,behavior:$('test-behavior').value,products})});
+  if(!res.ok){const error=await res.json();throw Error(error.message||error.error);}
+  const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';
+  while(true){const {done,value}=await reader.read();if(done){buffer+=decoder.decode();break;}buffer+=decoder.decode(value,{stream:true});let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(line.trim())onEvent(JSON.parse(line));}}
+  if(buffer.trim())onEvent(JSON.parse(buffer));
+  if(!trace.some(t=>t.node==='output'))throw Error('Koneksi pengujian terputus sebelum selesai.');notice('Pengujian selesai. Pilih langkah pada jejak eksekusi untuk memeriksa hasil.');
+ }catch(error){notice(error.name==='AbortError'?'Pengujian dihentikan.':error.message,true);$('run-status').textContent='Terhenti';session=null;document.querySelectorAll('[data-state="running"]').forEach(b=>b.dataset.state='error');}
+ finally{busy(false);}
+};
+window.addEventListener('beforeunload',e=>{if(dirty||running){e.preventDefault();e.returnValue='';}});
+$('test-products').value=pretty([{id:'P-001',name:'Produk Basic',type:'product',description:'Produk harian',price:150000,stock:10,active:true},{id:'P-002',name:'Produk Premium',type:'product',description:'Pilihan premium',price:350000,stock:5,active:true}]);
+(async()=>{try{const me=await api('/api/me');if(me.role!=='owner')throw Error('Halaman ini hanya tersedia untuk pemilik layanan.');await load();$('access').hidden=true;$('studio').hidden=false;setZoom(($('canvas-viewport').clientWidth-20)/1500);}catch(error){$('access').textContent=error.message+' Buka dashboard untuk masuk.';const a=document.createElement('a');a.href='/dashboard';a.textContent=' Kembali ke dashboard';$('access').append(a);}})();

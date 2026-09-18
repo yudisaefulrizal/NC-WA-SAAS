@@ -1,4 +1,6 @@
-import {modelTiers,tierConfig,type ModelRole} from './ai-models.js';
+import {routerResponseFormat} from './ai-router-schema.js';
+import {modelTiers,tierConfig,type ModelRole,type AgentWorkflow,type AITraceEvent} from './ai-models.js';
+import {activeWorkflow} from './ai-workflow.js';
 import {transientAIError} from './ai-retry.js';
 import {publicSources,sourceInput,saveSource} from './ai-data.js';
 import {runAgents,updateRouterContext,defaultTools,type AITools} from './ai-agents.js';
@@ -16,7 +18,7 @@ import type {IncomingMessage} from './engine/incoming.js';
 import {basicWallet} from './plans.js';
 import {sendBilled} from './outbound.js';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
-export interface AIConfig {model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
+export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
 export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 export const aiFallback='Maaf, saya sedang mengalami kendala memproses pesan Anda. Silakan hubungi admin untuk bantuan. Jika sedang memesan, mohon periksa status pesanan terlebih dahulu sebelum mengulang pemesanan.';
@@ -27,11 +29,14 @@ function text(value:unknown,max:number,name:string){if(typeof value!=='string'||
 export function chatEndpoint(value:string){let url:URL;try{url=new URL(value);}catch{throw fail('Endpoint tidak valid');}if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw fail('Endpoint wajib HTTPS tanpa kredensial, query, atau fragmen');url.pathname=url.pathname.replace(/\/$/,'');if(url.pathname===''||url.pathname==='/')url.pathname='/v1/chat/completions';else if(url.pathname==='/v1')url.pathname+='/chat/completions';else if(!url.pathname.endsWith('/chat/completions'))throw fail('Gunakan endpoint Chat Completions');return url.href;}
 export type AITransport=(config:AIConfig,messages:AIMessage[],maxWords:number)=>Promise<string>;
 // Validate and pin DNS. Never follow redirects carrying the provider credential.
+export function aiRequestPayload(config:AIConfig,messages:AIMessage[]){
+ return {model:config.model,messages:[...messages],stream:false,max_tokens:2048,...(config.call_role==='router'&&config.workflow?.nodes.router.structured_output===true?{response_format:routerResponseFormat()}:{})};
+}
 export const callAI:AITransport=async(config,messages,maxWords)=>{
  const {url,addresses}=await validatePublicUrl(config.endpoint);
- const payload=JSON.stringify({model:config.model,messages:[...messages],stream:false,max_tokens:2048});
+ const payload=JSON.stringify(aiRequestPayload(config,messages));
  return new Promise<string>((resolve,reject)=>{
-  const req=request(url,{method:'POST',agent:false,signal:AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+decrypt(config.secret),'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload)},lookup:(_hostname,options,callback)=>{if(options.all)callback(null,addresses);else callback(null,addresses[0].address,addresses[0].family);}},res=>{
+  const req=request(url,{method:'POST',agent:false,signal:config.signal?AbortSignal.any([config.signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000),headers:{Authorization:'Bearer '+decrypt(config.secret),'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload)},lookup:(_hostname,options,callback)=>{if(options.all)callback(null,addresses);else callback(null,addresses[0].address,addresses[0].family);}},res=>{
    const chunks:Buffer[]=[];let size=0;
    res.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>262144){res.destroy(new Error('ai_response_limit'));return;}chunks.push(chunk);});
    res.on('error',error=>reject(new Error(error.message==='ai_response_limit'?'ai_response_limit':'ai_provider_failed')));
@@ -52,8 +57,8 @@ export class AIService {
  private queues=new Map<string,Promise<void>>();
  private queued=0;
  constructor(private transport:AITransport=callAI,private wait:(milliseconds:number)=>Promise<void>=async milliseconds=>{await delay(milliseconds);},private tools:AITools=defaultTools){}
- async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0]}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;return config;}
- async configuration(){const {secret,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
+ async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0]}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;config.workflow=await activeWorkflow();return config;}
+ async configuration(){const {secret,workflow,onTrace,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
  async configure(actor:string,body:unknown){const input=object(body),previous=await this.config();
   const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model_medium??input.model,100,'Model sedang'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
   for(const tier of modelTiers){const key=('model_'+tier) as 'model_cheap'|'model_medium'|'model_smart';config[key]=text(input[key]??(tier==='medium'?config.model:previous[key])??config.model,100,'Model '+tier);if(!config[key])throw fail('Model '+tier+' wajib diisi');}

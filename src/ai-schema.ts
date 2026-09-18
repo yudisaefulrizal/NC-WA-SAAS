@@ -1,6 +1,7 @@
 import {db} from './db.js';
 export async function migrateAI(){
  const tables=[
+ `CREATE TABLE IF NOT EXISTS ai_workflow (id INT PRIMARY KEY,draft JSON NOT NULL,active JSON NULL,revision INT UNSIGNED NOT NULL DEFAULT 0,active_version INT UNSIGNED NOT NULL DEFAULT 0,published_revision INT UNSIGNED NOT NULL DEFAULT 0,tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0) ENGINE=InnoDB`,
  `CREATE TABLE IF NOT EXISTS ai_message_origins (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,message_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,origin ENUM('system','manual') NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,session_id,message_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
  `CREATE TABLE IF NOT EXISTS ai_settings (id INT PRIMARY KEY, endpoint VARCHAR(512) NOT NULL, model VARCHAR(100) NOT NULL, secret TEXT NOT NULL, input_rate INT UNSIGNED NOT NULL DEFAULT 1, output_rate INT UNSIGNED NOT NULL DEFAULT 2, memory_limit INT UNSIGNED NOT NULL DEFAULT 60, credit_price INT UNSIGNED NOT NULL DEFAULT 0) ENGINE=InnoDB`,
  `CREATE TABLE IF NOT EXISTS ai_assistants (account_id CHAR(36) NOT NULL, session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL, enabled BOOLEAN NOT NULL DEFAULT FALSE, knowledge TEXT NOT NULL, behavior TEXT NOT NULL, revision INT UNSIGNED NOT NULL DEFAULT 0, PRIMARY KEY(account_id,session_id), FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
@@ -24,7 +25,10 @@ export async function migrateAI(){
  if(!usageColumns.length)await db.query('ALTER TABLE ai_usage ADD COLUMN agent VARCHAR(20) NULL');
  for(const [table,column,definition] of [['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE']]){
   const [columns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,column]);
-  if(!columns.length)await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+ if(!columns.length)await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
  }
+ const [workflowColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','tool_defaults_version']);
+ if(!workflowColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0');
+ await db.query("UPDATE ai_workflow SET draft=IF(JSON_LENGTH(JSON_EXTRACT(draft,'$.nodes.lainnya.tools'))=0,JSON_SET(draft,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),draft),active=IF(active IS NULL,NULL,IF(JSON_LENGTH(JSON_EXTRACT(active,'$.nodes.lainnya.tools'))=0,JSON_SET(active,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),active)),tool_defaults_version=1 WHERE tool_defaults_version<1");
 
 }

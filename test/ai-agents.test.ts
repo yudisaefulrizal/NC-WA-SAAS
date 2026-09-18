@@ -27,7 +27,7 @@ test('Tool loop passes trusted scope, shares results, and deduplicates identical
  assert.equal(executions,1);assert.equal(result.agent,'transaksi');
 });
 test('Invalid routes cannot dispatch agents or tools',async()=>{
- for(const raw of ['not JSON',route('informasi','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'too short',isi_pesan:messages.at(-1)!.content})]){
+ for(const raw of ['not JSON',route('informasi','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'   ',isi_pesan:messages.at(-1)!.content})]){
   let calls=0;await assert.rejects(runAgents(async()=>{calls++;return raw;},defaults,messages,300,context));assert.equal(calls,2);
  }
 });
@@ -49,6 +49,17 @@ test('Tool errors, oversized results and endless loops fail with bounded executi
 test('Knowledge comes directly from the client',async()=>{
  assert.deepEqual(await defaultTools.execute('get_knowledge','',context),{knowledge:context.knowledge});
  assert.deepEqual(await defaultTools.execute('get_knowledge','',{...context,account:'tenant-b',knowledge:'Bisnis B'}),{knowledge:'Bisnis B'});
+});
+
+test('Agent Lainnya can read knowledge, products, and order status without creating orders',async()=>{
+ assert.deepEqual(permissions.lainnya,['get_knowledge','get_products','check_order']);
+ let calls=0;const tools:string[]=[];
+ const result=await runAgents(async(c)=>{
+  if(c.call_role==='router')return route('lainnya');
+  if(calls++===0)return JSON.stringify({tool:'get_products',query:'produk termurah'});
+  return JSON.stringify({answer:'Produk yang tersedia sudah saya tampilkan.'});
+ },defaults,messages,300,context,{async execute(name){tools.push(name);return [];}});
+ assert.equal(result.agent,'lainnya');assert.deepEqual(tools,['get_products']);
 });
 
 test('A specialist can correct invalid order input without repeating a successful mutation',async()=>{
