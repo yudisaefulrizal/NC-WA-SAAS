@@ -16,7 +16,7 @@ const assistant=new AIService();
 const product:Product={id:'P-1',name:'Produk A',type:'product',description:'Produk ringan',price:125000,stock:10,active:true};
 const input={items:[{product_id:'P-1',quantity:2}],notes:'Tolong siapkan'};
 async function fixture():Promise<ToolContext>{const account=randomUUID();accounts.push(account);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);return {account,session:'shop',customer:'628123456789',requestId:'request-1',knowledge:'Knowledge '+account,behavior:'Ramah'};}
-async function configure(scope:ToolContext,products:unknown,orders:unknown){return assistant.saveAssistant(scope.account,scope.session,{enabled:true,knowledge:scope.knowledge,behavior:scope.behavior,products_source:products,orders_source:orders});}
+async function configure(scope:ToolContext,products:unknown,orders:unknown){return assistant.saveAssistant(scope.account,scope.session,{enabled:true,profile:{lainnya:scope.knowledge},behavior:scope.behavior,products_source:products,orders_source:orders});}
 after(async()=>{for(const id of accounts){await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);await db.execute('DELETE FROM accounts WHERE id=?',[id]);}await db.end();});
 
 test('Built-in product and order tables isolate tenant, session and customer; preserve price snapshots and status',async()=>{

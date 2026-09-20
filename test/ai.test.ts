@@ -16,7 +16,7 @@ async function fixture(call:AITransport=async()=> 'Jawaban bisnis',sendFail=fals
   if(m[0]?.content.startsWith('Anda adalah ROUTER'))return JSON.stringify({s_p_o_konteks:'Pelanggan meminta bantuan',sub_agent:'informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
   if(m[0]?.content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-informasi';
   return JSON.stringify({answer:await call(c,m,max)});
- },wait,tools);await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});await service.saveAssistant(id,'shop',{enabled:true,knowledge:'Produk tersedia',behavior:'Gunakan bahasa Indonesia'});
+ },wait,tools);await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});await service.saveAssistant(id,'shop',{enabled:true,profile:{lainnya:'Produk tersedia'},behavior:'Gunakan bahasa Indonesia'});
  let sent=0;const manager=new SessionManager(async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){},async exists(){return !sendFail;},async read(jid,messageId){events.push('read:'+jid+':'+messageId);if(presenceFail)throw Error('read unavailable');},async typing(_jid,state){events.push(state);if(presenceFail)throw Error('presence unavailable');},async send(){events.push('send');sent++;return 'reply-'+sent;}};});managers.push(manager);await manager.create('shop');
  const message=(messageId:string,text='Halo pelanggan',from='628123456789')=>({messageId,text,from,sender:from,isGroup:false,groupId:null,type:'text' as const,timestamp:1});
  return {id,service,manager,message,sent:()=>sent};
@@ -44,7 +44,7 @@ test('Fallback ticket stays scoped to its session and forwards a team reply to t
   if(c.call_role==='context')return 'pelanggan-menunggu-konfirmasi';
   return JSON.stringify({fallback:'Diskon perlu persetujuan','question':'Apakah diskon khusus dapat diberikan?'});
  },false,async()=>{},[],false,true);
- await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'',behavior:'',fallback_number:'628999999999',fallback_notify:true});
+ await f.service.saveAssistant(f.id,'shop',{enabled:true,profile:{},behavior:'',fallback_number:'628999999999',fallback_notify:true});
  await f.service.incoming(f.id,f.manager,'shop',f.message('fallback-one','Bisa diskon khusus?'));
  const [tickets]=await db.execute<any[]>('SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=?',[f.id,'shop']);
  assert.equal(tickets.length,1);assert.equal(tickets[0].customer,'628123456789');assert.equal(tickets[0].status,'waiting');assert.ok(tickets[0].notification_message_id);assert.equal(f.sent(),2);
@@ -69,7 +69,7 @@ test('Memory holds individual messages within the global limit and is isolated b
  for(let i=0;i<3;i++)await f.service.incoming(f.id,f.manager,'shop',f.message('m'+i,'Pesan '+i));
  assert.deepEqual(calls[2].filter(m=>m.role!=='system').map(m=>m.content),['Pesan 1','Balasan','Pesan 2']);
  await f.service.incoming(f.id,f.manager,'shop',f.message('new','Pelanggan lain','628999999999'));assert.equal(calls[3].filter(m=>m.role!=='system').length,1);
- await f.manager.create('other');await f.service.saveAssistant(f.id,'other',{enabled:true,knowledge:'',behavior:''});await f.service.incoming(f.id,f.manager,'other',f.message('same','Nomor lain'));assert.equal(calls[4].filter(m=>m.role!=='system').length,1);
+ await f.manager.create('other');await f.service.saveAssistant(f.id,'other',{enabled:true,profile:{},behavior:''});await f.service.incoming(f.id,f.manager,'other',f.message('same','Nomor lain'));assert.equal(calls[4].filter(m=>m.role!=='system').length,1);
  const other=await fixture();assert.equal((await other.service.conversations(other.id,'shop')).length,0);assert.equal((await other.service.assistant(other.id,'other')).enabled,false);
  const [memory]=await db.execute<any[]>('SELECT JSON_LENGTH(messages) AS n FROM ai_conversations WHERE account_id=?',[f.id]);assert.ok(memory.every(m=>m.n<=3));
 });
@@ -80,8 +80,8 @@ test('WhatsApp failure still charges AI; provider failure and invalid output rel
 test('Concurrent customers cannot overspend, groups/media and disabled/paused assistants never invoke AI',async()=>{
  let calls=0;const f=await fixture(async()=>{calls++;return 'OK';});await f.service.adjust(f.id,f.id,{amount:-9950,reason:'small budget',requestId:'small'});
  await Promise.all(Array.from({length:5},(_,i)=>f.service.incoming(f.id,f.manager,'shop',f.message('m'+i,'Halo','62812345000'+i))));assert.ok((await f.service.wallet(f.id)).balance>=0);assert.ok(calls<=1);
- await f.service.saveAssistant(f.id,'shop',{enabled:false,knowledge:'',behavior:''});const before=calls;await f.service.incoming(f.id,f.manager,'shop',f.message('off'));await f.service.incoming(f.id,f.manager,'shop',{...f.message('group'),isGroup:true});await f.service.incoming(f.id,f.manager,'shop',{...f.message('image'),type:'image'});assert.equal(calls,before);
- await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'',behavior:''});await f.service.conversation(f.id,'shop','628123456789',{paused:true});await f.service.incoming(f.id,f.manager,'shop',f.message('paused'));assert.equal(calls,before);
+ await f.service.saveAssistant(f.id,'shop',{enabled:false,profile:{},behavior:''});const before=calls;await f.service.incoming(f.id,f.manager,'shop',f.message('off'));await f.service.incoming(f.id,f.manager,'shop',{...f.message('group'),isGroup:true});await f.service.incoming(f.id,f.manager,'shop',{...f.message('image'),type:'image'});assert.equal(calls,before);
+ await f.service.saveAssistant(f.id,'shop',{enabled:true,profile:{},behavior:''});await f.service.conversation(f.id,'shop','628123456789',{paused:true});await f.service.incoming(f.id,f.manager,'shop',f.message('paused'));assert.equal(calls,before);
 });
 test('Changes during generation cancel dispatch and context clear is preserved; generated answer stays billed',async()=>{
  const f=await fixture(async()=>{await f.service.conversation(f.id,'shop','628123456789',{paused:true,clear:true});return 'Jawaban';});await f.service.incoming(f.id,f.manager,'shop',f.message('clear'));assert.equal(f.sent(),0);const usage=await rows(f.id);assert.equal(usage[0].status,'cancelled');assert.ok(usage[0].charged>0);const conversations=await f.service.conversations(f.id,'shop') as any[];assert.equal(conversations[0].message_count,0);
@@ -108,9 +108,9 @@ test('Gateway assistant routes verify session ownership and account isolation',a
  await request(app).post('/sessions').set('Cookie','ncwa_session='+tokens[0]).set('Origin',origin).send({id:'shop'}).expect(200);
  await request(app).get('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[1]).expect(404);
  await request(app).post('/sessions').set('Cookie','ncwa_session='+tokens[1]).set('Origin',origin).send({id:'shop'}).expect(200);
- await request(app).put('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[0]).set('Origin',origin).send({enabled:true,knowledge:'Tenant A only',behavior:'',accountId:g.id}).expect(200);
- const other=await request(app).get('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[1]).expect(200);assert.equal(other.body.knowledge,'Produk tersedia');
- await request(app).put('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[0]).send({enabled:false,knowledge:'',behavior:''}).expect(403);
+ await request(app).put('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[0]).set('Origin',origin).send({enabled:true,profile:{lainnya:'Tenant A only'},behavior:'',accountId:g.id}).expect(200);
+ const other=await request(app).get('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[1]).expect(200);assert.equal(other.body.profile.lainnya,'Produk tersedia');assert.ok(other.body.knowledge.includes('Produk tersedia'));assert.ok(!other.body.knowledge.includes('Tenant A only'));
+ await request(app).put('/sessions/shop/ai').set('Cookie','ncwa_session='+tokens[0]).send({enabled:false,profile:{},behavior:''}).expect(403);
  }finally{await gateway.stop();await rm(root,{recursive:true,force:true});}
 });
 
@@ -149,7 +149,7 @@ test('Manual reply during generation cancels AI dispatch but retains the valid g
 test('Manual media pauses conversation, but groups and disabled assistants are ignored',async()=>{
  const f=await fixture();await f.service.manualOutgoing(f.id,'shop',{...f.message('group'),isGroup:true});assert.equal((await f.service.conversations(f.id,'shop')).length,0);
  await f.service.manualOutgoing(f.id,'shop',{...f.message('image','Foto produk'),type:'image'});assert.equal((await f.service.conversations(f.id,'shop') as any[])[0].paused,1);
- await f.service.saveAssistant(f.id,'shop',{enabled:false,knowledge:'',behavior:''});await f.service.manualOutgoing(f.id,'shop',f.message('disabled','Halo','628999999999'));assert.equal((await f.service.conversations(f.id,'shop')).length,1);
+ await f.service.saveAssistant(f.id,'shop',{enabled:false,profile:{},behavior:''});await f.service.manualOutgoing(f.id,'shop',f.message('disabled','Halo','628999999999'));assert.equal((await f.service.conversations(f.id,'shop')).length,1);
 });
 
 test('Multi-agent WhatsApp flow switches agents, persists shared memory across restart, and isolates identical customer IDs',async()=>{
@@ -171,7 +171,7 @@ test('Multi-agent WhatsApp flow switches agents, persists shared memory across r
  assert.ok(observed[3].history.some(x=>x.content==='Balasan transaksi'));
  assert.deepEqual((await rows(f.id)).map(x=>x.agent).sort(),['dukungan','informasi','konsultasi','transaksi']);
  const g=await fixture(transport,false,async()=>{},[],false,true);
- await g.service.saveAssistant(g.id,'shop',{enabled:true,knowledge:'Tenant B only',behavior:'',products_source:{mode:'endpoint',endpoint:'https://8.8.8.8/products'},orders_source:{mode:'builtin'}});
+ await g.service.saveAssistant(g.id,'shop',{enabled:true,profile:{lainnya:'Tenant B only'},behavior:'',products_source:{mode:'endpoint',endpoint:'https://8.8.8.8/products'},orders_source:{mode:'builtin'}});
  await g.service.incoming(g.id,g.manager,'shop',g.message('switch-0','info tenant B'));
  assert.deepEqual(observed.at(-1)!.history,[{role:'user',content:'info tenant B'}]);
  assert.equal((await f.service.assistant(f.id,'shop')).products_source.mode,'builtin');
@@ -220,7 +220,7 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
   return JSON.stringify({tool:'get_products',query:'P-REAL'});
  };
  const f=await fixture(transport,false,async()=>{},[],false,true);
- await f.service.saveAssistant(f.id,'shop',{enabled:true,knowledge:'KNOWLEDGE_PRIVATE',behavior:'Ramah'});
+ await f.service.saveAssistant(f.id,'shop',{enabled:true,profile:{lainnya:'KNOWLEDGE_PRIVATE'},behavior:'Ramah'});
  await aiData.saveProduct(f.id,'shop',{id:'P-REAL',name:'Produk asli tenant',description:'Produk harian',type:'product',price:100000,stock:5,active:true});
  await f.service.incoming(f.id,f.manager,'shop',f.message('order-create','Pesankan dua produk'));
  assert.ok(orderId);assert.equal((await aiData.orders(f.id,'shop'))[0].total,200000);

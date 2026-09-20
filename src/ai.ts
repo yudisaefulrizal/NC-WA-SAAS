@@ -21,6 +21,13 @@ export type AIMessage={role:'system'|'user'|'assistant';content:string};
 export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
 export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
+export const profileFields=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','produk_layanan','harga','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'] as const;
+export type ProfileField=typeof profileFields[number];
+const profileLabels:Record<ProfileField,string>={nama:'Nama perusahaan/lembaga',deskripsi:'Deskripsi',bidang:'Bidang usaha/kegiatan',alamat:'Alamat',kontak:'Kontak',jam_operasional:'Jam operasional',produk_layanan:'Produk/layanan',harga:'Harga/tarif',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ',lainnya:'Lainnya'};
+// Only filled-in fields are sent to the agent; empty ones add no noise to the prompt.
+export function composeKnowledge(profile:Partial<Record<ProfileField,string>>){
+ return profileFields.map(field=>{const value=profile[field]?.trim();return value?profileLabels[field]+': '+value:null;}).filter(Boolean).join('\n\n');
+}
 export const aiFallback='Maaf, saya sedang mengalami kendala memproses pesan Anda. Silakan coba lagi beberapa saat. Jika terkait pesanan, mohon periksa status pesanan terlebih dahulu sebelum mengulang pemesanan.';
 export const creditCost=(input:number,output:number,inputRate:number,outputRate:number)=>input*inputRate+output*outputRate;
 const fail=(message:string)=>new ApiError(400,'invalid_request',message);
@@ -118,13 +125,23 @@ export class AIService {
   const [items]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC,request_id DESC LIMIT '+size+' OFFSET '+((page-1)*size),[account]);
   return {items,page,pages,total,page_size:size};
  }
- async assistant(account:string,session:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,fallback_number,fallback_notify,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);return {enabled:Boolean(rows[0]?.enabled),knowledge:String(rows[0]?.knowledge??''),behavior:String(rows[0]?.behavior??''),fallback_number:String(rows[0]?.fallback_number??''),fallback_notify:Boolean(rows[0]?.fallback_notify),revision:Number(rows[0]?.revision??0),...await publicSources(account,session)};}
+ async assistant(account:string,session:string){
+  const profileColumns=profileFields.map(field=>'profil_'+field).join(',');
+  const [rows]=await db.execute<RowDataPacket[]>(`SELECT enabled,behavior,fallback_number,fallback_notify,revision,${profileColumns} FROM ai_assistants WHERE account_id=? AND session_id=?`,[account,session]);
+  const row=rows[0];
+  const profile=Object.fromEntries(profileFields.map(field=>[field,String(row?.['profil_'+field]??'')])) as Record<ProfileField,string>;
+  return {enabled:Boolean(row?.enabled),profile,knowledge:composeKnowledge(profile),behavior:String(row?.behavior??''),fallback_number:String(row?.fallback_number??''),fallback_notify:Boolean(row?.fallback_notify),revision:Number(row?.revision??0),...await publicSources(account,session)};
+ }
  async saveAssistant(account:string,session:string,body:unknown){
   const input=object(body);if(typeof input.enabled!=='boolean')throw fail('Status asisten wajib valid');
-  const knowledge=text(input.knowledge,8000,'Knowledge'),behavior=text(input.behavior,2000,'Perilaku AI'),fallbackNumber=input.fallback_number===undefined?'':text(input.fallback_number,20,'Nomor fallback'),fallbackNotify=input.fallback_notify===true;
+  const inputProfile=object(input.profile);
+  const profile=Object.fromEntries(profileFields.map(field=>[field,text(inputProfile[field]??'',2000,profileLabels[field])])) as Record<ProfileField,string>;
+  const behavior=text(input.behavior,2000,'Perilaku AI'),fallbackNumber=input.fallback_number===undefined?'':text(input.fallback_number,20,'Nomor fallback'),fallbackNotify=input.fallback_notify===true;
   if(fallbackNumber&&!/^[1-9][0-9]{5,14}$/.test(fallbackNumber))throw fail('Nomor fallback harus nomor internasional tanpa +');
   const products=input.products_source===undefined?undefined:await sourceInput(input.products_source),orders=input.orders_source===undefined?undefined:await sourceInput(input.orders_source);
-  await transaction(async c=>{await lockAccount(c,account);await c.execute('INSERT INTO ai_assistants(account_id,session_id,enabled,knowledge,behavior,fallback_number,fallback_notify) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),knowledge=VALUES(knowledge),behavior=VALUES(behavior),fallback_number=VALUES(fallback_number),fallback_notify=VALUES(fallback_notify),revision=revision+1',[account,session,Boolean(input.enabled),knowledge,behavior,fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify]);
+  const profileColumns=profileFields.map(field=>'profil_'+field),profileValues=profileFields.map(field=>profile[field]);
+  await transaction(async c=>{await lockAccount(c,account);
+   await c.execute(`INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,fallback_number,fallback_notify,${profileColumns.join(',')}) VALUES (?,?,?,?,?,?,${profileColumns.map(()=>'?').join(',')}) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),behavior=VALUES(behavior),fallback_number=VALUES(fallback_number),fallback_notify=VALUES(fallback_notify),revision=revision+1,${profileColumns.map(c=>c+'=VALUES('+c+')').join(',')}`,[account,session,Boolean(input.enabled),behavior,fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify,...profileValues] as any[]);
    if(products)await saveSource(c,account,session,'products',products);if(orders)await saveSource(c,account,session,'orders',orders);
   });return this.assistant(account,session);
  }
@@ -192,8 +209,8 @@ export class AIService {
   if(!/^FB-[A-Z0-9]{8,48}$/.test(id))throw fail('ID fallback tidak valid');
   const content=text(object(body).content,2000,'Knowledge dari fallback');if(!content)throw fail('Knowledge dari fallback wajib diisi');
   return transaction(async c=>{await lockAccount(c,account);const [tickets]=await c.execute<RowDataPacket[]>("SELECT status FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=? FOR UPDATE",[id,account,session]);if(!tickets[0]||tickets[0].status!=='resolved')throw new ApiError(409,'fallback_not_ready','Tiket harus sudah selesai sebelum diterapkan.');
-   const [assistants]=await c.execute<RowDataPacket[]>('SELECT knowledge FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);const previous=String(assistants[0]?.knowledge??''),knowledge=(previous?previous+'\\n\\n':'')+content;if(knowledge.length>8000)throw fail('Knowledge melebihi batas 8.000 karakter');
-   await c.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,knowledge,behavior) VALUES (?,?,FALSE,?,'') ON DUPLICATE KEY UPDATE knowledge=VALUES(knowledge),revision=revision+1",[account,session,knowledge]);return {ok:true,knowledge};
+   const [assistants]=await c.execute<RowDataPacket[]>('SELECT profil_lainnya FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);const previous=String(assistants[0]?.profil_lainnya??''),lainnya=(previous?previous+'\n\n':'')+content;if(lainnya.length>2000)throw fail('Bagian Lainnya melebihi batas 2.000 karakter; kosongkan sebagian sebelum menambah lagi.');
+   await c.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,profil_lainnya) VALUES (?,?,FALSE,'',?) ON DUPLICATE KEY UPDATE profil_lainnya=VALUES(profil_lainnya),revision=revision+1",[account,session,lainnya]);const knowledge=composeKnowledge({lainnya});return {ok:true,knowledge};
   });
  }
  async conversation(account:string,session:string,customer:string,body:unknown){
