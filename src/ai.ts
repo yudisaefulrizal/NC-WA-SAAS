@@ -22,9 +22,10 @@ export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:
 export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 // Product and price are handled by the dedicated products table (ai-data.ts), not free-text here.
-export const profileFields=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'] as const;
+// Bidang is folded into Deskripsi rather than kept as its own field.
+export const profileFields=['nama','deskripsi','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'] as const;
 export type ProfileField=typeof profileFields[number];
-const profileLabels:Record<ProfileField,string>={nama:'Nama perusahaan/lembaga',deskripsi:'Deskripsi',bidang:'Bidang usaha/kegiatan',alamat:'Alamat',kontak:'Kontak',jam_operasional:'Jam operasional',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ',lainnya:'Lainnya'};
+const profileLabels:Record<ProfileField,string>={nama:'Nama perusahaan/lembaga',deskripsi:'Deskripsi',alamat:'Alamat',kontak:'Kontak',jam_operasional:'Jam operasional',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ',lainnya:'Lainnya'};
 // Only filled-in fields are sent to the agent; empty ones add no noise to the prompt.
 export function composeKnowledge(profile:Partial<Record<ProfileField,string>>){
  return profileFields.map(field=>{const value=profile[field]?.trim();return value?profileLabels[field]+': '+value:null;}).filter(Boolean).join('\n\n');

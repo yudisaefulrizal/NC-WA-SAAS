@@ -124,7 +124,7 @@ const aiUnits=document.createElement('input');aiUnits.id='ai-units';aiUnits.type
 const aiTabNames=['knowledge','sources','behavior','fallback','products','orders','conversations','usage','trial'];
 function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('nama');}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
-const knowledgeTabNames=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+const knowledgeTabNames=['nama','deskripsi','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
 function knowledgeTab(tab){for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
 document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
 aiTab('knowledge');
@@ -150,7 +150,7 @@ $('ai-usage-prev').onclick=()=>run(()=>loadAIUsage(aiUsagePage-1));
 $('ai-usage-next').onclick=()=>run(()=>loadAIUsage(aiUsagePage+1));
 let assistantLoad=0;
 const sourceKinds=['products','orders'];
-const profileFields=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+const profileFields=['nama','deskripsi','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;}}
 for(const kind of sourceKinds)$('ai-form').elements[kind+'_mode'].onchange=sourceVisibility;
 async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;const controls=[...$('ai-form').elements].filter(x=>x.name!=='session');for(const control of controls)control.disabled=true;
