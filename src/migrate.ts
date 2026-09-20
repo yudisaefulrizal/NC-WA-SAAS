@@ -1,5 +1,6 @@
 import {migrateAutoShare} from './auto-share-schema.js';
 import {migrateAI} from './ai-schema.js';
+import {migrateReferral} from './referral-schema.js';
 import { db } from './db.js';
 try {
 await db.query(`CREATE TABLE IF NOT EXISTS accounts (id CHAR(36) PRIMARY KEY, email VARCHAR(254) NOT NULL UNIQUE, password_hash VARCHAR(256) NOT NULL, role ENUM('user','owner') NOT NULL DEFAULT 'user', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`);
@@ -37,5 +38,6 @@ await column('plans','max_share_storage_bytes','BIGINT UNSIGNED NOT NULL DEFAULT
 await db.query("UPDATE plans SET max_share_assets=10,max_share_storage_bytes=52428800 WHERE id='basic' AND max_share_assets=20 AND max_share_storage_bytes=104857600");
 await migrateAI();
 await migrateAutoShare();
+await migrateReferral();
 console.log('Migrasi fondasi dan AI selesai.');
 } finally { await db.end(); }

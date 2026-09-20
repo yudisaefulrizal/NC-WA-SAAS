@@ -55,3 +55,8 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 .workspace .settings-menu-list button.link-button:hover{background:#f0f4f2;background-color:#f0f4f2}
 .workspace .settings-menu button#settings-toggle{background:none;background-color:transparent;color:#20332e;box-shadow:none;border:none}
 .workspace .settings-menu button#settings-toggle:hover,.workspace .settings-menu button#settings-toggle[aria-expanded=true]{background:#eef3f0;background-color:#eef3f0}
+
+/* Referral */
+#referral #referral-summary{margin-bottom:20px}
+#referral-redeem-section{margin-bottom:24px}
+#referral-payout-list,#referral-earnings-list,#referral-list{margin-bottom:8px}

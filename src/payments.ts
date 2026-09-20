@@ -4,6 +4,7 @@ import {db} from './db.js';
 import {activatePackage} from './plans.js';
 import {ApiError} from './engine/sessions.js';
 import {object,requiredString} from './engine/messages.js';
+import {referral as defaultReferral} from './referral.js';
 const base=(environment:string)=>environment==='production'?'https://api.midtrans.com':'https://api.sandbox.midtrans.com';
 function encryptionKey(){const key=process.env.PAYMENT_ENCRYPTION_KEY;if(!key||! /^[a-f0-9]{64}$/i.test(key))throw new ApiError(503,'payment_not_configured','Kunci enkripsi pembayaran belum dikonfigurasi');return Buffer.from(key,'hex');}
 export function encrypt(value:string){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',encryptionKey(),iv);const encrypted=Buffer.concat([cipher.update(value,'utf8'),cipher.final()]);return [iv,cipher.getAuthTag(),encrypted].map(v=>v.toString('hex')).join(':');}
@@ -15,7 +16,7 @@ const transport:Transport=async(environment,key,path,body)=>{
  if(!response.ok&&![400,401,402,404,410].includes(response.status))throw new ApiError(502,'payment_provider_error','Midtrans belum dapat dihubungi atau konfigurasi ditolak');return data;
 };
 export class Payments {
- constructor(private call:Transport=transport,private configId?:string){}
+ constructor(private call:Transport=transport,private configId?:string,private referral=defaultReferral){}
  async configuration(){const [rows]=await db.query<RowDataPacket[]>('SELECT c.id,c.environment,c.created_at FROM payment_config c JOIN payment_settings s ON s.config_id=c.id WHERE s.id=1');return {configured:Boolean(rows[0]),...(rows[0]??{}),serverKey:rows[0]?'********':null,notificationUrl:(process.env.APP_ORIGIN??'http://127.0.0.1:8067')+'/payments/midtrans/notification'};}
  async configure(actor:string,body:unknown){
   const input=object(body);if(!['sandbox','production'].includes(String(input.environment)))throw new ApiError(400,'invalid_request','Lingkungan tidak valid');
@@ -89,6 +90,7 @@ export class Payments {
    if(verified&&data.transaction_status==='settlement'&&String(data.status_code)==='200'&&(data.fraud_status===undefined||data.fraud_status==='accept')){
     if(order.kind==='ai'){await c.execute('INSERT INTO ai_wallets VALUES (?,?) ON DUPLICATE KEY UPDATE balance=balance+VALUES(balance)',[order.account_id,order.credits]);}else await activatePackage(c,order.account_id,id,{id:order.plan_id,credits:order.credits,session_limit:order.session_limit});status='settlement';
     await c.execute('UPDATE payment_orders SET activated_at=UTC_TIMESTAMP() WHERE id=?',[id]);
+    await this.referral.recordPurchaseCommission(c,order.account_id,id,order.total);
    }else if(['pending','expire','deny','cancel'].includes(data.transaction_status))status=data.transaction_status;
    let expires=order.expires_at;
    const expiryText=data.expiry_time??data.transaction_time;

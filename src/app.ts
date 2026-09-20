@@ -13,7 +13,8 @@ import {credentials,digest,hashPassword,verifyPassword} from './security.js';
 import {basicWallet,ensureBasic,planInput} from './plans.js';
 import {gateway as defaultGateway} from './gateway.js';
 import {ApiError} from './engine/sessions.js';
-export function createApp(gateway=defaultGateway,payments=defaultPayments,studio=defaultStudio){
+import {referral as defaultReferral} from './referral.js';
+export function createApp(gateway=defaultGateway,payments=defaultPayments,studio=defaultStudio,referral=defaultReferral){
 const app=express();
 const configuredOrigin=new URL(process.env.APP_ORIGIN??'http://127.0.0.1:8067');
 if(configuredOrigin.origin!==(process.env.APP_ORIGIN??'http://127.0.0.1:8067')||!['http:','https:'].includes(configuredOrigin.protocol))throw new Error('APP_ORIGIN harus berupa origin HTTP/HTTPS tanpa path');
@@ -78,6 +79,14 @@ app.post('/api/ai/trial',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res
 app.get('/api/ai/usage',async(req,res)=>res.json(req.query.page===undefined?await ai.usage(res.locals.account.id):await ai.usagePage(res.locals.account.id,req.query.page)));
 app.get('/api/wallet',async(_req,res)=>res.json(await basicWallet(res.locals.account.id)));
 app.get('/api/plans',async(_req,res)=>{const [plans]=await db.query('SELECT * FROM plans WHERE active=TRUE');res.json(plans);});
+app.get('/api/referral',async(_req,res)=>res.json(await referral.overview(res.locals.account.id)));
+app.post('/api/referral/redeem',async(req,res)=>res.json(await referral.redeem(res.locals.account.id,req.body)));
+app.get('/api/referral/referrals',async(_req,res)=>res.json(await referral.myReferrals(res.locals.account.id)));
+app.get('/api/referral/earnings',async(_req,res)=>res.json(await referral.myEarnings(res.locals.account.id)));
+app.get('/api/referral/profile',async(_req,res)=>res.json(await referral.profile(res.locals.account.id)));
+app.put('/api/referral/profile',async(req,res)=>res.json(await referral.saveProfile(res.locals.account.id,req.body)));
+app.get('/api/referral/payouts',async(_req,res)=>res.json(await referral.myPayouts(res.locals.account.id)));
+app.post('/api/referral/payouts',async(req,res)=>res.status(201).json(await referral.requestPayout(res.locals.account.id,req.body)));
 app.use('/api/admin',(_req,res,next)=>{if(res.locals.account.role!=='owner'){res.status(403).json({error:'forbidden'});return;}next();});
 app.get('/api/admin/audit',async(_req,res)=>{const [rows]=await db.query('SELECT e.id,e.account_id,a.email AS account_email,e.action,e.created_at FROM audit_events e LEFT JOIN accounts a ON a.id=e.account_id ORDER BY e.id DESC LIMIT 100');res.json(rows);});
 app.get('/api/admin/health',async(_req,res)=>{await db.query('SELECT 1');res.json({database:'ok',engine:gateway.health(),uptime:Math.floor(process.uptime())});});
@@ -150,8 +159,15 @@ app.put('/api/admin/plans/:id',async(req,res)=>{
  const connection=await db.getConnection();
  try {await connection.beginTransaction();await connection.execute('INSERT INTO plans VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),price=VALUES(price),credits=VALUES(credits),session_limit=VALUES(session_limit),active=VALUES(active),max_share_assets=VALUES(max_share_assets),max_share_storage_bytes=VALUES(max_share_storage_bytes)',[id,input.name,input.price,input.credits,input.session_limit,input.active,input.maxShareAssets,input.maxShareStorageBytes]);await connection.execute('INSERT INTO audit_events (account_id,action) VALUES (?,?)',[res.locals.account.id,'plan_updated:'+id]);await connection.commit();res.json({ok:true});}catch(e){await connection.rollback();throw e;}finally{connection.release();}
 });
+app.get('/api/admin/referral',async(_req,res)=>res.json(await referral.settings()));
+app.put('/api/admin/referral',async(req,res)=>res.json(await referral.configure(res.locals.account.id,req.body)));
+app.get('/api/admin/referral/referrals',async(_req,res)=>res.json(await referral.adminList()));
+app.get('/api/admin/referral/payouts',async(req,res)=>res.json(await referral.adminPayouts(typeof req.query.status==='string'?req.query.status:undefined)));
+app.put('/api/admin/referral/payouts/:id',async(req,res)=>res.json(await referral.decidePayout(res.locals.account.id,req.params.id,req.body)));
+app.get('/api/admin/referral/agents',async(_req,res)=>res.json(await referral.agents()));
+app.put('/api/admin/referral/agents/:id',async(req,res)=>res.json(await referral.setAgent(res.locals.account.id,req.params.id,req.body)));
 app.use(express.static('public'));
-app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/health','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
+app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/referral','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/health','/dashboard/admin/referral','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
 app.use((_req,res)=>res.status(404).json({error:'not_found'}));
 app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{if(res.headersSent){_next(err);return;}if(err instanceof ApiError){res.status(err.status).json({error:err.code,message:err.message});return;}const status=(err as {status?:number}).status;res.status(status===400||status===413?status:500).json({error:status===400||status===413?'invalid_request':'internal_error'});});
 

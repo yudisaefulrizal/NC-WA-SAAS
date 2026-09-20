@@ -17,9 +17,15 @@ import {basicWallet,ensureBasic} from './plans.js';
 import {SessionManager,ApiError,type Connector} from './engine/sessions.js';
 import {SessionStore} from './engine/store.js';
 import {baileysConnector} from './engine/baileys.js';
+import {referral as defaultReferral} from './referral.js';
 
-export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth'),ai=defaultAI) {
+export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth'),ai=defaultAI,referral=defaultReferral) {
  const hooks=new TenantWebhooks();
+ referral.currentNumbersProvider=async(accountId:string)=>{
+  const pending=managers.get(accountId);if(!pending)return [];
+  const m=await pending;
+  return m.list().filter(s=>s.status==='connected'&&s.phone).map(s=>s.phone as string);
+ };
  const media=new Map<string,MediaStore>();
  const streams=new Map<string,EventStream>();
  const pending=new Map<string,number>();
@@ -30,7 +36,10 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
    const result=new SessionManager(connector?connector(id,store):baileysConnector(store,(session,messageId)=>ai.registerSystemMessage(id,session,messageId)),store);
    const files=new MediaStore(resolve(root,'_media',id),process.env.APP_ORIGIN??'http://127.0.0.1:8067');
    const events=new EventStream();media.set(id,files);streams.set(id,events);
-   result.onEvent=async event=>{events.push(event);await hooks.enqueue(id,event);};
+   result.onEvent=async event=>{
+    events.push(event);await hooks.enqueue(id,event);
+    if(event.event==='session.status'&&event.status==='connected'&&typeof event.phone==='string'&&event.phone)await referral.qualify(id,event.phone).catch(()=>{});
+   };
    result.onBeforeSend=async()=>{const [accounts]=await db.execute<RowDataPacket[]>('SELECT suspended FROM accounts WHERE id=?',[id]);if(!accounts[0]||accounts[0].suspended){await result.applyLimit(0);throw new ApiError(403,'account_suspended','Akun dinonaktifkan');}await result.applyLimit((await basicWallet(id)).session_limit);};
    result.onOutgoing=async(session,message)=>{await ai.manualOutgoing(id,session.id,message);};
    result.onIncoming=async(session,message)=>{
