@@ -122,8 +122,11 @@ document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.c
 const aiUnits=document.createElement('input');aiUnits.id='ai-units';aiUnits.type='number';aiUnits.min='1';aiUnits.max='100';aiUnits.step='1';aiUnits.value='1';aiUnits.inputMode='numeric';const aiUnitsLabel=document.createElement('label');aiUnitsLabel.textContent='Jumlah unit kredit AI (1 unit = 10.000 kredit)';aiUnitsLabel.append(' ',aiUnits);$('ai-credit-actions').prepend(aiUnitsLabel);
 
 const aiTabNames=['knowledge','sources','behavior','fallback','products','orders','conversations','usage','trial'];
-function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));}
+function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('nama');}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
+const knowledgeTabNames=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+function knowledgeTab(tab){for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
+document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
 aiTab('knowledge');
 let aiUsagePage=1,aiUsageLoading=false;
 async function loadAI(){
