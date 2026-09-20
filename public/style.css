@@ -78,3 +78,9 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 #referral-config fieldset>p{font-size:12px;line-height:1.55;color:var(--muted);margin:6px 0 10px}
 #referral-config fieldset label{margin:10px 0}
 @media(max-width:640px){#referral-config .ai-data-grid{grid-template-columns:1fr}}
+
+/* Product/order source settings: secondary, collapsed by default, tucked below the table */
+.ai-source-settings{margin-top:24px}
+.ai-source-settings summary:before{content:'⚙'!important;font-family:inherit!important}
+.ai-source-settings [type=submit]{margin-top:14px}
+.ai-source-settings details{margin-top:12px}
