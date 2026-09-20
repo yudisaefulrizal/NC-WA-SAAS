@@ -86,6 +86,9 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 .ai-source-settings details{margin-top:12px}
 
 /* AI credit purchase, moved from the AI page into Pembelian */
-.ai-credit-section{margin-bottom:20px;border:1px solid #e0e8eb;border-radius:13px;padding:22px 25px;background:#fff;box-shadow:0 7px 24px #153b3208}
-.ai-credit-section h3{font-size:20px;letter-spacing:-.5px;margin:0 0 14px;color:#0d2837}
-@media(max-width:650px){.ai-credit-section{padding:18px 14px}}
+#ai-credit-catalog{grid-template-columns:1fr;margin-bottom:24px}
+.ai-credit-card .package-icon{background:#e3f5eb;color:#07845a}
+.ai-credit-card .package-features{margin-bottom:20px}
+#ai-credit-modal label{margin-bottom:6px}
+#ai-credit-modal input{max-width:160px}
+#ai-credit-summary{font-weight:650;margin:14px 0}
