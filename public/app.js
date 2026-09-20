@@ -117,10 +117,14 @@ form('midtransform',async data=>{await api('/api/admin/midtrans','PUT',data);$('
 $('testmidtrans').onclick=()=>run(async()=>{$('message').textContent=(await api('/api/admin/midtrans/test','POST')).message;});
 let adjustment;
 form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment||adjustment.payload!==payload)adjustment={payload,id:crypto.randomUUID()};await api('/api/admin/accounts/'+encodeURIComponent(data.accountId)+'/credits','POST',{amount:Number(data.amount),reason:data.reason,requestId:adjustment.id});adjustment=undefined;await admin();$('adjustform-modal').close();$('adjustform').reset();$('message').textContent='Penyesuaian tersimpan.';});
-document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();if(modal.id==='ai-trial-dialog')$('ai-trial-session').value=$('ai-session').value;modal.showModal();});
+document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 const aiUnits=document.createElement('input');aiUnits.id='ai-units';aiUnits.type='number';aiUnits.min='1';aiUnits.max='100';aiUnits.step='1';aiUnits.value='1';aiUnits.inputMode='numeric';const aiUnitsLabel=document.createElement('label');aiUnitsLabel.textContent='Jumlah unit kredit AI (1 unit = 10.000 kredit)';aiUnitsLabel.append(' ',aiUnits);$('ai-credit-actions').prepend(aiUnitsLabel);
 
+const aiTabNames=['knowledge','sources','behavior','fallback','products','orders','conversations','usage','trial'];
+function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));}
+document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
+aiTab('knowledge');
 let aiUsagePage=1,aiUsageLoading=false;
 async function loadAI(){
  const [w,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/sessions'),loadAIUsage()]);
@@ -128,7 +132,6 @@ async function loadAI(){
  const units=Number($('ai-units').value),validUnits=Number.isSafeInteger(units)&&units>=1&&units<=100;
  $('ai-buy').disabled=!w.credit_price||!validUnits;$('ai-buy').textContent=w.credit_price&&validUnits?`Beli ${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(w.credit_price*units)}`:'Pembelian AI belum tersedia';
  const selected=$('ai-session').value;$('ai-session').replaceChildren(new Option('Pilih sesi',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-session').value=selected;
- const trialSelected=$('ai-trial-session').value;$('ai-trial-session').replaceChildren(new Option('Pilih nomor layanan',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-trial-session').value=trialSelected;
 
  await loadAssistant();
 }
@@ -147,7 +150,7 @@ const sourceKinds=['products','orders'];
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;}}
 for(const kind of sourceKinds)$('ai-form').elements[kind+'_mode'].onchange=sourceVisibility;
 async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;const controls=[...$('ai-form').elements].filter(x=>x.name!=='session');for(const control of controls)control.disabled=true;
- $('ai-session-detail').hidden=!id;$('ai-session-placeholder').hidden=Boolean(id);$('ai-refresh').disabled=!id;
+ $('ai-session-detail').hidden=!id;$('ai-session-placeholder').hidden=Boolean(id);$('ai-trial-session').value=id;if(id)aiTab('knowledge');
  for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();
  $('ai-product-add').disabled=$('ai-order-add').disabled=true;
  try{const config=id?await api('/sessions/'+encodeURIComponent(id)+'/ai'):{enabled:false,knowledge:'',behavior:''};if(generation!==assistantLoad)return;
