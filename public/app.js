@@ -147,7 +147,7 @@ $('ai-usage-prev').onclick=()=>run(()=>loadAIUsage(aiUsagePage-1));
 $('ai-usage-next').onclick=()=>run(()=>loadAIUsage(aiUsagePage+1));
 let assistantLoad=0;
 const sourceKinds=['products','orders'];
-const profileFields=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','produk_layanan','harga','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+const profileFields=['nama','deskripsi','bidang','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;}}
 for(const kind of sourceKinds)$('ai-form').elements[kind+'_mode'].onchange=sourceVisibility;
 async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;const controls=[...$('ai-form').elements].filter(x=>x.name!=='session');for(const control of controls)control.disabled=true;
