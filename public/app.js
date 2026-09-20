@@ -121,7 +121,7 @@ document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 const aiUnits=document.createElement('input');aiUnits.id='ai-units';aiUnits.type='number';aiUnits.min='1';aiUnits.max='100';aiUnits.step='1';aiUnits.value='1';aiUnits.inputMode='numeric';const aiUnitsLabel=document.createElement('label');aiUnitsLabel.textContent='Jumlah unit kredit AI (1 unit = 10.000 kredit)';aiUnitsLabel.append(' ',aiUnits);$('ai-credit-actions').prepend(aiUnitsLabel);
 
-const aiTabNames=['knowledge','sources','behavior','fallback','products','orders','conversations','usage','trial'];
+const aiTabNames=['knowledge','behavior','fallback','products','orders','conversations','usage','trial'];
 function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('nama');}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
 const knowledgeTabNames=['nama','deskripsi','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
@@ -154,8 +154,7 @@ const profileFields=['nama','deskripsi','alamat','kontak','jam_operasional','car
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;}}
 for(const kind of sourceKinds)$('ai-form').elements[kind+'_mode'].onchange=sourceVisibility;
 async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;const controls=[...$('ai-form').elements].filter(x=>x.name!=='session');for(const control of controls)control.disabled=true;
- $('ai-session-detail').hidden=!id;$('ai-session-placeholder').hidden=Boolean(id);$('ai-trial-session').value=id;if(id)aiTab('knowledge');
- for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();
+ $('ai-session-detail').hidden=!id;$('ai-session-placeholder').hidden=Boolean(id);$('ai-trial-session').value=id;
  $('ai-product-add').disabled=$('ai-order-add').disabled=true;
  try{const config=id?await api('/sessions/'+encodeURIComponent(id)+'/ai'):{enabled:false,profile:{},behavior:''};if(generation!==assistantLoad)return;
  for(const field of profileFields)$('ai-form').elements['profile_'+field].value=config.profile?.[field]??'';
@@ -192,7 +191,7 @@ async function loadConversations(){
   return [r.customer,r.message_count,r.router_context||'—',r.paused?'Dijeda':r.full_auto?'Full auto':'Aktif',actions];
  });
 }
-$('ai-session').onchange=()=>run(loadAssistant);
+$('ai-session').onchange=()=>run(async()=>{if($('ai-session').value)aiTab('knowledge');for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();await loadAssistant();});
 form('ai-form',async data=>{if(!data.session)throw Error('Pilih sesi terlebih dahulu.');const profile=Object.fromEntries(profileFields.map(field=>[field,data['profile_'+field]]));const payload={enabled:data.enabled==='on',profile,behavior:data.behavior,fallback_number:data.fallback_number,fallback_notify:data.fallback_notify==='on'};for(const kind of sourceKinds)payload[kind+'_source']={mode:data[kind+'_mode'],endpoint:data[kind+'_endpoint'],token:data[kind+'_token'],clear_token:data[kind+'_clear_token']==='on'};await api('/sessions/'+encodeURIComponent(data.session)+'/ai','PUT',payload);await loadAssistant();$('message').textContent='Pengaturan asisten tersimpan.';});
 $('ai-units').oninput=()=>void run(loadAI);
 form('ai-trial-form',async data=>{$('ai-trial-error').textContent='';$('ai-trial-answer').hidden=true;try{const result=await api('/api/ai/trial','POST',{session:data.session,question:data.question});$('ai-trial-answer-text').textContent=result.answer;$('ai-trial-answer').hidden=false;await loadAI();}catch(e){$('ai-trial-error').textContent=e.message;}});
