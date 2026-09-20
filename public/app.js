@@ -308,6 +308,9 @@ form('referral-profile-form',async data=>{await api('/api/referral/profile','PUT
 form('referral-payout-form',async data=>{await api('/api/referral/payouts','POST',{amount:Number(data.amount)});$('referral-payout-form').reset();await loadReferral();$('message').textContent='Pengajuan pencairan terkirim.';});
 
 // --- Referral (admin) ---
+function referralAdminTab(tab){for(const name of ['settings','payouts','list','agents'])$('referral-admin-'+name+(name==='settings'?'':'-tab')).hidden=name!==tab;document.querySelectorAll('[data-referral-admin-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.referralAdminTab===tab)));}
+document.querySelectorAll('[data-referral-admin-tab]').forEach(b=>b.onclick=()=>referralAdminTab(b.dataset.referralAdminTab));
+referralAdminTab('settings');
 async function loadAdminReferral(){
  const settings=await api('/api/admin/referral');
  $('referral-config').elements.enabled.checked=Boolean(settings.enabled);

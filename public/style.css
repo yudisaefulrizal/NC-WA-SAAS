@@ -60,3 +60,5 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 #referral #referral-summary{margin-bottom:20px}
 #referral-redeem-section{margin-bottom:24px}
 #referral-payout-list,#referral-earnings-list,#referral-list{margin-bottom:8px}
+#admin-referral > .row-actions{flex-wrap:wrap;white-space:normal;margin-bottom:20px}
+#admin-referral > .row-actions [aria-pressed="true"]{background:#087b5a;color:#fff;border-color:#087b5a}
