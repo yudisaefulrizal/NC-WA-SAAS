@@ -1,5 +1,11 @@
 import {db} from './db.js';
 export async function migrateAutoShare(){
+ await db.query(`CREATE TABLE IF NOT EXISTS share_assets (
+ id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, filename VARCHAR(255) NOT NULL,
+ mimetype VARCHAR(100) NOT NULL, media_type VARCHAR(16) NOT NULL, size_bytes INT UNSIGNED NOT NULL,
+ created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX asset_account(account_id,created_at),
+ FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB`);
  await db.query(`CREATE TABLE IF NOT EXISTS daftar_kontak (
  id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, nomor VARCHAR(100) NOT NULL,
  kelompkontak VARCHAR(100) NOT NULL DEFAULT '', UNIQUE KEY contact_unique(account_id,nomor),
@@ -30,15 +36,28 @@ export async function migrateAutoShare(){
   const [rows]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,name]);
   if(!rows.length)await db.query(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
  }
+ async function foreignKey(table:string,constraint:string,definition:string){
+  const [rows]=await db.execute<any[]>('SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND CONSTRAINT_NAME=?',[table,constraint]);
+  if(!rows.length)await db.query(`ALTER TABLE ${table} ADD CONSTRAINT ${constraint} FOREIGN KEY ${definition}`);
+ }
+ async function index(table:string,name:string,definition:string){
+  const [rows]=await db.execute<any[]>('SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?',[table,name]);
+  if(!rows.length)await db.query(`ALTER TABLE ${table} ADD ${definition}`);
+ }
+ await column('share_assets','public_token','CHAR(32) NULL');
+ await index('share_assets','public_token','UNIQUE INDEX public_token(public_token)');
  await column('auto_share_templates','media_type',"VARCHAR(16) NOT NULL DEFAULT 'text'");
  await column('auto_share_templates','media_url','VARCHAR(4096) NULL');
  await column('auto_share_templates','filename','VARCHAR(255) NULL');
  await column('auto_share_templates','content_migrated','BOOLEAN NOT NULL DEFAULT FALSE');
+ await column('auto_share_templates','asset_id','CHAR(36) NULL');
+ await foreignKey('auto_share_templates','fk_template_asset','(asset_id) REFERENCES share_assets(id) ON DELETE SET NULL');
  await column('auto_share_runs','job_id','CHAR(36) NULL');
  await column('auto_share_runs','job_name','VARCHAR(100) NULL');
  await column('auto_share_runs','media_type',"VARCHAR(16) NOT NULL DEFAULT 'text'");
  await column('auto_share_runs','media_url','VARCHAR(4096) NULL');
  await column('auto_share_runs','filename','VARCHAR(255) NULL');
+ await column('auto_share_runs','asset_id','CHAR(36) NULL');
  await db.query(`CREATE TABLE IF NOT EXISTS auto_share_jobs (
  id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,name VARCHAR(100) NOT NULL,session_id VARCHAR(64) NOT NULL,
  contacts JSON NOT NULL,groups_json JSON NOT NULL,template_ids JSON NOT NULL,rotation_index INT UNSIGNED NOT NULL DEFAULT 0,

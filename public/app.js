@@ -104,13 +104,13 @@ $('checkpayment').onclick=()=>run(()=>refreshPayment());
 $('cancelpayment').onclick=()=>run(async()=>{if(paymentBusy||!currentPayment||!confirm('Batalkan pembayaran ini? Status akan diperiksa kembali sebelum pembatalan.'))return;const id=currentPayment;paymentBusy=true;$('cancelpayment').disabled=$('checkpayment').disabled=true;try{const order=await api('/api/payments/'+encodeURIComponent(id)+'/cancel','POST');if(currentPayment!==id)return;renderPayment(order);await Promise.all([paymentList(),wallet(),sessions()]);$('message').textContent=$('paymentstatus').textContent;}finally{paymentBusy=false;$('cancelpayment').disabled=$('checkpayment').disabled=false;schedulePayment();}});
 $('paymentqr').onerror=()=>{$('qrerror').textContent='QR belum berhasil dimuat. Periksa status untuk mencoba lagi.';$('qrerror').hidden=false;$('paymentqr').removeAttribute('src');};
 setInterval(()=>{if(!document.hidden&&!$('paket').hidden)paymentCountdown();},1000);
-async function plans(){table('plans',['Nama paket','Harga / bulan','Kredit','Batas nomor','Status','Tindakan'],await api('/api/admin/plans'),p=>{
+async function plans(){table('plans',['Nama paket','Harga / bulan','Kredit','Batas nomor','Batas asset','Status','Tindakan'],await api('/api/admin/plans'),p=>{
  const actions=document.createElement('div');actions.className='row-actions';
- actions.append(button('Edit',async()=>{for(const name of ['id','name','price','credits','session_limit'])$('planform').elements.namedItem(name).value=p[name];$('planform').elements.namedItem('active').checked=Boolean(p.active);$('planform-modal').showModal();}));
+ actions.append(button('Edit',async()=>{for(const name of ['id','name','price','credits','session_limit','max_share_assets'])$('planform').elements.namedItem(name).value=p[name];$('planform').elements.namedItem('max_share_storage_mb').value=Math.round(p.max_share_storage_bytes/1048576);$('planform').elements.namedItem('active').checked=Boolean(p.active);$('planform-modal').showModal();}));
  if(p.id!=='basic')actions.append(button('Hapus',async()=>{if(!confirm(`Hapus paket "${p.name}" dari katalog? Kredit pelanggan dan riwayat pembayaran tetap tersimpan.`))return;await api('/api/admin/plans/'+encodeURIComponent(p.id),'DELETE');await plans();$('message').textContent='Paket berhasil dihapus.';}));
- return [p.name,money(p.price),p.credits,p.session_limit,p.active?'Aktif':'Nonaktif',actions];
+ return [p.name,money(p.price),p.credits,p.session_limit,`${p.max_share_assets} asset · ${Math.round(p.max_share_storage_bytes/1048576)} MB`,p.active?'Aktif':'Nonaktif',actions];
 });}
-form('planform',async p=>{await api('/api/admin/plans/'+encodeURIComponent(p.id),'PUT',{name:p.name,price:Number(p.price),credits:Number(p.credits),session_limit:Number(p.session_limit),active:p.active==='on'});await plans();$('planform-modal').close();$('message').textContent='Paket tersimpan.';});
+form('planform',async p=>{await api('/api/admin/plans/'+encodeURIComponent(p.id),'PUT',{name:p.name,price:Number(p.price),credits:Number(p.credits),session_limit:Number(p.session_limit),max_share_assets:Number(p.max_share_assets),max_share_storage_bytes:Number(p.max_share_storage_mb)*1048576,active:p.active==='on'});await plans();$('planform-modal').close();$('message').textContent='Paket tersimpan.';});
 const passwordModal=document.createElement('dialog'),passwordForm=document.createElement('form'),passwordTitle=document.createElement('h2'),passwordInput=document.createElement('input'),passwordClose=document.createElement('button');passwordModal.append(passwordTitle,passwordForm);passwordForm.method='dialog';passwordForm.append(document.createElement('label'));passwordForm.firstChild.textContent='Password baru ';passwordInput.type='password';passwordInput.minLength=6;passwordInput.maxLength=128;passwordInput.autocomplete='new-password';passwordInput.required=true;passwordForm.firstChild.append(passwordInput);const passwordSave=document.createElement('button');passwordSave.textContent='Ganti password';passwordClose.type='button';passwordClose.className='secondary';passwordClose.textContent='Tutup';passwordForm.append(passwordSave,passwordClose);document.body.append(passwordModal);passwordClose.onclick=()=>passwordModal.close();let passwordAccount;function changePassword(account){passwordAccount=account;passwordTitle.textContent='Ganti password · '+account.email;passwordInput.value='';passwordModal.showModal();passwordInput.focus();}passwordForm.onsubmit=e=>{e.preventDefault();void run(async()=>{passwordSave.disabled=true;try{await api('/api/admin/accounts/'+encodeURIComponent(passwordAccount.id)+'/password','PUT',{password:passwordInput.value});passwordModal.close();$('message').textContent='Password berhasil diganti; semua sesi login akun tersebut telah dicabut.';}finally{passwordSave.disabled=false;}});};
 async function admin(){await plans();await loadAIConfig();await loadModelUsage();const accounts=await api('/api/admin/accounts');$('ai-adjust-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));const selected=$('adjustaccount').value;$('adjustaccount').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));$('adjustaccount').value=selected;table('accounts',['Email','Peran','Status','Paket aktif','Sisa kredit','Tindakan'],accounts,u=>{if(u.role==='owner')return [u.email,'Pemilik',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),'—'];const actions=document.createElement('div');actions.className='row-actions';actions.append(button(u.suspended?'Aktifkan':'Nonaktifkan',async()=>{await api('/api/admin/accounts/'+u.id+'/status','PUT',{suspended:!u.suspended});await admin();}),button('Ganti password',async()=>changePassword(u)));return [u.email,'Pengguna',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),actions];});const config=await api('/api/admin/midtrans');$('midtransstatus').textContent=`${config.configured?'Terkonfigurasi: '+config.environment+' · '+config.serverKey:'Belum dikonfigurasi'} · URL notifikasi: ${config.notificationUrl}`;table('audit',['Waktu','Aktivitas','Email'],await api('/api/admin/audit'),a=>[new Date(a.created_at).toLocaleString('id-ID'),a.action,a.account_email]);table('adminpayments',['ID pembayaran','Email','Total','Status'],await api('/api/admin/payments'),p=>[p.id,p.account_email,money(p.total),p.status]);const health=await api('/api/admin/health');table('health',['Komponen','Status'],Object.entries(health),([key,value])=>[({database:'Database',engine:'WhatsApp',uptime:'Waktu aktif'})[key]||key,typeof value==='object'?JSON.stringify(value):key==='uptime'?Math.floor(value)+' detik':String(value)]);}
 form('midtransform',async data=>{await api('/api/admin/midtrans','PUT',data);$('midtransform').reset();$('midtransform-modal').close();await admin();});
@@ -196,21 +196,45 @@ $('ai-model-refresh').onclick=()=>run(loadModelUsage);
 let aiAdjustment;
 form('ai-adjust',async data=>{const payload=JSON.stringify(data);if(!aiAdjustment||aiAdjustment.payload!==payload)aiAdjustment={payload,id:crypto.randomUUID()};const result=await api('/api/admin/accounts/'+encodeURIComponent(data.accountId)+'/ai-credits','POST',{amount:Number(data.amount),reason:data.reason,requestId:aiAdjustment.id});aiAdjustment=undefined;$('message').textContent=`Penyesuaian AI tersimpan. Saldo: ${result.balance} kredit AI.`;});
 
-let shareContacts=[],shareJobs=[],shareTemplates=[],shareSessions=[],shareOrder=[];
+let shareContacts=[],shareJobs=[],shareTemplates=[],shareSessions=[],shareOrder=[],shareAssets=[];
 const shareStatus=s=>({queued:'Dalam antrean',running:'Sedang dikirim',completed:'Selesai',completed_with_errors:'Selesai dengan kendala',pending:'Menunggu',sending:'Mengirim',sent:'Berhasil',failed:'Gagal',unknown:'Belum pasti'})[s]||s;
-function shareTab(tab){for(const name of ['contacts','templates','jobs','history'])$('share-'+name).hidden=name!==tab;document.querySelectorAll('[data-share-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.shareTab===tab)));}
+const shareMediaLabel=t=>({image:'Gambar',video:'Video',document:'Dokumen',audio:'Audio'})[t]||t;
+const shareBytes=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':(n/1024).toFixed(0)+' KB';
+function shareTab(tab){for(const name of ['contacts','templates','assets','jobs','history'])$('share-'+name).hidden=name!==tab;document.querySelectorAll('[data-share-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.shareTab===tab)));}
 document.querySelectorAll('[data-share-tab]').forEach(b=>b.onclick=()=>shareTab(b.dataset.shareTab));
 function openShareContact(value={}){const f=$('share-contact-form');f.reset();for(const key of ['id','nomor','kelompkontak'])f.elements[key].value=value[key]||'';$('share-contact-dialog').showModal();}
 $('share-add-contact').onclick=()=>openShareContact();
 function shareOptions(id,items){$(id).replaceChildren(...items.map(([value,text])=>new Option(text,value)));}
 async function loadAutoShare(){
  [shareContacts,shareJobs,shareSessions,shareTemplates]=await Promise.all([api('/auto-share/contacts'),api('/auto-share/jobs'),api('/sessions'),api('/auto-share/templates')]);
+ await loadShareAssets();
  const groups=[...new Set(shareContacts.map(c=>c.kelompkontak).filter(Boolean))].sort();
  $('share-group-options').replaceChildren(...groups.map(g=>new Option(g,g)));
  table('share-contact-list',['Nomor / ID grup','Kelompok','Tindakan'],shareContacts,c=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Ubah',async()=>openShareContact(c)),button('Hapus',async()=>{if(!confirm('Hapus kontak '+c.nomor+'?'))return;await api('/auto-share/contacts/'+c.id,'DELETE');await loadAutoShare();}));return [c.nomor,c.kelompkontak||'—',actions];});
  table('share-job-list',['Nama','Sesi','Tujuan','Rotasi berikutnya','Jadwal','Tindakan'],shareJobs,t=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Kirim',async()=>{$('share-send-form').elements.id.value=t.id;shareOptions('share-send-template',t.template_ids.map(id=>[id,shareTemplates.find(v=>v.id===id)?.name||'Template tidak tersedia']));$('share-send-dialog').showModal();}),button('Ubah',async()=>openShareJob(t)),button(t.enabled?'Nonaktifkan jadwal':'Aktifkan jadwal',async()=>{if(!t.enabled){await openShareJob(t);$('share-job-form').elements.enabled.checked=true;return;}await api('/auto-share/jobs/'+t.id,'PUT',{...t,enabled:false});await loadAutoShare();}),button('Hapus',async()=>{if(!confirm('Hapus pengiriman? Pengiriman yang sudah antre tetap berjalan.'))return;await api('/auto-share/jobs/'+t.id,'DELETE');await loadAutoShare();}));return [t.name,t.session_id,t.contacts.length+' kontak / '+t.groups.length+' kelompok',shareTemplates.find(v=>v.id===t.template_ids[t.rotation_index%t.template_ids.length])?.name||'—',t.enabled?new Date(t.next_at).toLocaleString('id-ID')+' · '+(t.interval_minutes?'setiap '+t.interval_minutes+' menit':'sekali'):'Tidak aktif',actions];});
- table('share-template-list',['Nama','Jenis','Konten','Tindakan'],shareTemplates,t=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Ubah',async()=>openShareTemplate(t)),button('Hapus',async()=>{if(!confirm('Hapus template ini?'))return;await api('/auto-share/templates/'+t.id,'DELETE');await loadAutoShare();}));return [t.name,t.media_type,(t.message||t.media_url||'').slice(0,120),actions];});
+ table('share-template-list',['Nama','Jenis','Konten','Tindakan'],shareTemplates,t=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Ubah',async()=>openShareTemplate(t)),button('Hapus',async()=>{if(!confirm('Hapus template ini?'))return;await api('/auto-share/templates/'+t.id,'DELETE');await loadAutoShare();}));return [t.name,t.media_type,(t.message||t.filename||'').slice(0,120),actions];});
  await loadShareRuns();
+}
+const sharePublicUrl=token=>location.origin+'/public/assets/'+token;
+async function shareCopyLink(text){
+ try{await navigator.clipboard.writeText(text);}
+ catch{const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.append(area);area.select();document.execCommand('copy');area.remove();}
+}
+async function loadShareAssets(){
+ const data=await api('/auto-share/assets');shareAssets=data.assets;
+ $('share-asset-quota').textContent=`${data.used_count}/${data.max_count} asset · ${shareBytes(data.used_bytes)}/${shareBytes(data.max_bytes)}`;
+ table('share-asset-list',['Nama file','Jenis','Ukuran','Akses','Tindakan'],shareAssets,a=>{
+  const actions=document.createElement('div');actions.className='row-actions';
+  actions.append(button('Preview',async()=>{window.open('/auto-share/assets/'+a.id+'/file','_blank','noopener');}));
+  if(a.public_token)actions.append(button('Salin link publik',async()=>{await shareCopyLink(sharePublicUrl(a.public_token));$('message').textContent='Link publik disalin.';}));
+  actions.append(button(a.public_token?'Jadikan privat':'Jadikan publik',async()=>{await api('/auto-share/assets/'+a.id+'/public','PUT',{public:!a.public_token});await loadShareAssets();$('message').textContent=a.public_token?'Asset kini privat.':'Asset kini publik; link dapat diakses tanpa API key.';}));
+  actions.append(button('Hapus',async()=>{if(!confirm('Hapus asset '+a.filename+'?'))return;await api('/auto-share/assets/'+a.id,'DELETE');await loadShareAssets();await loadAutoShare();}));
+  return [a.filename,shareMediaLabel(a.media_type),shareBytes(a.size_bytes),a.public_token?'Publik':'Privat',actions];
+ });
+}
+function shareTemplateAssetOptions(){
+ const type=$('share-template-form').elements.media_type.value;
+ shareOptions('share-template-asset',shareAssets.filter(a=>a.media_type===type).map(a=>[a.id,a.filename]));
 }
 async function openShareJob(t={}){
  await loadAutoShare();const f=$('share-job-form');f.reset();
@@ -236,11 +260,21 @@ function renderShareOrder(){
  const remove=button('Hapus dari urutan',async()=>{shareOrder.splice(index,1);renderShareOrder();});remove.type='button';li.append(up,down,remove);return li;}));
 }
 $('share-append-template').onclick=()=>{const id=$('share-choose-template').value;if(id&&!shareOrder.includes(id)){shareOrder.push(id);renderShareOrder();}};
-function shareMediaFields(){const f=$('share-template-form'),media=f.elements.media_type.value!=='text';$('share-media-fields').hidden=!media;f.elements.media_url.required=media;f.elements.message.required=!media;f.elements.message.disabled=f.elements.media_type.value==='audio';}
+function shareMediaFields(){const f=$('share-template-form'),media=f.elements.media_type.value!=='text';$('share-media-fields').hidden=!media;f.elements.asset_id.required=media;f.elements.message.required=!media;f.elements.message.disabled=f.elements.media_type.value==='audio';shareTemplateAssetOptions();}
 $('share-media-type').onchange=shareMediaFields;
-function openShareTemplate(t={}){const f=$('share-template-form');f.reset();for(const key of ['id','name','message','media_url','filename'])f.elements[key].value=t[key]||'';f.elements.media_type.value=t.media_type||'text';shareMediaFields();$('share-template-dialog').showModal();}
+function openShareTemplate(t={}){const f=$('share-template-form');f.reset();for(const key of ['id','name','message'])f.elements[key].value=t[key]||'';f.elements.media_type.value=t.media_type||'text';shareMediaFields();if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
 $('share-add-template').onclick=()=>openShareTemplate();
-form('share-template-form',async data=>{await api('/auto-share/templates'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',data);$('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
+form('share-template-form',async data=>{await api('/auto-share/templates'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',{name:data.name,message:data.message,media_type:data.media_type,asset_id:data.asset_id||null});$('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
+$('share-asset-upload-form').onsubmit=e=>{e.preventDefault();void run(async()=>{
+ const file=$('share-asset-upload-form').elements.file.files[0];if(!file)return;
+ const submit=$('share-asset-upload-form').querySelector('button');submit.disabled=true;
+ try{
+  const response=await fetch('/auto-share/assets',{method:'POST',headers:{'X-Filename':file.name},body:file});
+  const data=await response.json().catch(()=>({error:'rate_limited'}));
+  if(!response.ok){const messages={asset_limit_exceeded:'Jumlah asset sudah mencapai batas paket.',storage_limit_exceeded:'Penyimpanan asset sudah mencapai batas paket.',unsupported_file_type:'Jenis file tidak didukung.',asset_too_large:'Ukuran file melebihi batas.'};throw Error(messages[data.error]||data.message||data.error);}
+  $('share-asset-upload-form').reset();await loadShareAssets();shareTemplateAssetOptions();$('message').textContent='Asset tersimpan.';
+ }finally{submit.disabled=false;}
+});};
 form('share-send-form',async data=>{const result=await api('/auto-share/jobs/'+data.id+'/send','POST',{template_id:data.template_id});$('share-send-dialog').close();shareTab('history');await loadShareRuns();$('message').textContent='Pengiriman masuk antrean untuk '+result.total+' tujuan.';});
 let shareDetail;
 async function loadShareDetail(id){shareDetail=id;const rows=await api('/auto-share/runs/'+id);table('share-run-detail',['Tujuan','Status','Keterangan'],rows,d=>[d.nomor,shareStatus(d.status),d.error||d.message_id||'—']);}

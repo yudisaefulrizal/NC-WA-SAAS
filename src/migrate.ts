@@ -7,7 +7,7 @@ await db.query(`CREATE TABLE IF NOT EXISTS login_sessions (token_hash CHAR(64) P
 await db.query(`CREATE TABLE IF NOT EXISTS api_keys (id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, key_hash CHAR(64) NOT NULL UNIQUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
 await db.query(`CREATE TABLE IF NOT EXISTS audit_events (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, account_id CHAR(36) NOT NULL, action VARCHAR(80) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`);
 await db.query(`CREATE TABLE IF NOT EXISTS plans (id VARCHAR(36) PRIMARY KEY, name VARCHAR(100) NOT NULL, price INT UNSIGNED NOT NULL, credits INT UNSIGNED NOT NULL, session_limit INT UNSIGNED NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE) ENGINE=InnoDB`);
-await db.query(`INSERT IGNORE INTO plans VALUES ('basic','Dasar Gratis',0,100,1,TRUE)`);
+await db.query(`INSERT IGNORE INTO plans (id,name,price,credits,session_limit,active) VALUES ('basic','Dasar Gratis',0,100,1,TRUE)`);
 await db.query(`CREATE TABLE IF NOT EXISTS wallets (account_id CHAR(36) PRIMARY KEY, period CHAR(7) NOT NULL, balance INT UNSIGNED NOT NULL, quota INT UNSIGNED NOT NULL, session_limit INT UNSIGNED NOT NULL, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
 await db.query(`CREATE TABLE IF NOT EXISTS credit_events (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, account_id CHAR(36) NOT NULL, period CHAR(7) NOT NULL, reason VARCHAR(32) NOT NULL, amount INT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY one_grant(account_id,period,reason), FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
 await db.query(`CREATE TABLE IF NOT EXISTS credit_reservations (account_id CHAR(36) NOT NULL, request_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL, payload_hash CHAR(64) NOT NULL, period CHAR(7) NOT NULL, status ENUM('reserved','unknown','sent','failed') NOT NULL DEFAULT 'reserved', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(account_id,request_id), FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
@@ -32,6 +32,9 @@ await db.query(`CREATE TABLE IF NOT EXISTS payment_orders (id VARCHAR(64) PRIMAR
 await db.query(`CREATE TABLE IF NOT EXISTS credit_adjustments (account_id CHAR(36) NOT NULL,request_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,actor_id CHAR(36) NOT NULL,amount INT NOT NULL,reason VARCHAR(200) NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,request_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
 await column('payment_orders','expires_at','DATETIME NULL');
 await column('payment_orders','kind',"VARCHAR(16) NOT NULL DEFAULT 'whatsapp'");
+await column('plans','max_share_assets','INT UNSIGNED NOT NULL DEFAULT 20');
+await column('plans','max_share_storage_bytes','BIGINT UNSIGNED NOT NULL DEFAULT 104857600');
+await db.query("UPDATE plans SET max_share_assets=10,max_share_storage_bytes=52428800 WHERE id='basic' AND max_share_assets=20 AND max_share_storage_bytes=104857600");
 await migrateAI();
 await migrateAutoShare();
 console.log('Migrasi fondasi dan AI selesai.');

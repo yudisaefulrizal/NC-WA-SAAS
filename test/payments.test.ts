@@ -9,7 +9,7 @@ const accounts:string[]=[],configs:string[]=[],plans:string[]=[];
 async function fixture(){const account=randomUUID(),config=randomUUID(),plan='test-'+randomUUID().slice(0,20);accounts.push(account);configs.push(config);plans.push(plan);
  await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);await basicWallet(account);
  await db.execute("INSERT INTO payment_config(id,environment,secret) VALUES (?,'sandbox',?)",[config,encrypt('fixture-key')]);
- await db.execute('INSERT INTO plans VALUES (?,?,10000,500,3,TRUE)',[plan,'Fixture plan']);return {account,config,plan};}
+ await db.execute('INSERT INTO plans VALUES (?,?,10000,500,3,TRUE,20,104857600)',[plan,'Fixture plan']);return {account,config,plan};}
 after(async()=>{for(const id of accounts){await db.execute('DELETE FROM accounts WHERE id=?',[id]);await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);}for(const id of configs)await db.execute('DELETE FROM payment_config WHERE id=?',[id]);for(const id of plans)await db.execute('DELETE FROM plans WHERE id=?',[id]);await db.end();});
 test('Checkout snapshots catalog; parallel create and verified callback activate once using pinned credentials',async()=>{
  const f=await fixture();let charges=0;let order='';let invalid=false;const calls:string[]=[];

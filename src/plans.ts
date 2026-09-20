@@ -28,11 +28,13 @@ export async function basicWallet(accountId:string,now=new Date()){
 }
 export function planInput(body:unknown){
  if(!body||typeof body!=='object')return null;
- const {name,price,credits,session_limit,active}=body as Record<string,unknown>;
+ const {name,price,credits,session_limit,active,max_share_assets,max_share_storage_bytes}=body as Record<string,unknown>;
  if(typeof name!=='string'||!name.trim()||name.length>100||typeof active!=='boolean')return null;
  if(![price,credits,session_limit].every(v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=100000000))return null;
  if((session_limit as number)<1||(session_limit as number)>1000)return null;
- return {name:name.trim(),price:price as number,credits:credits as number,session_limit:session_limit as number,active};
+ if(typeof max_share_assets!=='number'||!Number.isSafeInteger(max_share_assets)||max_share_assets<0||max_share_assets>100000)return null;
+ if(typeof max_share_storage_bytes!=='number'||!Number.isSafeInteger(max_share_storage_bytes)||max_share_storage_bytes<0||max_share_storage_bytes>10*1024*1024*1024)return null;
+ return {name:name.trim(),price:price as number,credits:credits as number,session_limit:session_limit as number,active,maxShareAssets:max_share_assets,maxShareStorageBytes:max_share_storage_bytes};
 }
 
 // Calendar month in WIB, clamped to the final day of the destination month.

@@ -8,7 +8,8 @@ import {db} from '../src/db.js';
 import {basicPeriod,basicWallet,planInput} from '../src/plans.js';
 const ids:string[]=[];
 after(async()=>{for(const id of ids)await db.execute('DELETE FROM accounts WHERE id=?',[id]);await db.end();});
-test('WIB reset boundary and plan validation',()=>{assert.equal(basicPeriod(new Date('2026-09-30T16:59:59Z')),'2026-09');assert.equal(basicPeriod(new Date('2026-09-30T17:00:00Z')),'2026-10');assert.equal(planInput({name:'A',price:-1,credits:100,session_limit:1,active:true}),null);assert.equal(planInput({name:'A',price:0,credits:0.5,session_limit:1,active:true}),null);});
+const withShareLimits=(o:object)=>({max_share_assets:20,max_share_storage_bytes:104857600,...o});
+test('WIB reset boundary and plan validation',()=>{assert.equal(basicPeriod(new Date('2026-09-30T16:59:59Z')),'2026-09');assert.equal(basicPeriod(new Date('2026-09-30T17:00:00Z')),'2026-10');assert.equal(planInput(withShareLimits({name:'A',price:-1,credits:100,session_limit:1,active:true})),null);assert.equal(planInput(withShareLimits({name:'A',price:0,credits:0.5,session_limit:1,active:true})),null);assert.equal(planInput({name:'A',price:0,credits:100,session_limit:1,active:true}),null);});
 test('Concurrent grants/reset happen once and replace remaining balance',async()=>{
  const id=randomUUID();ids.push(id);await db.execute('INSERT INTO accounts (id,email,password_hash) VALUES (?,?,?)',[id,`test-${id}@example.test`,'unused']);
  const now=new Date('2026-08-10T00:00:00Z');
@@ -27,7 +28,7 @@ test('Registration grants current basic quota and denies plan administration',as
  const wallet=(await a.get('/api/wallet').expect(200)).body;assert.equal(wallet.balance,wallet.quota);
  await a.get('/api/admin/plans').expect(403);
  await a.delete('/api/admin/plans/basic').set('Origin',origin).expect(403);
- await a.put('/api/admin/plans/basic').set('Origin',origin).send({name:'hacked',price:0,credits:999999,session_limit:99,active:true}).expect(403);
+ await a.put('/api/admin/plans/basic').set('Origin',origin).send(withShareLimits({name:'hacked',price:0,credits:999999,session_limit:99,active:true})).expect(403);
 });
 
 test('Owner manages catalog, basic cannot be disabled, changes do not mutate wallets',async()=>{
@@ -38,11 +39,11 @@ test('Owner manages catalog, basic cannot be disabled, changes do not mutate wal
  const wallet=await basicWallet(id);const a=request.agent(app),origin=process.env.APP_ORIGIN??'http://127.0.0.1:8067';
  try{
  await a.post('/api/auth/login').set('Origin',origin).send({email,password}).expect(200);
- await a.put('/api/admin/plans/'+planId).set('Origin',origin).send({name:'Test',price:100,credits:50,session_limit:2,active:true}).expect(200);
+ await a.put('/api/admin/plans/'+planId).set('Origin',origin).send(withShareLimits({name:'Test',price:100,credits:50,session_limit:2,active:true})).expect(200);
  assert.ok((await a.get('/api/plans')).body.some((p:{id:string})=>p.id===planId));
- await a.put('/api/admin/plans/'+planId).set('Origin',origin).send({name:'Test',price:200,credits:80,session_limit:2,active:false}).expect(200);
+ await a.put('/api/admin/plans/'+planId).set('Origin',origin).send(withShareLimits({name:'Test',price:200,credits:80,session_limit:2,active:false})).expect(200);
  assert.equal((await a.get('/api/plans')).body.some((p:{id:string})=>p.id===planId),false);
- await a.put('/api/admin/plans/basic').set('Origin',origin).send({name:'Basic',price:0,credits:100,session_limit:1,active:false}).expect(400);
+ await a.put('/api/admin/plans/basic').set('Origin',origin).send(withShareLimits({name:'Basic',price:0,credits:100,session_limit:1,active:false})).expect(400);
  await a.delete('/api/admin/plans/basic').set('Origin',origin).expect(409);
  await db.execute('UPDATE wallets SET plan_id=?,expires_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 DAY) WHERE account_id=?',[planId,id]);
  await a.delete('/api/admin/plans/'+planId).set('Origin',origin).expect(200);

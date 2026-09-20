@@ -1,11 +1,12 @@
 import {randomUUID,randomInt} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
+import {Readable} from 'node:stream';
 import express from 'express';
 import type {RowDataPacket,PoolConnection} from 'mysql2/promise';
 import {db} from './db.js';
 import {ApiError,type SessionManager} from './engine/sessions.js';
 import {object,recipient,requiredString} from './engine/messages.js';
-import {downloadPublicMedia} from './engine/download.js';
+import {AssetStore} from './engine/assets.js';
 import {sendBilled} from './outbound.js';
 
 const invalid=(message:string)=>new ApiError(400,'invalid_request',message);
@@ -28,14 +29,8 @@ export function templateInput(body:unknown){
  const message=type==='text'?requiredString(b.message,'Pesan',10000):(b.message??'');
  if(typeof message!=='string'||message.length>10000)throw invalid('Caption maksimal 10000 karakter');
  if(type==='audio'&&message.trim())throw invalid('Audio tidak mendukung caption; gunakan template teks terpisah');
- let url:string|null=null;
- if(type!=='text'){
-  url=requiredString(b.media_url,'URL media',4096);
-  let parsed:URL;try{parsed=new URL(url);}catch{throw invalid('URL media tidak valid');}
-  if(!['https:','http:'].includes(parsed.protocol)||parsed.username||parsed.password)throw invalid('Gunakan URL media HTTP/HTTPS publik tanpa kredensial');
- }
- const filename=b.filename?requiredString(b.filename,'Nama file',255):null;
- return {name,message,type,url,filename};
+ const assetId=type!=='text'?requiredString(b.asset_id,'Asset',36):null;
+ return {name,message,type,assetId};
 }
 export function jobInput(body:unknown,now=Date.now()){
  const b=object(body),name=requiredString(b.name,'Nama',100),session=requiredString(b.session_id,'Sesi',64);
@@ -78,13 +73,51 @@ async function enqueue(c:PoolConnection,t:RowDataPacket,source:string,selected?:
  const [content]=await c.execute<RowDataPacket[]>('SELECT * FROM auto_share_templates WHERE account_id=? AND id=? FOR SHARE',[t.account_id,templateId]);
  if(!content[0])throw invalid('Template tidak tersedia');
  const v=content[0],id=randomUUID();
- await c.execute('INSERT INTO auto_share_runs(id,account_id,job_id,job_name,template_id,template_name,session_id,message,source,media_type,media_url,filename) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',[id,t.account_id,t.id,t.name,v.id,v.name,t.session_id,v.message,source,v.media_type,v.media_url,v.filename]);
+ await c.execute('INSERT INTO auto_share_runs(id,account_id,job_id,job_name,template_id,template_name,session_id,message,source,media_type,asset_id,filename) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',[id,t.account_id,t.id,t.name,v.id,v.name,t.session_id,v.message,source,v.media_type,v.asset_id,v.filename]);
  if(source==='schedule')await c.execute('UPDATE auto_share_jobs SET rotation_index=? WHERE id=?',[(t.rotation_index+1)%templates.length,t.id]);
  for(let i=0;i<targets.length;i++)await c.execute('INSERT INTO auto_share_deliveries(id,run_id,nomor,position) VALUES (?,?,?,?)',[randomUUID(),id,targets[i],i]);
  return {id,total:targets.length};
 }
-export function createAutoShare(getManager:(account:string)=>Promise<SessionManager>,delay=sleep,download=downloadPublicMedia){
+export function createAutoShare(getManager:(account:string)=>Promise<SessionManager>,assets:AssetStore,delay=sleep){
  const router=express.Router();
+ async function quota(account:string){
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT p.max_share_assets,p.max_share_storage_bytes FROM wallets w JOIN plans p ON p.id=w.plan_id WHERE w.account_id=?',[account]);
+  return rows[0]?{maxCount:Number(rows[0].max_share_assets),maxBytes:Number(rows[0].max_share_storage_bytes)}:{maxCount:0,maxBytes:0};
+ }
+ router.post('/assets',express.raw({type:'*/*',limit:'32mb'}),async(req,res)=>{
+  const account=res.locals.accountId;
+  const filename=(req.get('X-Filename')??'asset').slice(0,255);
+  if(!Buffer.isBuffer(req.body)||!req.body.length)throw invalid('Isi file kosong atau tidak terbaca');
+  const saved=await assets.save(account,filename,Readable.from(req.body),await quota(account));
+  res.status(201).json({id:saved.id,filename:saved.filename,mimetype:saved.mimetype,media_type:saved.mediaType,size_bytes:saved.sizeBytes});
+ });
+ router.get('/assets',async(req,res)=>{
+  const account=res.locals.accountId;
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT id,filename,mimetype,media_type,size_bytes,created_at,public_token FROM share_assets WHERE account_id=? ORDER BY created_at DESC',[account]);
+  const [[usage]]=await db.execute<RowDataPacket[]>('SELECT COUNT(*) AS count, COALESCE(SUM(size_bytes),0) AS bytes FROM share_assets WHERE account_id=?',[account]);
+  const limit=await quota(account);
+  res.json({assets:rows,used_count:Number(usage.count),used_bytes:Number(usage.bytes),max_count:limit.maxCount,max_bytes:limit.maxBytes});
+ });
+ router.get('/assets/:id/file',async(req,res)=>{
+  const file=await assets.get(res.locals.accountId,req.params.id);
+  res.set('Content-Type',file.mimetype).set('Content-Disposition','inline').set('Cache-Control','private, no-store').sendFile(file.path);
+ });
+ router.put('/assets/:id/public',async(req,res)=>{
+  const isPublic=object(req.body).public;
+  if(typeof isPublic!=='boolean')throw invalid('Status publik tidak valid');
+  const token=await assets.setPublic(res.locals.accountId,req.params.id,isPublic);
+  res.json({public_token:token});
+ });
+ router.delete('/assets/:id',async(req,res)=>{
+  const account=res.locals.accountId;
+  const [used]=await db.execute<RowDataPacket[]>('SELECT id FROM auto_share_templates WHERE account_id=? AND asset_id=?',[account,req.params.id]);
+  if(used.length)throw new ApiError(409,'asset_in_use','Asset masih digunakan oleh template. Hapus dari template terlebih dahulu.');
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT id FROM share_assets WHERE account_id=? AND id=?',[account,req.params.id]);
+  if(!rows.length)throw new ApiError(404,'asset_not_found','Asset tidak ditemukan');
+  await assets.remove(account,req.params.id);
+  await db.execute('DELETE FROM share_assets WHERE account_id=? AND id=?',[account,req.params.id]);
+  res.json({ok:true});
+ });
  router.get('/contacts',async(_req,res)=>{const [rows]=await db.execute('SELECT id,nomor,kelompkontak FROM daftar_kontak WHERE account_id=? ORDER BY kelompkontak,nomor',[res.locals.accountId]);res.json(rows);});
  async function saveContact(account:string,id:string,body:unknown,update:boolean){
   const v=contactInput(body);
@@ -98,13 +131,20 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
  router.put('/contacts/:id',async(req,res)=>res.json(await saveContact(res.locals.accountId,req.params.id,req.body,true)));
  router.delete('/contacts/:id',async(req,res)=>{await db.execute('DELETE FROM daftar_kontak WHERE account_id=? AND id=?',[res.locals.accountId,req.params.id]);res.json({ok:true});});
  async function accountLock(c:PoolConnection,account:string){await c.execute('SELECT id FROM accounts WHERE id=? FOR UPDATE',[account]);}
- router.get('/templates',async(_req,res)=>{const [rows]=await db.execute('SELECT id,name,message,media_type,media_url,filename FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);res.json(rows);});
+ router.get('/templates',async(_req,res)=>{const [rows]=await db.execute('SELECT id,name,message,media_type,asset_id,filename FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);res.json(rows);});
  async function saveTemplate(account:string,id:string,body:unknown,update:boolean){
   const v=templateInput(body),c=await db.getConnection();
   try{await c.beginTransaction();await accountLock(c,account);
+   let filename:string|null=null;
+   if(v.assetId){
+    const [rows]=await c.execute<RowDataPacket[]>('SELECT filename,media_type FROM share_assets WHERE account_id=? AND id=? FOR SHARE',[account,v.assetId]);
+    if(!rows[0])throw invalid('Asset tidak ditemukan');
+    if(rows[0].media_type!==v.type)throw invalid('Jenis asset tidak sesuai dengan jenis konten template');
+    filename=rows[0].filename;
+   }
    if(update){const [rows]=await c.execute<RowDataPacket[]>('SELECT id FROM auto_share_templates WHERE account_id=? AND id=?',[account,id]);if(!rows.length)throw new ApiError(404,'not_found','Template tidak ditemukan');
-    await c.execute('UPDATE auto_share_templates SET name=?,message=?,media_type=?,media_url=?,filename=? WHERE account_id=? AND id=?',[v.name,v.message,v.type,v.url,v.filename,account,id]);
-   }else await c.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,media_url,filename,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,?,?,?,'',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[id,account,v.name,v.message,v.type,v.url,v.filename]);
+    await c.execute('UPDATE auto_share_templates SET name=?,message=?,media_type=?,asset_id=?,filename=? WHERE account_id=? AND id=?',[v.name,v.message,v.type,v.assetId,filename,account,id]);
+   }else await c.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,asset_id,filename,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,?,?,?,'',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[id,account,v.name,v.message,v.type,v.assetId,filename]);
    await c.commit();return {id};
   }catch(e){await c.rollback();throw e;}finally{c.release();}
  }
@@ -168,8 +208,11 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
     manager=await getManager(run.account_id);
     const to=target.nomor.replace(/@s\.whatsapp\.net$/,'');
     const media=run.media_type&&run.media_type!=='text';
-    const body=media?{to,type:run.media_type,url:run.media_url,...(run.message?{caption:run.message}:{}),...(run.filename?{filename:run.filename}:{})}:{to,text:run.message};
-    const result=await sendBilled(run.account_id,manager,run.session_id,media?'media':'text',body,'share_'+target.id,download,async()=>{await manager!.typing(run.session_id,target.nomor,'composing');await delay(1000);});
+    const body=media?{to,type:run.media_type,url:run.asset_id,...(run.message?{caption:run.message}:{}),...(run.filename?{filename:run.filename}:{})}:{to,text:run.message};
+    // Local assets are already on disk; wrap AssetStore.get in the download() contract so
+    // sendBilled reads the file directly instead of fetching a public URL.
+    const readAsset=async(assetId:string)=>{const file=await assets.get(run.account_id,assetId);return {path:file.path,mimetype:file.mimetype,cleanup:async()=>{}};};
+    const result=await sendBilled(run.account_id,manager,run.session_id,media?'media':'text',body,'share_'+target.id,readAsset,async()=>{await manager!.typing(run.session_id,target.nomor,'composing');await delay(1000);});
     accepted=true;
     await db.execute("UPDATE auto_share_deliveries SET status='sent',message_id=? WHERE id=?",[result.messageId,target.id]);
    }catch(e){

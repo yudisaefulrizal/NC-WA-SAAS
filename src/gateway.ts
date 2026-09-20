@@ -4,6 +4,7 @@ import {ai as defaultAI} from './ai.js';
 import express from 'express';
 import {TenantWebhooks} from './webhooks.js';
 import {MediaStore} from './engine/media.js';
+import {AssetStore} from './engine/assets.js';
 import {EventStream} from './engine/events.js';
 import {sendBilled} from './outbound.js';
 import {object,readRecipient,requiredString} from './engine/messages.js';
@@ -59,7 +60,8 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
   if(!rows[0]){res.status(401).json({error:'unauthorized'});return;}
   res.locals.accountId=rows[0].id;res.locals.manager=await manager(rows[0].id);await (res.locals.manager as SessionManager).onBeforeSend!();next();
  });
- const autoShare=createAutoShare(manager);
+ const shareAssets=new AssetStore(resolve(root,'_share-assets'),db);
+ const autoShare=createAutoShare(manager,shareAssets);
  router.use('/auto-share',autoShare.router);
  router.post('/sessions/:id/messages/:kind',async(req,res)=>{
   if(req.params.kind!=='text'&&req.params.kind!=='media')throw new ApiError(404,'not_found','Operasi tidak tersedia');
@@ -130,6 +132,6 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
    if(rows[0])await manager(rows[0].id);
   }
  }
- return {router,restore,autoShare,start:()=>{hooks.start();autoShare.start();},refresh,health:()=>({loadedAccounts:managers.size,pendingSends:[...pending.values()].reduce((a,b)=>a+b,0)}),revoke:(account:string,tag?:string)=>{const stream=streams.get(account);if(tag)stream?.revoke(tag);else stream?.stop();},stop:async()=>{clearInterval(maintenance);await refreshing;await autoShare.stop();await hooks.stop();await ai.stop();for(const stream of streams.values())stream.stop();for(const pending of managers.values())await (await pending).stop();for(const files of media.values())await files.flush();managers.clear();}};
+ return {router,restore,autoShare,shareAssets,start:()=>{hooks.start();autoShare.start();},refresh,health:()=>({loadedAccounts:managers.size,pendingSends:[...pending.values()].reduce((a,b)=>a+b,0)}),revoke:(account:string,tag?:string)=>{const stream=streams.get(account);if(tag)stream?.revoke(tag);else stream?.stop();},stop:async()=>{clearInterval(maintenance);await refreshing;await autoShare.stop();await hooks.stop();await ai.stop();for(const stream of streams.values())stream.stop();for(const pending of managers.values())await (await pending).stop();for(const files of media.values())await files.flush();managers.clear();}};
 }
 export const gateway=createGateway();
