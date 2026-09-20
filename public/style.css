@@ -86,7 +86,6 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 .ai-source-settings details{margin-top:12px}
 
 /* AI credit purchase, moved from the AI page into Pembelian */
-#ai-credit-catalog{grid-template-columns:1fr;margin-bottom:24px}
 .ai-credit-card .package-icon{background:#e3f5eb;color:#07845a}
 .ai-credit-card .package-features{margin-bottom:20px}
 #ai-credit-modal label{margin-bottom:6px}
