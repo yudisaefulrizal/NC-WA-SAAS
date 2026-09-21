@@ -38,6 +38,21 @@ test('Uploaded photo is downscaled to the width limit, re-encoded to JPEG, and s
   assert.equal(rows[0].session_id, 'shop');
 });
 
+test('A multi-megabyte photo (past a stream\'s internal buffer size) saves without stalling', async () => {
+  const accountId = await account();
+  const width = 3000, height = 2000;
+  const raw = Buffer.alloc(width * height * 3);
+  for (let i = 0; i < raw.length; i++) raw[i] = Math.floor(Math.random() * 256);
+  const large = await sharp(raw, {raw: {width, height, channels: 3}}).jpeg({quality: 95}).toBuffer();
+  assert.ok(large.length > 1024 * 1024, 'fixture must exceed a single stream buffer to exercise backpressure');
+  const started = Date.now();
+  const saved = await store.save(accountId, 'shop', 'large.jpg', Readable.from(large));
+  assert.ok(Date.now() - started < 5000, 'must not stall waiting on an unread transform stream');
+  const file = await store.get(accountId, saved.id);
+  const meta = await sharp(file.path).metadata();
+  assert.equal(meta.width, 1920);
+});
+
 test('A narrower photo is kept at its original width instead of being enlarged', async () => {
   const accountId = await account();
   const small = await sharp({create: {width: 400, height: 300, channels: 3, background: {r: 10, g: 10, b: 10}}}).png().toBuffer();

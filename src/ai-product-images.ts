@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {createWriteStream} from 'node:fs';
 import {mkdir, rename, rm, stat} from 'node:fs/promises';
 import {join} from 'node:path';
-import {Readable, Transform} from 'node:stream';
+import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import sharp from 'sharp';
 import {db} from './db.js';
@@ -20,18 +20,18 @@ export class ProductImageStore {
   const dir = this.dir(accountId);
   await mkdir(dir, {recursive: true, mode: 0o700});
   const temporary = join(dir, `${id}.part`);
-  let size = 0;
-  const chunks: Buffer[] = [];
-  const limit = new Transform({
-   transform: (chunk: Buffer, _encoding, callback) => {
-    size += chunk.length;
-    if (size > MAX_UPLOAD_BYTES) { callback(new ApiError(413, 'image_too_large', 'Ukuran foto melebihi batas 12 MB')); return; }
-    chunks.push(chunk);
-    callback(null, chunk);
-   },
-  });
   try {
-   await pipeline(body, limit, {signal: AbortSignal.timeout(30_000)});
+   let size = 0;
+   const chunks: Buffer[] = [];
+   // Read the upload directly (no dangling Transform as the pipeline's tail): a Transform with
+   // no writable destination never drains, so it stalls under backpressure on anything past a
+   // few KB and only surfaces as a 30s abort -- small test uploads happened to fit its internal
+   // buffer and never hit that path, which is why only large photos appeared to fail.
+   for await (const chunk of body) {
+    size += chunk.length;
+    if (size > MAX_UPLOAD_BYTES) throw new ApiError(413, 'image_too_large', 'Ukuran foto melebihi batas 12 MB');
+    chunks.push(chunk);
+   }
    const original = Buffer.concat(chunks);
    const sniffed = sniffMediaType(original.subarray(0, 64), filename);
    if (!sniffed || sniffed.mediaType !== 'image') throw new ApiError(400, 'unsupported_file_type', 'Foto harus berupa gambar (PNG/JPEG/WEBP)');
