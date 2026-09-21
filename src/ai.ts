@@ -7,7 +7,7 @@ import {runAgents,updateRouterContext,defaultTools,type AITools} from './ai-agen
 import {randomInt,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {request} from 'node:https';
-import type {PoolConnection,RowDataPacket} from 'mysql2/promise';
+import type {PoolConnection,RowDataPacket,ResultSetHeader} from 'mysql2/promise';
 import {db} from './db.js';
 import {encrypt,decrypt} from './payments.js';
 import {digest} from './security.js';
@@ -208,6 +208,12 @@ export class AIService {
  async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_data_sources','ai_products','ai_orders','ai_fallbacks'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
  async conversations(account:string,session:string){const [rows]=await db.execute('SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',[account,session]);return rows;}
  async fallbacks(account:string,session:string){const [rows]=await db.execute('SELECT id,customer,status,agent,reason,question,staff_answer,created_at,answered_at,resolved_at FROM ai_fallbacks WHERE account_id=? AND session_id=? ORDER BY created_at DESC LIMIT 100',[account,session]);return rows;}
+ async removeFallback(account:string,session:string,id:string){
+  if(!/^FB-[A-Z0-9]{8,48}$/.test(id))throw fail('ID fallback tidak valid');
+  const [result]=await db.execute<ResultSetHeader>('DELETE FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=?',[id,account,session]);
+  if(!result.affectedRows)throw new ApiError(404,'fallback_not_found','Tiket fallback tidak tersedia.');
+  return {ok:true};
+ }
  async applyFallbackKnowledge(account:string,session:string,id:string,body:unknown){
   if(!/^FB-[A-Z0-9]{8,48}$/.test(id))throw fail('ID fallback tidak valid');
   const content=text(object(body).content,2000,'Knowledge dari fallback');if(!content)throw fail('Knowledge dari fallback wajib diisi');

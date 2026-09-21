@@ -118,6 +118,7 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  router.get('/sessions/:id/ai/fallbacks',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.fallbacks(res.locals.accountId,req.params.id));});
  router.post('/sessions/:id/ai/fallbacks/:fallback/answer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.answerFallback(res.locals.accountId,res.locals.manager,req.params.id,req.params.fallback,req.body));});
  router.post('/sessions/:id/ai/fallbacks/:fallback/knowledge',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.applyFallbackKnowledge(res.locals.accountId,req.params.id,req.params.fallback,req.body));});
+ router.delete('/sessions/:id/ai/fallbacks/:fallback',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.removeFallback(res.locals.accountId,req.params.id,req.params.fallback));});
  router.put('/sessions/:id/ai/conversations/:customer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversation(res.locals.accountId,req.params.id,req.params.customer,req.body));});
  router.get('/sessions/:id',(req,res)=>res.json((res.locals.manager as SessionManager).detail(req.params.id)));
  router.get('/sessions/:id/qr',(req,res)=>res.json((res.locals.manager as SessionManager).qr(req.params.id)));
