@@ -239,7 +239,9 @@ export class AIService {
   const id=digest(JSON.stringify([session,message.from,message.messageId]));
   const prepared=await transaction(async c=>{await lockAccount(c,account);
    const [existing]=await c.execute<RowDataPacket[]>('SELECT request_id FROM ai_usage WHERE account_id=? AND request_id=?',[account,id]);if(existing[0])return;
-   const [current]=await c.execute<RowDataPacket[]>('SELECT enabled,knowledge,behavior,fallback_number,fallback_notify,revision FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);if(!current[0]?.enabled)return;
+   const profileColumns=profileFields.map(field=>'profil_'+field).join(',');
+   const [current]=await c.execute<RowDataPacket[]>(`SELECT enabled,behavior,fallback_number,fallback_notify,revision,${profileColumns} FROM ai_assistants WHERE account_id=? AND session_id=?`,[account,session]);if(!current[0]?.enabled)return;
+   const knowledge=composeKnowledge(Object.fromEntries(profileFields.map(field=>[field,String(current[0]['profil_'+field]??'')])) as Record<ProfileField,string>);
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
    await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,message.from]);
    const [conversations]=await c.execute<RowDataPacket[]>('SELECT paused,messages,revision,router_context FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);if(conversations[0].paused)return;
@@ -257,7 +259,7 @@ export class AIService {
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
    await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,?,'generating',?,?,?,?,?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge:current[0].knowledge as string,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
+   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
   });if(!prepared)return;
   const jid=message.from+'@s.whatsapp.net';
   // Read/presence are best effort and never add a message or a credit charge.
