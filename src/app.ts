@@ -133,6 +133,7 @@ app.post('/api/admin/ai/studio/run',rateLimit({windowMs:60000,limit:10}),async(r
  res.end();
 });
 app.get('/api/admin/ai/usage',async(_req,res)=>res.json(await ai.modelUsage()));
+app.get('/api/admin/ai/failures',async(_req,res)=>res.json(await ai.agentFailures()));
 app.put('/api/admin/ai',async(req,res)=>res.json(await ai.configure(res.locals.account.id,req.body)));
 app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res.json(await ai.test(req.body?.tier)));
 app.post('/api/admin/accounts/:id/ai-credits',async(req,res)=>res.json(await ai.adjust(res.locals.account.id,req.params.id,req.body)));

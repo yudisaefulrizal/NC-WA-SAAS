@@ -25,7 +25,7 @@ after(async()=>{
 });
 const products=[{id:'P-001',name:'Produk uji',type:'product',description:'',price:150000,stock:10,active:true}];
 const configuration=async()=>({...defaults,model_cheap:'cheap',model_medium:'medium',model_smart:'smart',secret:'private-test-secret'});
-async function input(message='Pesan produk'){return {message,knowledge:'Bisnis uji',behavior:'Ramah',products,revision:(await workflowState()).revision};}
+async function input(message='Pesan produk'){return {message,profile:{lainnya:'Bisnis uji'},behavior:'Ramah',products,revision:(await workflowState()).revision};}
 const transport:AITransport=async(c,m)=>{
  const latest=m.filter(x=>x.role==='user').at(-1)!.content;
  if(c.call_role==='router')return JSON.stringify({sub_agent:latest==='statusnya?'?'dukungan':'transaksi',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:latest});
@@ -64,7 +64,7 @@ test('Sandbox traces real agent/tool flow, keeps context across turns, and never
  assert.ok(!JSON.stringify(events).includes('private-test-secret'));
  const [orders]=await db.execute<any[]>('SELECT id FROM ai_orders WHERE account_id=?',[owner]);const [usage]=await db.execute<any[]>('SELECT request_id FROM ai_usage WHERE account_id=?',[owner]);assert.equal(orders.length,0);assert.equal(usage.length,0);
  await assert.rejects(runner.run(client,{...await input(),session},()=>{}),{code:'studio_session_missing'});
- await assert.rejects(runner.run(owner,{...await input(),session,knowledge:'Berubah'},()=>{}),{code:'studio_session_changed'});
+ await assert.rejects(runner.run(owner,{...await input(),session,profile:{lainnya:'Berubah'}},()=>{}),{code:'studio_session_changed'});
 });
 
 test('Studio traces network retries and format repair without replaying order creation',async()=>{

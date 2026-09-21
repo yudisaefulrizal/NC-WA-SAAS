@@ -87,6 +87,7 @@ export class AIService {
   catch{throw new ApiError(502,'ai_provider_failed','Koneksi model '+tier+' belum berhasil; periksa endpoint, key, dan model.');}
  }
  async modelUsage(){const [rows]=await db.query('SELECT account_id,session_id,request_id,status,agent,model_calls,created_at FROM ai_usage ORDER BY created_at DESC LIMIT 100');return rows;}
+ async agentFailures(){const [rows]=await db.query('SELECT account_id,session_id,request_id,agent,error,message,created_at FROM ai_agent_failures ORDER BY created_at DESC LIMIT 100');return rows;}
  async trial(account:string,body:unknown){
   const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
   if(!question)throw fail('Pertanyaan wajib diisi');if(!session)throw fail('Pilih nomor layanan yang akan diuji');
@@ -279,6 +280,8 @@ export class AIService {
    throw Error('ai_retry_limit');
   };
   let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
+  let lastNode:string|undefined,lastTraceError:string|undefined;
+  config.onTrace=event=>{if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;}};
   try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
    await guard();
    try{return await this.tools.execute(name,query,context);}catch(error){
@@ -286,7 +289,10 @@ export class AIService {
     await retryPause(0);return this.tools.execute(name,query,context);
    }
   }},prepared.routerContext);fallback=result.fallback;answer=fallback?'Baik, saya konfirmasi dulu dan akan melanjutkan jawaban segera.':result.answer;agent=result.agent;}
-  catch{generationFailed=true;answer=aiFallback;}
+  catch(error){generationFailed=true;answer=aiFallback;
+   const errorCode=error instanceof Error?error.message:'unknown_error';
+   await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message) VALUES (?,?,?,?,?,?)',[account,session,id,lastNode??null,(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000)]).catch(()=>{});
+  }
   // Context is internal and never billed. A failed summary clears stale context on a successful send.
   let routerContext:string|null=null;
   if(!generationFailed)try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer);}catch{console.error('Pembaruan konteks router AI gagal.');}

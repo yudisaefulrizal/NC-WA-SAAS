@@ -13,7 +13,7 @@ import {decrypt} from '../src/payments.js';
 import {digest} from '../src/security.js';
 const accounts:string[]=[];
 const assistant=new AIService();
-const product:Product={id:'P-1',name:'Produk A',type:'product',description:'Produk ringan',price:125000,stock:10,active:true};
+const product:Product={id:'P-1',name:'Produk A',type:'product',description:'Produk ringan',price:125000,stock:10,unit:'pcs',active:true};
 const input={items:[{product_id:'P-1',quantity:2}],notes:'Tolong siapkan'};
 async function fixture():Promise<ToolContext>{const account=randomUUID();accounts.push(account);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);return {account,session:'shop',customer:'628123456789',requestId:'request-1',knowledge:'Knowledge '+account,behavior:'Ramah'};}
 async function configure(scope:ToolContext,products:unknown,orders:unknown){return assistant.saveAssistant(scope.account,scope.session,{enabled:true,profile:{lainnya:scope.knowledge},behavior:scope.behavior,products_source:products,orders_source:orders});}
