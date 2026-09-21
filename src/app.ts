@@ -75,7 +75,7 @@ app.post('/api/payments/:id/cancel',async(req,res)=>{const order=await payments.
 app.get('/api/payments/:id/qr',async(req,res)=>res.set('Content-Type','image/png').set('Cache-Control','private, no-store').send(await payments.qr(res.locals.account.id,req.params.id)));
 app.post('/api/ai/payments',async(req,res)=>res.json(await payments.create(res.locals.account.id,'ai-10000','ai',req.body?.units)));
 app.get('/api/ai/wallet',async(_req,res)=>res.json(await ai.wallet(res.locals.account.id)));
-app.post('/api/ai/trial',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res.json(await ai.trial(res.locals.account.id,req.body)));
+app.post('/api/ai/trial',rateLimit({windowMs:60000,limit:120}),async(req,res)=>res.json(await ai.trial(res.locals.account.id,req.body)));
 app.get('/api/ai/usage',async(req,res)=>res.json(req.query.page===undefined?await ai.usage(res.locals.account.id):await ai.usagePage(res.locals.account.id,req.query.page)));
 app.get('/api/wallet',async(_req,res)=>res.json(await basicWallet(res.locals.account.id)));
 app.get('/api/plans',async(_req,res)=>{const [plans]=await db.query('SELECT * FROM plans WHERE active=TRUE');res.json(plans);});
