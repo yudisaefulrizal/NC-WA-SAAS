@@ -67,4 +67,12 @@ export async function migrateAI(){
   const fresh=JSON.stringify(defaultWorkflow());
   await db.query('UPDATE ai_workflow SET draft=?,active=IF(active IS NULL,NULL,?),revision=revision+1,layanan_merge_version=1 WHERE id=1',[fresh,fresh]);
  }
+ // Agent "informasi" renamed to "profil_perusahaan" for clarity; old node key no longer validates, so reset again.
+ const [renamedColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','profil_perusahaan_rename_version']);
+ if(!renamedColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN profil_perusahaan_rename_version INT UNSIGNED NOT NULL DEFAULT 0');
+ const [renamedRows]=await db.query<any[]>('SELECT profil_perusahaan_rename_version FROM ai_workflow WHERE id=1');
+ if(renamedRows[0]&&renamedRows[0].profil_perusahaan_rename_version<1){
+  const fresh=JSON.stringify(defaultWorkflow());
+  await db.query('UPDATE ai_workflow SET draft=?,active=IF(active IS NULL,NULL,?),revision=revision+1,profil_perusahaan_rename_version=1 WHERE id=1',[fresh,fresh]);
+ }
 }

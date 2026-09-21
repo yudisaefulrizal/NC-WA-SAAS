@@ -1,4 +1,4 @@
-export const routerAgentNames=['pembuka','informasi','layanan','penutup','lainnya'] as const;
+export const routerAgentNames=['pembuka','profil_perusahaan','layanan','penutup','lainnya'] as const;
 export type RouterAgentName=typeof routerAgentNames[number];
 export const routerOutputSchema={
  type:'object',

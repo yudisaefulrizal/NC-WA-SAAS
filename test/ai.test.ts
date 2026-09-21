@@ -13,7 +13,7 @@ class FixtureAI extends AIService {settings={...defaults,memory_limit:3,secret:'
 async function fixture(call:AITransport=async()=> 'Jawaban bisnis',sendFail=false,wait:(ms:number)=>Promise<void>=async()=>{},events:string[]=[],presenceFail=false,raw=false,tools?:AITools){
  const id=randomUUID();ids.push(id);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[id,id+'@test.invalid','unused']);await basicWallet(id);
  const service=new FixtureAI(raw?call:async(c,m,max)=>{
-  if(m[0]?.content.startsWith('Anda adalah ROUTER'))return JSON.stringify({s_p_o_konteks:'Pelanggan meminta bantuan',sub_agent:'informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+  if(m[0]?.content.startsWith('Anda adalah ROUTER'))return JSON.stringify({s_p_o_konteks:'Pelanggan meminta bantuan',sub_agent:'profil_perusahaan',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
   if(m[0]?.content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-informasi';
   return JSON.stringify({answer:await call(c,m,max)});
  },wait,tools);await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});await service.saveAssistant(id,'shop',{enabled:true,profile:{lainnya:'Produk tersedia'},behavior:'Gunakan bahasa Indonesia'});
@@ -157,7 +157,7 @@ test('Multi-agent WhatsApp flow switches agents, persists shared memory across r
  const transport:AITransport=async(_config,m)=>{
   if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-layanan';
   const input=m.filter(x=>x.role==='user').at(-1)!.content;
-  const agent=input.startsWith('info')?'informasi':'layanan';
+  const agent=input.startsWith('info')?'profil_perusahaan':'layanan';
   if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan meminta layanan',isi_pesan:input});
   observed.push({input,history:m.filter(x=>x.role!=='system')});
   return JSON.stringify({answer:'Balasan '+agent});
@@ -169,7 +169,7 @@ test('Multi-agent WhatsApp flow switches agents, persists shared memory across r
  const restarted=new FixtureAI(transport,async()=>{});
  await restarted.incoming(f.id,f.manager,'shop',f.message('restart','status pesanan'));
  assert.ok(observed[3].history.some(x=>x.content==='Balasan layanan'));
- assert.deepEqual((await rows(f.id)).map(x=>x.agent).sort(),['informasi','layanan','layanan','layanan']);
+ assert.deepEqual((await rows(f.id)).map(x=>x.agent).sort(),['layanan','layanan','layanan','profil_perusahaan']);
  const g=await fixture(transport,false,async()=>{},[],false,true);
  await g.service.saveAssistant(g.id,'shop',{enabled:true,profile:{lainnya:'Tenant B only'},behavior:'',products_source:{mode:'endpoint',endpoint:'https://8.8.8.8/products'},orders_source:{mode:'builtin'}});
  await g.service.incoming(g.id,g.manager,'shop',g.message('switch-0','info tenant B'));
@@ -185,7 +185,7 @@ test('Tool calls use authenticated tenant context and cannot run after manual ta
  const tools:AITools={async execute(name,_query,scope){executed.push(scope.account);assert.equal(scope.session,'shop');assert.equal(scope.customer,'628123456789');assert.equal(name,'get_knowledge');return {knowledge:scope.knowledge};}};
  const transport:AITransport=async(_c,m)=>{
   if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-pesanan';
-  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'profil_perusahaan',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
   return m.some(x=>x.content.startsWith('Tool result'))?JSON.stringify({answer:'Informasi tersedia'}):JSON.stringify({tool:'get_knowledge',query:''});
  };
  const f=await fixture(transport,false,async()=>{},[],false,true,tools),g=await fixture(transport,false,async()=>{},[],false,true,tools);
@@ -256,7 +256,7 @@ test('Failed delivery, failed context updates and manual takeover cannot leave m
  assert.equal((await failed.service.conversations(failed.id,'shop') as any[])[0].router_context,null);
  let failContext=false;
  const f=await fixture(async(_c,m)=>{
-  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.at(-1)!.content});
+  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'profil_perusahaan',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:m.at(-1)!.content});
   if(m[0].content.startsWith('Anda adalah Context Agent')){if(failContext)throw Error('timeout');return 'pelanggan-menunggu-informasi';}
   return JSON.stringify({answer:'Jawaban pelanggan'});
  },false,async()=>{},[],false,true);
@@ -275,7 +275,7 @@ test('Transient provider failures retry with backoff, retain billing and record 
  await f.service.incoming(f.id,f.manager,'shop',f.message('retry'));
  assert.equal(calls,3);assert.equal(f.sent(),1);assert.ok(delays[0]>=500&&delays[0]<=750);assert.ok(delays[1]>=1000&&delays[1]<=1250);
  const usage=(await rows(f.id))[0],trace=typeof usage.model_calls==='string'?JSON.parse(usage.model_calls):usage.model_calls;
- assert.deepEqual(trace.filter((c:any)=>c.role==='informasi').map((c:any)=>[c.status,c.attempt]),[['failed',1],['failed',2],['responded',3]]);
+ assert.deepEqual(trace.filter((c:any)=>c.role==='profil_perusahaan').map((c:any)=>[c.status,c.attempt]),[['failed',1],['failed',2],['responded',3]]);
  assert.equal(usage.charged,usage.input_words+2);assert.equal(usage.status,'sent');
 });
 
@@ -342,7 +342,7 @@ test('Owner model configuration persists, legacy fallback works, tests select ea
  const tiered=await fixture();Object.assign(tiered.service.settings,{model_cheap:'cheap-fixture',model_medium:'medium-fixture',model_smart:'smart-fixture'});
  await tiered.service.incoming(tiered.id,tiered.manager,'shop',tiered.message('tiered'));
  const usage=(await rows(tiered.id))[0];const trace=typeof usage.model_calls==='string'?JSON.parse(usage.model_calls):usage.model_calls;
- assert.deepEqual(trace.map((c:any)=>[c.role,c.model]),[['router','cheap-fixture'],['informasi','medium-fixture'],['context','cheap-fixture']]);assert.equal(usage.model,'medium-fixture');
+ assert.deepEqual(trace.map((c:any)=>[c.role,c.model]),[['router','cheap-fixture'],['profil_perusahaan','medium-fixture'],['context','cheap-fixture']]);assert.equal(usage.model,'medium-fixture');
  const client=await tiered.service.usage(tiered.id) as any[];assert.equal(client[0].model,undefined);assert.equal(client[0].model_calls,undefined);
  const {createApp}=await import('../src/app.js');const token=randomUUID();await db.execute('INSERT INTO login_sessions VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR))',[digest(token),tiered.id]);
  await request(createApp()).get('/api/admin/ai/usage').set('Cookie','ncwa_session='+token).expect(403);

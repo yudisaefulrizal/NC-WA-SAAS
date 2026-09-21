@@ -11,7 +11,7 @@ test('Router selects pending tickets and only selected questions reach the speci
   await runAgents(async(c,m)=>{
    if(c.call_role==='router'){
     assert.ok(m[1].content.includes('FB-A'));assert.ok(m[1].content.includes('FB-B'));
-    return JSON.stringify({...JSON.parse(route('informasi')),fallback_terkait:selected});
+    return JSON.stringify({...JSON.parse(route('profil_perusahaan')),fallback_terkait:selected});
    }
    const prompt=m.map(x=>x.content).join('\n');
    assert.equal(prompt.includes('Persetujuan diskon khusus'),selected.length>0);
@@ -25,7 +25,7 @@ test('Router cannot reference unavailable tickets, duplicate IDs, or omit select
   let calls=0;
   await assert.rejects(runAgents(async(c)=>{
    assert.equal(c.call_role,'router');calls++;
-   return JSON.stringify({...JSON.parse(route('informasi')),fallback_terkait:selected});
+   return JSON.stringify({...JSON.parse(route('profil_perusahaan')),fallback_terkait:selected});
   },defaults,messages,300,{...context,pendingFallbacks:[{id:'FB-A',question:'Diskon'}]}),/ai_invalid_route/);
   assert.equal(calls,2);
  }
@@ -52,7 +52,7 @@ test('Tool loop passes trusted scope, shares results, and deduplicates identical
  assert.equal(executions,1);assert.equal(result.agent,'layanan');
 });
 test('Invalid routes cannot dispatch agents or tools',async()=>{
- for(const raw of ['not JSON',route('informasi','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'   ',isi_pesan:messages.at(-1)!.content})]){
+ for(const raw of ['not JSON',route('profil_perusahaan','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'profil_perusahaan',s_p_o_konteks:'   ',isi_pesan:messages.at(-1)!.content})]){
   let calls=0;await assert.rejects(runAgents(async()=>{calls++;return raw;},defaults,messages,300,context));assert.equal(calls,2);
  }
 });
