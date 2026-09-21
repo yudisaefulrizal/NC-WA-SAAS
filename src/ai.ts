@@ -323,7 +323,11 @@ export class AIService {
   }
   // Context is internal and never billed. A failed summary clears stale context on a successful send.
   let routerContext:string|null=null;
-  if(!generationFailed)try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer);}catch{console.error('Pembaruan konteks router AI gagal.');}
+  if(!generationFailed)try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer);}catch(error){
+   console.error('Pembaruan konteks router AI gagal.');
+   const errorCode=error instanceof Error?error.message:'unknown_error';
+   await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message,model,prompt,raw_output,router_context) VALUES (?,?,?,?,?,?,?,?,?,?)',[account,session,id,'context',(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000),lastModel??null,lastMessages?JSON.stringify(lastMessages):null,lastRawOutput?.slice(0,65000)??null,prepared.routerContext]).catch(()=>{});
+  }
   const outputWords=generationFailed?0:countWords(answer),charged=generationFailed?0:creditCost(prepared.inputWords,outputWords,config.input_rate,config.output_rate);
   const fallbackId=fallback?'FB-'+randomUUID().replaceAll('-','').slice(0,20).toUpperCase():undefined;
   await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status=?,output_words=?,charged=?,agent=?,model_calls=?,model=?,reserved=0 WHERE account_id=? AND request_id=?",[generationFailed?'fallback_generated':'generated',outputWords,charged,agent,JSON.stringify(modelCalls),modelCalls.find(call=>call.role===agent)?.model??config.model,account,id]);
