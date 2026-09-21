@@ -88,7 +88,15 @@ app.put('/api/referral/profile',async(req,res)=>res.json(await referral.saveProf
 app.get('/api/referral/payouts',async(_req,res)=>res.json(await referral.myPayouts(res.locals.account.id)));
 app.post('/api/referral/payouts',async(req,res)=>res.status(201).json(await referral.requestPayout(res.locals.account.id,req.body)));
 app.use('/api/admin',(_req,res,next)=>{if(res.locals.account.role!=='owner'){res.status(403).json({error:'forbidden'});return;}next();});
-app.get('/api/admin/audit',async(_req,res)=>{const [rows]=await db.query('SELECT e.id,e.account_id,a.email AS account_email,e.action,e.created_at FROM audit_events e LEFT JOIN accounts a ON a.id=e.account_id ORDER BY e.id DESC LIMIT 100');res.json(rows);});
+async function paginate(value:unknown,countSql:string,itemsSql:(size:number,offset:number)=>string){
+ if(typeof value!=='string'||!/^\d{1,9}$/.test(value)||Number(value)<1)throw new ApiError(400,'invalid_request','Halaman tidak valid');
+ const size=20;
+ const [counts]=await db.query<RowDataPacket[]>(countSql);
+ const total=Number(counts[0].total),pages=Math.max(1,Math.ceil(total/size)),page=Math.min(Number(value),pages);
+ const [items]=await db.query(itemsSql(size,(page-1)*size));
+ return {items,page,pages,total,page_size:size};
+}
+app.get('/api/admin/audit',async(req,res)=>res.json(await paginate(req.query.page??'1','SELECT COUNT(*) AS total FROM audit_events',(size,offset)=>'SELECT e.id,e.account_id,a.email AS account_email,e.action,e.created_at FROM audit_events e LEFT JOIN accounts a ON a.id=e.account_id ORDER BY e.id DESC LIMIT '+size+' OFFSET '+offset)));
 app.get('/api/admin/health',async(_req,res)=>{await db.query('SELECT 1');res.json({database:'ok',engine:gateway.health(),uptime:Math.floor(process.uptime())});});
 app.put('/api/admin/accounts/:id/status',async(req,res)=>{
  if(typeof req.body?.suspended!=='boolean')throw new ApiError(400,'invalid_request','Status wajib valid');
@@ -117,7 +125,7 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
  await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[res.locals.account.id,'credit_adjusted:'+req.params.id]);}
  await c.commit();res.json({ok:true});}catch(e){await c.rollback();throw e;}finally{c.release();}
 });
-app.get('/api/admin/payments',async(_req,res)=>{const [rows]=await db.query('SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT 100');res.json(rows);});
+app.get('/api/admin/payments',async(req,res)=>res.json(await paginate(req.query.page??'1','SELECT COUNT(*) AS total FROM payment_orders',(size,offset)=>'SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT '+size+' OFFSET '+offset)));
 app.get('/dashboard/admin/ai-studio',(_req,res)=>res.sendFile('ai-studio.html',{root:'public'}));
 app.get('/api/admin/ai',async(_req,res)=>res.json(await ai.configuration()));
 app.get('/api/admin/ai/studio',async(_req,res)=>res.json({...await workflowState(),models:await ai.configuration()}));
@@ -133,7 +141,7 @@ app.post('/api/admin/ai/studio/run',rateLimit({windowMs:60000,limit:10}),async(r
  res.end();
 });
 app.get('/api/admin/ai/usage',async(_req,res)=>res.json(await ai.modelUsage()));
-app.get('/api/admin/ai/failures',async(_req,res)=>res.json(await ai.agentFailures()));
+app.get('/api/admin/ai/failures',async(req,res)=>res.json(await ai.agentFailures(req.query.page??'1')));
 app.put('/api/admin/ai',async(req,res)=>res.json(await ai.configure(res.locals.account.id,req.body)));
 app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res.json(await ai.test(req.body?.tier)));
 app.post('/api/admin/accounts/:id/ai-credits',async(req,res)=>res.json(await ai.adjust(res.locals.account.id,req.params.id,req.body)));

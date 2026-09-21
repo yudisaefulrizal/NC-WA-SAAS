@@ -55,7 +55,7 @@ test('Fallback ticket stays scoped to its session and forwards a team reply to t
 test('Web-only fallback creates a ticket without team notification and can resolve it',async()=>{
  const f=await fixture(async(c)=>c.call_role==='router'?JSON.stringify({s_p_o_konteks:'pelanggan meminta keputusan',sub_agent:'lainnya',isi_pesan:'Butuh persetujuan'}):c.call_role==='context'?'pelanggan-menunggu-konfirmasi':JSON.stringify({fallback:'Butuh keputusan','question':'Setujui permintaan pelanggan?'}),false,async()=>{},[],false,true);
  await f.service.incoming(f.id,f.manager,'shop',f.message('fallback-web','Butuh persetujuan'));
- const tickets=await f.service.fallbacks(f.id,'shop') as any[];assert.equal(tickets.length,1);assert.equal(f.sent(),1);
+ const tickets=(await f.service.fallbacks(f.id,'shop','1') as any).items;assert.equal(tickets.length,1);assert.equal(f.sent(),1);
  assert.deepEqual(await f.service.answerFallback(f.id,f.manager,'shop',tickets[0].id,{answer:'Permintaan disetujui.'}),{ok:true,status:'resolved'});assert.equal(f.sent(),2);
  const applied=await f.service.applyFallbackKnowledge(f.id,'shop',tickets[0].id,{content:'Persetujuan khusus diproses setelah konfirmasi tim.'});assert.ok(applied.knowledge.includes('Persetujuan khusus'));
 });

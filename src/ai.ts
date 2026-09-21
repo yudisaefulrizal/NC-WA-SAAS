@@ -87,7 +87,14 @@ export class AIService {
   catch{throw new ApiError(502,'ai_provider_failed','Koneksi model '+tier+' belum berhasil; periksa endpoint, key, dan model.');}
  }
  async modelUsage(){const [rows]=await db.query('SELECT account_id,session_id,request_id,status,agent,model_calls,created_at FROM ai_usage ORDER BY created_at DESC LIMIT 100');return rows;}
- async agentFailures(){const [rows]=await db.query('SELECT account_id,session_id,request_id,agent,error,message,created_at FROM ai_agent_failures ORDER BY created_at DESC LIMIT 100');return rows;}
+ async agentFailures(value:unknown){
+  if(typeof value!=='string'||!/^\d{1,9}$/.test(value)||Number(value)<1)throw fail('Halaman tidak valid');
+  const size=20;
+  const [counts]=await db.execute<RowDataPacket[]>('SELECT COUNT(*) AS total FROM ai_agent_failures');
+  const total=Number(counts[0].total),pages=Math.max(1,Math.ceil(total/size)),page=Math.min(Number(value),pages);
+  const [items]=await db.query('SELECT account_id,session_id,request_id,agent,error,message,created_at FROM ai_agent_failures ORDER BY created_at DESC,id DESC LIMIT '+size+' OFFSET '+((page-1)*size));
+  return {items,page,pages,total,page_size:size};
+ }
  async trial(account:string,body:unknown){
   const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
   if(!question)throw fail('Pertanyaan wajib diisi');if(!session)throw fail('Pilih nomor layanan yang akan diuji');
@@ -207,7 +214,14 @@ export class AIService {
  }
  async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_data_sources','ai_products','ai_orders','ai_fallbacks'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
  async conversations(account:string,session:string){const [rows]=await db.execute('SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',[account,session]);return rows;}
- async fallbacks(account:string,session:string){const [rows]=await db.execute('SELECT id,customer,status,agent,reason,question,staff_answer,created_at,answered_at,resolved_at FROM ai_fallbacks WHERE account_id=? AND session_id=? ORDER BY created_at DESC LIMIT 100',[account,session]);return rows;}
+ async fallbacks(account:string,session:string,value:unknown){
+  if(typeof value!=='string'||!/^\d{1,9}$/.test(value)||Number(value)<1)throw fail('Halaman tidak valid');
+  const size=20;
+  const [counts]=await db.execute<RowDataPacket[]>('SELECT COUNT(*) AS total FROM ai_fallbacks WHERE account_id=? AND session_id=?',[account,session]);
+  const total=Number(counts[0].total),pages=Math.max(1,Math.ceil(total/size)),page=Math.min(Number(value),pages);
+  const [items]=await db.execute('SELECT id,customer,status,agent,reason,question,staff_answer,created_at,answered_at,resolved_at FROM ai_fallbacks WHERE account_id=? AND session_id=? ORDER BY created_at DESC,id DESC LIMIT '+size+' OFFSET '+((page-1)*size),[account,session]);
+  return {items,page,pages,total,page_size:size};
+ }
  async removeFallback(account:string,session:string,id:string){
   if(!/^FB-[A-Z0-9]{8,48}$/.test(id))throw fail('ID fallback tidak valid');
   const [result]=await db.execute<ResultSetHeader>('DELETE FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=?',[id,account,session]);
