@@ -75,4 +75,12 @@ export async function migrateAI(){
   const fresh=JSON.stringify(defaultWorkflow());
   await db.query('UPDATE ai_workflow SET draft=?,active=IF(active IS NULL,NULL,?),revision=revision+1,profil_perusahaan_rename_version=1 WHERE id=1',[fresh,fresh]);
  }
+ // profil_perusahaan no longer has get_products (product/price questions moved fully to layanan); old node's tools no longer validate, so reset again.
+ const [narrowedColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','profil_perusahaan_narrow_version']);
+ if(!narrowedColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN profil_perusahaan_narrow_version INT UNSIGNED NOT NULL DEFAULT 0');
+ const [narrowedRows]=await db.query<any[]>('SELECT profil_perusahaan_narrow_version FROM ai_workflow WHERE id=1');
+ if(narrowedRows[0]&&narrowedRows[0].profil_perusahaan_narrow_version<1){
+  const fresh=JSON.stringify(defaultWorkflow());
+  await db.query('UPDATE ai_workflow SET draft=?,active=IF(active IS NULL,NULL,?),revision=revision+1,profil_perusahaan_narrow_version=1 WHERE id=1',[fresh,fresh]);
+ }
 }
