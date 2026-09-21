@@ -85,7 +85,7 @@ export const contextPrompt='Anda adalah Context Agent di akhir alur Customer Ser
 export async function updateRouterContext(transport:AITransport,config:AIConfig,userMessage:string,answer:string,history:readonly AIMessage[]=[]):Promise<string> {
  return validatedAI(transport,roleConfig(config,'context'),[{role:'system',content:config.workflow?.nodes.context.prompt??contextPrompt},{role:'user',content:JSON.stringify({riwayat_sebelumnya:history.map(m=>({peran:m.role,isi:m.content})),pesan_pelanggan:userMessage,jawaban_agent:answer})}],30,raw=>{
  const result=raw.trim();
- if(result.length>200||!/^\p{L}[\p{L}\p{N}_]*(-\p{L}[\p{L}\p{N}_]*){2,}$/u.test(result))throw Error('ai_invalid_context');
+ if(result.length>200||!/^[\p{L}\p{N}_]+(-[\p{L}\p{N}_]+){2,}$/u.test(result))throw Error('ai_invalid_context');
  return result;
  },'Kembalikan satu baris Subjek-Predikat-Objek dipisahkan tanda hubung, minimal tiga kata, tanpa penjelasan atau JSON.');
 }
