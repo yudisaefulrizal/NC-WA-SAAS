@@ -25,7 +25,7 @@ export class AIStudio {
   const knowledge=composeKnowledge(profile);
   if(!message)throw bad('Isi pesan pengujian.');
   if(!Array.isArray(body.products)||body.products.length>20)throw bad('Maksimal 20 produk simulasi.');
-  const products=body.products.map(productInput);if(new Set(products.map(p=>p.id)).size!==products.length)throw bad('Kode produk harus unik.');
+  const products=body.products.map(productInput);if(new Set(products.map(p=>p.name)).size!==products.length)throw bad('Nama produk harus unik.');
   const state=await workflowState();if(body.revision!==state.revision)throw new ApiError(409,'workflow_conflict','Draft berubah. Muat ulang sebelum menguji.');
   const base=await this.configuration();if(!base.secret)throw bad('Konfigurasikan koneksi AI di Pengaturan AI terlebih dahulu.');
   if(this.busy.has(owner))throw new ApiError(409,'studio_busy','Pengujian sebelumnya masih berjalan.');
@@ -60,14 +60,14 @@ export class AIStudio {
    try{
     let result:unknown;
     if(name==='get_knowledge')result={knowledge};
-    else if(name==='get_products')result={products:products.filter(p=>p.active&&(!query||`${p.id} ${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase())))};
+    else if(name==='get_products')result={products:products.filter(p=>p.active&&(!query||`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase())))};
     else if(name==='check_order')result={order:sandbox.orders.find(o=>o.id===query.trim())??null};
     else{
      if(sandbox.orders.length>=50)throw bad('Batas 50 pesanan simulasi tercapai. Mulai percakapan baru.');
      let value:unknown;try{value=JSON.parse(query);}catch{throw bad('Input order harus JSON.');}
      const order=orderInput(value),items=order.items.map(item=>{
-      const p=products.find(p=>p.id===item.product_id&&p.active);if(!p||p.stock<item.quantity)throw bad('Produk tidak tersedia atau stok tidak cukup.');
-      return {...item,name:p.name,price:p.price};
+      const p=products.find(p=>p.name===item.product_name&&p.active);if(!p||p.stock<item.quantity)throw bad('Produk tidak tersedia atau stok tidak cukup.');
+      return {...item,price:p.price};
      });
      const created:Order={id:'SIM-'+(sandbox.orders.length+1),customer:'628000000000',items,total:items.reduce((sum,i)=>sum+i.price*i.quantity,0),status:'baru',notes:order.notes};
      sandbox.orders.push(created);result={order:created};

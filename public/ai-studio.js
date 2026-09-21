@@ -77,5 +77,5 @@ $('chat-form').onsubmit=async e=>{
  finally{busy(false);}
 };
 window.addEventListener('beforeunload',e=>{if(dirty||running){e.preventDefault();e.returnValue='';}});
-$('test-products').value=pretty([{id:'P-001',name:'Produk Basic',type:'product',description:'Produk harian',price:150000,stock:10,unit:'pcs',active:true},{id:'P-002',name:'Produk Premium',type:'product',description:'Pilihan premium',price:350000,stock:5,unit:'pcs',active:true}]);
+$('test-products').value=pretty([{name:'Produk Basic',type:'product',description:'Produk harian, satuan pcs',price:150000,stock:10,active:true},{name:'Produk Premium',type:'product',description:'Pilihan premium, satuan pcs',price:350000,stock:5,active:true}]);
 (async()=>{try{const me=await api('/api/me');if(me.role!=='owner')throw Error('Halaman ini hanya tersedia untuk pemilik layanan.');await load();$('access').hidden=true;$('studio').hidden=false;setZoom(($('canvas-viewport').clientWidth-20)/1500);}catch(error){$('access').textContent=error.message+' Buka dashboard untuk masuk.';const a=document.createElement('a');a.href='/dashboard';a.textContent=' Kembali ke dashboard';$('access').append(a);}})();

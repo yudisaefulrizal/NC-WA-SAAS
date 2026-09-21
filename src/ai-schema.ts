@@ -16,7 +16,7 @@ export async function migrateAI(){
  for(const sql of tables)await db.query(sql);
  const dataTables=[
  `CREATE TABLE IF NOT EXISTS ai_data_sources (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,kind ENUM('products','orders') NOT NULL,mode ENUM('builtin','endpoint') NOT NULL DEFAULT 'builtin',endpoint VARCHAR(512) NOT NULL DEFAULT '',secret TEXT NOT NULL,PRIMARY KEY(account_id,session_id,kind),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
- `CREATE TABLE IF NOT EXISTS ai_products (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,name VARCHAR(150) NOT NULL,type ENUM('product','service') NOT NULL,description VARCHAR(500) NOT NULL,price BIGINT UNSIGNED NOT NULL,stock INT UNSIGNED NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(account_id,session_id,id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
+ `CREATE TABLE IF NOT EXISTS ai_products (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,name VARCHAR(150) COLLATE utf8mb4_bin NOT NULL,type ENUM('product','service') NOT NULL,description VARCHAR(500) NOT NULL,price BIGINT UNSIGNED NOT NULL,stock INT UNSIGNED NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(account_id,session_id,name),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
  `CREATE TABLE IF NOT EXISTS ai_orders (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,request_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,input_hash CHAR(64) NOT NULL,customer VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,items JSON NOT NULL,total BIGINT UNSIGNED NOT NULL,status ENUM('baru','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'baru',notes VARCHAR(1000) NOT NULL,created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),PRIMARY KEY(account_id,session_id,id),UNIQUE KEY order_request(account_id,session_id,request_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`
  ];
  for(const sql of dataTables)await db.query(sql);
@@ -37,7 +37,7 @@ export async function migrateAI(){
  if(legacyKnowledgeColumn.length)await db.query('ALTER TABLE ai_assistants MODIFY knowledge TEXT NULL');
  const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
  let addedProfilLainnya=false;
- for(const [table,column,definition] of [['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_settings','context_memory_limit','INT UNSIGNED NOT NULL DEFAULT 6'],['ai_settings','trace_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_products','unit',"VARCHAR(20) NOT NULL DEFAULT 'pcs'"],['ai_agent_failures','model','VARCHAR(100) NULL'],['ai_agent_failures','prompt','JSON NULL'],['ai_agent_failures','raw_output','MEDIUMTEXT NULL'],['ai_agent_failures','router_context','VARCHAR(200) NULL'],...profileFields.map(field=>['ai_assistants','profil_'+field,'TEXT NULL'] as [string,string,string])]){
+ for(const [table,column,definition] of [['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_settings','context_memory_limit','INT UNSIGNED NOT NULL DEFAULT 6'],['ai_settings','trace_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_agent_failures','model','VARCHAR(100) NULL'],['ai_agent_failures','prompt','JSON NULL'],['ai_agent_failures','raw_output','MEDIUMTEXT NULL'],['ai_agent_failures','router_context','VARCHAR(200) NULL'],...profileFields.map(field=>['ai_assistants','profil_'+field,'TEXT NULL'] as [string,string,string])]){
   const [columns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,column]);
  if(!columns.length){await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);if(table==='ai_assistants'&&column==='profil_lainnya')addedProfilLainnya=true;}
  }
@@ -61,6 +61,15 @@ export async function migrateAI(){
  if(usahaSourceColumns.length){
   await db.query(`UPDATE ai_assistants SET profil_usaha=TRIM(BOTH '\\n\\n' FROM CONCAT_WS('\\n\\n',NULLIF(profil_nama,''),NULLIF(profil_deskripsi,''),NULLIF(profil_alamat,''),NULLIF(profil_kontak,''),NULLIF(profil_jam_operasional,'')))`);
   for(const column of ['profil_nama','profil_deskripsi','profil_alamat','profil_kontak','profil_jam_operasional'])await db.query(`ALTER TABLE ai_assistants DROP COLUMN ${column}`);
+ }
+ // Product code removed (name-based identity avoids the duplicate-name confusion a separate code invited); unit folded into description as free text.
+ const [productIdColumn]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_products','id']);
+ if(productIdColumn.length){
+  const [productUnitColumn]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_products','unit']);
+  // Two old codes could share a name; keep only the most recently defined (highest id) row per name before name becomes the primary key.
+  await db.query('DELETE p1 FROM ai_products p1 INNER JOIN ai_products p2 ON p1.account_id=p2.account_id AND p1.session_id=p2.session_id AND p1.name=p2.name AND p1.id<p2.id');
+  if(productUnitColumn.length)await db.query("UPDATE ai_products SET description=TRIM(BOTH ' ' FROM CONCAT(description,IF(description<>'' AND unit IS NOT NULL AND unit<>'',' | ',''),IF(unit IS NOT NULL AND unit<>'',CONCAT('Satuan: ',unit),'')))");
+  await db.query('ALTER TABLE ai_products DROP PRIMARY KEY, ADD PRIMARY KEY(account_id,session_id,name), DROP COLUMN id'+(productUnitColumn.length?', DROP COLUMN unit':''));
  }
  const [workflowColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','tool_defaults_version']);
  if(!workflowColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0');

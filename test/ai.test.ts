@@ -216,12 +216,12 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
   const result=m.find(x=>x.content.startsWith('Tool result '+(checking?'check_order':'create_order')));
   if(result){const data=JSON.parse(result.content.slice(result.content.indexOf('{')));orderId=data.order.id;return JSON.stringify({answer:checking?'Status '+data.order.status:'Pesanan '+orderId+' tercatat'});}
   if(checking){assert.ok(m.some(x=>x.content.includes(orderId)));return JSON.stringify({tool:'check_order',query:orderId});}
-  if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_id:'P-REAL',quantity:2}],notes:'Pesanan pelanggan'})});
-  return JSON.stringify({tool:'get_products',query:'P-REAL'});
+  if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_name:'Produk asli tenant',quantity:2}],notes:'Pesanan pelanggan'})});
+  return JSON.stringify({tool:'get_products',query:'Produk asli tenant'});
  };
  const f=await fixture(transport,false,async()=>{},[],false,true);
  await f.service.saveAssistant(f.id,'shop',{enabled:true,profile:{lainnya:'KNOWLEDGE_PRIVATE'},behavior:'Ramah'});
- await aiData.saveProduct(f.id,'shop',{id:'P-REAL',name:'Produk asli tenant',description:'Produk harian',type:'product',price:100000,stock:5,active:true});
+ await aiData.saveProduct(f.id,'shop','',{name:'Produk asli tenant',description:'Produk harian',type:'product',price:100000,stock:5,active:true});
  await f.service.incoming(f.id,f.manager,'shop',f.message('order-create','Pesankan dua produk'));
  assert.ok(orderId);assert.equal((await aiData.orders(f.id,'shop'))[0].total,200000);
  await f.service.incoming(f.id,f.manager,'shop',f.message('order-check','Bagaimana statusnya?'));

@@ -23,7 +23,7 @@ after(async()=>{
  await db.query('DELETE FROM ai_workflow WHERE id=1');if(original[0]){const row=original[0];await db.execute('INSERT INTO ai_workflow(id,draft,active,revision,active_version,published_revision) VALUES (1,?,?,?,?,?)',[typeof row.draft==='string'?row.draft:JSON.stringify(row.draft),row.active?(typeof row.active==='string'?row.active:JSON.stringify(row.active)):null,row.revision,row.active_version,row.published_revision]);}
  for(const id of [owner,client]){await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);await db.execute('DELETE FROM accounts WHERE id=?',[id]);}await db.end();
 });
-const products=[{id:'P-001',name:'Produk uji',type:'product',description:'',price:150000,stock:10,active:true}];
+const products=[{name:'Produk uji',type:'product',description:'',price:150000,stock:10,active:true}];
 const configuration=async()=>({...defaults,model_cheap:'cheap',model_medium:'medium',model_smart:'smart',secret:'private-test-secret'});
 async function input(message='Pesan produk'){return {message,profile:{lainnya:'Bisnis uji'},behavior:'Ramah',products,revision:(await workflowState()).revision};}
 const transport:AITransport=async(c,m)=>{
@@ -32,8 +32,8 @@ const transport:AITransport=async(c,m)=>{
  if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
  if(latest==='statusnya?')return m.some(x=>x.content.startsWith('Tool result check_order'))?JSON.stringify({answer:'Pesanan SIM-1 berstatus baru.'}):JSON.stringify({tool:'check_order',query:'SIM-1'});
  if(m.some(x=>x.content.startsWith('Tool result create_order')))return JSON.stringify({answer:'Pesanan SIM-1 dibuat.'});
- if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_id:'P-001',quantity:2}],notes:''})});
- return JSON.stringify({tool:'get_products',query:'P-001'});
+ if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_name:'Produk uji',quantity:2}],notes:''})});
+ return JSON.stringify({tool:'get_products',query:'Produk uji'});
 };
 
 test('Workflow validation keeps topology fixed and cannot grant unauthorized tools',()=>{
