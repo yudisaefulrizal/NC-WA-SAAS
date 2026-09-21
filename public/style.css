@@ -95,3 +95,5 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 .trace-event p{margin:0 0 8px;font-size:13px}
 .trace-event pre{margin:8px 0 0;font-size:12px;max-height:280px;overflow:auto}
 .trace-error{color:#b84444}
+.ai-product-thumb{width:48px;height:48px;object-fit:cover;border-radius:6px}
+#ai-product-image-preview{object-fit:cover;border-radius:8px;margin:4px 0}

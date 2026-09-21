@@ -86,6 +86,25 @@ test('Cancelled testing prevents later calls and mutations',async()=>{
  assert.equal(calls,1);assert.equal(events.at(-1).error,'ai_cancelled');assert.ok(!events.some(e=>e.node==='create_order'));
 });
 
+test('Sandbox reports photo availability for send_product_image without ever sending anything real',async()=>{
+ const withPhoto=[{name:'Produk berfoto',type:'product',description:'',price:100000,stock:5,active:true,image_id:'11111111-1111-1111-1111-111111111111'},{name:'Produk polos',type:'product',description:'',price:50000,stock:5,active:true}];
+ const photoTransport:AITransport=async(c,m)=>{
+  const latest=m.filter(x=>x.role==='user').at(-1)!.content;
+  if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan meminta foto',isi_pesan:latest});
+  if(c.call_role==='context')return 'pelanggan-melihat-foto';
+  if(m.some(x=>x.content.startsWith('Tool result send_product_image')))return JSON.stringify({answer:'Ini fotonya.'});
+  return JSON.stringify({tool:'send_product_image',query:latest==='foto polos'?'Produk polos':'Produk berfoto'});
+ };
+ const runner=new AIStudio(photoTransport,configuration,async()=>{}),events:any[]=[];
+ await runner.run(owner,{...await input('foto produk'),products:withPhoto},e=>events.push(e));
+ const done=events.find(e=>e.node==='send_product_image'&&e.state==='done');
+ assert.deepEqual(done.output,{available:true,product_name:'Produk berfoto',image_id:'11111111-1111-1111-1111-111111111111'});
+ events.length=0;
+ await runner.run(owner,{...await input('foto polos'),products:withPhoto},e=>events.push(e));
+ const missing=events.find(e=>e.node==='send_product_image'&&e.state==='done');
+ assert.deepEqual(missing.output,{available:false,reason:'Produk tidak ditemukan atau belum memiliki foto'});
+});
+
 test('Studio APIs require owner cookie and same origin; run streams events without credentials',async()=>{
  const app=createApp(undefined,undefined,new AIStudio(transport,configuration,async()=>{})),origin=process.env.APP_ORIGIN??'http://127.0.0.1:8067';
  for(const endpoint of ['/api/admin/ai/studio','/api/admin/ai/studio/run','/api/admin/ai/studio/publish']){

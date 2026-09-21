@@ -17,6 +17,8 @@ import {object} from './engine/messages.js';
 import type {IncomingMessage} from './engine/incoming.js';
 import {basicWallet} from './plans.js';
 import {sendBilled} from './outbound.js';
+import {ProductImageStore} from './ai-product-images.js';
+import {resolve} from 'node:path';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
 export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;context_memory_limit:number;trace_enabled:boolean;credit_price:number}
 export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,context_memory_limit:6,trace_enabled:false,credit_price:0};
@@ -67,6 +69,8 @@ function parseMemory(value:unknown):AIMessage[]{return (typeof value==='string'?
 export class AIService {
  private queues=new Map<string,Promise<void>>();
  private queued=0;
+ // Assigned by createGateway() once the tenant storage root is known, so file paths always match the gateway that sends them.
+ productImages=new ProductImageStore(resolve('auth','_product-images'));
  constructor(private transport:AITransport=callAI,private wait:(milliseconds:number)=>Promise<void>=async milliseconds=>{await delay(milliseconds);},private tools:AITools=defaultTools){}
  async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0],trace_enabled:Boolean(rows[0].trace_enabled)}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;config.workflow=await activeWorkflow();return config;}
  async configuration(){const {secret,workflow,onTrace,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
@@ -327,12 +331,16 @@ export class AIService {
    throw Error('ai_retry_limit');
   };
   let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
-  let lastNode:string|undefined,lastTraceError:string|undefined,lastRawOutput:string|undefined;
+  let lastNode:string|undefined,lastTraceError:string|undefined,lastRawOutput:string|undefined,pendingImageId:string|undefined;
   config.onTrace=event=>{trace?.(event);if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;if(typeof event.output==='string')lastRawOutput=event.output;}};
   try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
    await guard();
    const start=Date.now();trace?.({node:name,state:'running',input:query});
-   try{const result=await this.tools.execute(name,query,context);trace?.({node:name,state:'done',output:result,duration_ms:Date.now()-start});return result;}catch(error){
+   try{const result=await this.tools.execute(name,query,context);trace?.({node:name,state:'done',output:result,duration_ms:Date.now()-start});
+    // Resolving the image is just data; the actual WhatsApp send happens once the final answer is settled below,
+    // so a later tool step or an ai_invalid_tool retry never leaves an image sent ahead of a discarded turn.
+    if(name==='send_product_image'&&(result as {available?:boolean;image_id?:string})?.available)pendingImageId=(result as {image_id:string}).image_id;
+    return result;}catch(error){
     if(name==='create_order'||!transientAIError(error)||Date.now()>=deadline){trace?.({node:name,state:'error',error:error instanceof Error?error.message:'unknown_error',duration_ms:Date.now()-start});throw error;}
     await retryPause(0);const result=await this.tools.execute(name,query,context);trace?.({node:name,state:'done',output:result,duration_ms:Date.now()-start});return result;
    }
@@ -358,6 +366,13 @@ export class AIService {
    await guard();typingStarted=true;
    await manager.typing(session,jid,'composing').catch(()=>{});
    await this.wait(randomInt(1000,3001));
+   // Sent ahead of the text answer so the customer sees the product before its explanation.
+   // Best effort: a failed image never blocks or fails the text reply that follows.
+   if(!generationFailed&&!fallback&&pendingImageId){
+    await guard();
+    const readImage=async(imageId:string)=>{const file=await this.productImages.get(account,imageId);return {path:file.path,mimetype:file.mimetype,cleanup:async()=>{}};};
+    await sendBilled(account,manager,session,'media',{to:message.from,type:'image'as const,url:pendingImageId},'ai_image_'+id,readImage,guard).catch(()=>{});
+   }
    await guard();const confirmation=await sendBilled(account,manager,session,'text',{to:message.from,text:answer},'ai_'+id,undefined,guard);if(fallbackId)await db.execute('UPDATE ai_fallbacks SET confirmation_message_id=? WHERE id=?',[confirmation.messageId,fallbackId]);
   }catch(error){status=error instanceof ApiError&&error.code==='ai_cancelled'?'cancelled':error instanceof ApiError&&error.code==='send_unknown'?'send_unknown':'send_failed';}
   finally{if(typingStarted)await manager.typing(session,jid,'paused').catch(()=>{});}

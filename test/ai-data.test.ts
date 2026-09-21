@@ -13,7 +13,7 @@ import {decrypt} from '../src/payments.js';
 import {digest} from '../src/security.js';
 const accounts:string[]=[];
 const assistant=new AIService();
-const product:Product={name:'Produk A',type:'product',description:'Produk ringan',price:125000,stock:10,active:true};
+const product:Product={name:'Produk A',type:'product',description:'Produk ringan',price:125000,stock:10,active:true,image_id:null};
 const input={items:[{product_name:'Produk A',quantity:2}],notes:'Tolong siapkan'};
 async function fixture():Promise<ToolContext>{const account=randomUUID();accounts.push(account);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);return {account,session:'shop',customer:'628123456789',requestId:'request-1',knowledge:'Knowledge '+account,behavior:'Ramah'};}
 async function configure(scope:ToolContext,products:unknown,orders:unknown){return assistant.saveAssistant(scope.account,scope.session,{enabled:true,profile:{faq:scope.knowledge},behavior:scope.behavior,products_source:products,orders_source:orders});}
@@ -78,6 +78,15 @@ test('Built-in products and custom orders route independently, validate customer
  await assert.rejects(new AIData(async()=>{throw Error('endpoint_timeout');}).execute('check_order','EXT-1',scope),/endpoint_timeout/);
 });
 
+test('send_product_image reports availability without ever dispatching WhatsApp itself',async()=>{
+ const scope=await fixture(),data=new AIData();
+ await data.saveProduct(scope.account,scope.session,'',product);
+ assert.deepEqual(await data.execute('send_product_image',product.name,scope),{available:false,reason:'Produk tidak ditemukan atau belum memiliki foto'});
+ await data.saveProduct(scope.account,scope.session,product.name,{...product,image_id:'11111111-1111-1111-1111-111111111111'});
+ assert.deepEqual(await data.execute('send_product_image',product.name,scope),{available:true,product_name:product.name,image_id:'11111111-1111-1111-1111-111111111111'});
+ assert.deepEqual(await data.execute('send_product_image','Produk tidak ada',scope),{available:false,reason:'Produk tidak ditemukan atau belum memiliki foto'});
+});
+
 test('SSRF URLs, unsupported endpoint data and credentials in URLs are rejected',async()=>{
  for(const url of ['http://8.8.8.8/api','https://127.0.0.1/api','https://10.0.0.1/api','https://[::1]/api','https://user:secret@8.8.8.8/api','https://8.8.8.8/api?key=secret'])await assert.rejects(endpointUrl(url));
  await assert.rejects(callEndpoint({mode:'endpoint',endpoint:'https://127.0.0.1',secret:''},{},'test'));
@@ -103,5 +112,11 @@ test('Authenticated product/order APIs enforce ownership, CSRF and immutable ord
   await request(app).put(base+'/orders/'+created.body.id).set('Cookie',cookie).set('Origin',origin).send({status:'diproses',notes:'Siap',total:1,customer:b.customer}).expect(200);
   const order=(await request(app).get(base+'/orders').set('Cookie',cookie).expect(200)).body[0];assert.equal(order.total,250000);assert.equal(order.customer,a.customer);assert.equal(order.status,'diproses');
   assert.deepEqual((await request(app).get(base+'/orders').set('Cookie',other).expect(200)).body,[]);
+  const sharp=(await import('sharp')).default;
+  const pngFixture=await sharp({create:{width:20,height:20,channels:3,background:{r:5,g:6,b:7}}}).png().toBuffer();
+  const uploaded=await request(app).post(base+'/products-image').set('Cookie',cookie).set('Origin',origin).set('X-Filename','photo.png').set('Content-Type','application/octet-stream').send(pngFixture).expect(200);
+  assert.ok(uploaded.body.id);
+  await request(app).get(base+'/products-image/'+uploaded.body.id).set('Cookie',cookie).expect(200).expect('Content-Type','image/jpeg');
+  await request(app).get(base+'/products-image/'+uploaded.body.id).set('Cookie',other).expect(404);
  }finally{await gateway.stop();await rm(root,{recursive:true,force:true});}
 });

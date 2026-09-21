@@ -62,6 +62,11 @@ export class AIStudio {
     if(name==='get_knowledge')result={knowledge};
     else if(name==='get_products')result={products:products.filter(p=>p.active&&(!query||`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase())))};
     else if(name==='check_order')result={order:sandbox.orders.find(o=>o.id===query.trim())??null};
+    else if(name==='send_product_image'){
+     // Sandbox never dispatches WhatsApp media; this only reports whether a real send would have found a photo.
+     const p=products.find(p=>p.name===query.trim());
+     result=p?.image_id?{available:true,product_name:p.name,image_id:p.image_id}:{available:false,reason:'Produk tidak ditemukan atau belum memiliki foto'};
+    }
     else{
      if(sandbox.orders.length>=50)throw bad('Batas 50 pesanan simulasi tercapai. Mulai percakapan baru.');
      let value:unknown;try{value=JSON.parse(query);}catch{throw bad('Input order harus JSON.');}

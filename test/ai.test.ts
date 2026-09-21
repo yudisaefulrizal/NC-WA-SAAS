@@ -228,6 +228,44 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
  assert.equal(f.sent(),2);assert.equal((await aiData.orders(f.id,'shop')).length,1);
 });
 
+test('Product photo is sent before the text answer, via WhatsApp media, and only for the final answer',async()=>{
+ const {aiData}=await import('../src/ai-data.js');
+ const {ProductImageStore}=await import('../src/ai-product-images.js');
+ const {mkdtemp,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path');
+ const sharp=(await import('sharp')).default;
+ const {Readable}=await import('node:stream');
+ const root=await mkdtemp(join(tmpdir(),'ncwa-ai-image-test-'));
+ const images=new ProductImageStore(root);
+ const id=randomUUID();ids.push(id);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[id,id+'@test.invalid','unused']);await basicWallet(id);
+ const transport:AITransport=async(_c,m)=>{
+  if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-foto';
+  const input=m.filter(x=>x.role==='user').at(-1)!.content;
+  if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan meminta foto produk',isi_pesan:input});
+  if(m.some(x=>x.content.startsWith('Tool result send_product_image')))return JSON.stringify({answer:'Ini fotonya ya.'});
+  return JSON.stringify({tool:'send_product_image',query:'Produk berfoto'});
+ };
+ const service=new FixtureAI(transport);
+ service.productImages=images;
+ await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});
+ await service.saveAssistant(id,'shop',{enabled:true,profile:{faq:'Produk tersedia'},behavior:'Ramah'});
+ const photo=await sharp({create:{width:100,height:100,channels:3,background:{r:1,g:2,b:3}}}).png().toBuffer();
+ const saved=await images.save(id,'shop','photo.png',Readable.from(photo));
+ await aiData.saveProduct(id,'shop','',{name:'Produk berfoto',description:'Ada fotonya',type:'product',price:50000,stock:5,active:true,image_id:saved.id});
+ const sentContent:unknown[]=[];
+ const manager=new SessionManager(async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){},async exists(){return true;},async read(){},async typing(){},async send(jid:string,content:unknown){sentContent.push(content);return 'reply-'+sentContent.length;}};});
+ managers.push(manager);await manager.create('shop');
+ const message=(messageId:string,text='Halo',from='628123456789')=>({messageId,text,from,sender:from,isGroup:false,groupId:null,type:'text' as const,timestamp:1});
+ const whatsappBalanceBefore=(await basicWallet(id)).balance;
+ await service.incoming(id,manager,'shop',message('photo-request','Boleh lihat foto produknya?'));
+ assert.equal(sentContent.length,2);
+ assert.equal((sentContent[0] as {type?:string}).type,'image');
+ assert.ok(String((sentContent[0] as {url:string}).url).includes(saved.id));
+ assert.deepEqual(sentContent[1],{text:'Ini fotonya ya.'});
+ // Two outbound messages (image + text) both draw from the WhatsApp credit wallet, not the AI credit wallet.
+ assert.equal((await basicWallet(id)).balance,whatsappBalanceBefore-2);
+ await rm(root,{recursive:true,force:true});
+});
+
 test('Router context persists, feeds next turn, stays isolated and clears with memory',async()=>{
  const seen:AIMessage[][]=[];
  const transport:AITransport=async(_c,m)=>{
