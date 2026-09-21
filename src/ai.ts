@@ -97,9 +97,9 @@ export class AIService {
  }
  async agentFailureDetail(id:unknown){
   if(typeof id!=='string'||!/^\d{1,20}$/.test(id))throw fail('ID kegagalan tidak valid');
-  const [rows]=await db.execute<RowDataPacket[]>('SELECT prompt,raw_output FROM ai_agent_failures WHERE id=?',[id]);
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT prompt,raw_output,router_context FROM ai_agent_failures WHERE id=?',[id]);
   if(!rows[0])throw new ApiError(404,'not_found','Detail kegagalan tidak ditemukan');
-  return {prompt:rows[0].prompt,raw_output:rows[0].raw_output};
+  return {prompt:rows[0].prompt,raw_output:rows[0].raw_output,router_context:rows[0].router_context};
  }
  async trial(account:string,body:unknown){
   const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
@@ -319,7 +319,7 @@ export class AIService {
   }},prepared.routerContext);fallback=result.fallback;answer=fallback?'Baik, saya konfirmasi dulu dan akan melanjutkan jawaban segera.':result.answer;agent=result.agent;}
   catch(error){generationFailed=true;answer=aiFallback;
    const errorCode=error instanceof Error?error.message:'unknown_error';
-   await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message,model,prompt,raw_output) VALUES (?,?,?,?,?,?,?,?,?)',[account,session,id,lastNode??null,(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000),lastModel??null,lastMessages?JSON.stringify(lastMessages):null,lastRawOutput?.slice(0,65000)??null]).catch(()=>{});
+   await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message,model,prompt,raw_output,router_context) VALUES (?,?,?,?,?,?,?,?,?,?)',[account,session,id,lastNode??null,(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000),lastModel??null,lastMessages?JSON.stringify(lastMessages):null,lastRawOutput?.slice(0,65000)??null,prepared.routerContext]).catch(()=>{});
   }
   // Context is internal and never billed. A failed summary clears stale context on a successful send.
   let routerContext:string|null=null;
