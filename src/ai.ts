@@ -18,8 +18,8 @@ import type {IncomingMessage} from './engine/incoming.js';
 import {basicWallet} from './plans.js';
 import {sendBilled} from './outbound.js';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
-export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;context_memory_limit:number;credit_price:number}
-export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,context_memory_limit:6,credit_price:0};
+export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;context_memory_limit:number;trace_enabled:boolean;credit_price:number}
+export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,context_memory_limit:6,trace_enabled:false,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 // Product and price are handled by the dedicated products table (ai-data.ts), not free-text here.
 // Bidang is folded into Deskripsi rather than kept as its own field.
@@ -66,15 +66,16 @@ export class AIService {
  private queues=new Map<string,Promise<void>>();
  private queued=0;
  constructor(private transport:AITransport=callAI,private wait:(milliseconds:number)=>Promise<void>=async milliseconds=>{await delay(milliseconds);},private tools:AITools=defaultTools){}
- async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0]}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;config.workflow=await activeWorkflow();return config;}
+ async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0],trace_enabled:Boolean(rows[0].trace_enabled)}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;config.workflow=await activeWorkflow();return config;}
  async configuration(){const {secret,workflow,onTrace,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
  async configure(actor:string,body:unknown){const input=object(body),previous=await this.config();
-  const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model_medium??input.model,100,'Model sedang'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),context_memory_limit:integer(input.context_memory_limit,0,100,'Batas memori Context Agent'),credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
+  if(typeof input.trace_enabled!=='boolean')throw fail('Status log lengkap wajib valid');
+  const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model_medium??input.model,100,'Model sedang'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),context_memory_limit:integer(input.context_memory_limit,0,100,'Batas memori Context Agent'),trace_enabled:input.trace_enabled,credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
   for(const tier of modelTiers){const key=('model_'+tier) as 'model_cheap'|'model_medium'|'model_smart';config[key]=text(input[key]??(tier==='medium'?config.model:previous[key])??config.model,100,'Model '+tier);if(!config[key])throw fail('Model '+tier+' wajib diisi');}
   if(!config.model)throw fail('Model wajib diisi');await validatePublicUrl(config.endpoint);
   if(input.apiKey!==undefined&&input.apiKey!==''){const key=text(input.apiKey,512,'API key');if(!key||/[\r\n]/.test(key))throw fail('API key tidak valid');config.secret=encrypt(key);}
   if(!config.secret)throw fail('API key wajib diisi');
-  await transaction(async c=>{await c.execute('INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,context_memory_limit,credit_price,model_cheap,model_medium,model_smart) VALUES (1,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),context_memory_limit=VALUES(context_memory_limit),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart)',[config.endpoint,config.model,config.secret,config.input_rate,config.output_rate,config.memory_limit,config.context_memory_limit,config.credit_price,config.model_cheap??config.model,config.model_medium??config.model,config.model_smart??config.model]);
+  await transaction(async c=>{await c.execute('INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,context_memory_limit,trace_enabled,credit_price,model_cheap,model_medium,model_smart) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),context_memory_limit=VALUES(context_memory_limit),trace_enabled=VALUES(trace_enabled),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart)',[config.endpoint,config.model,config.secret,config.input_rate,config.output_rate,config.memory_limit,config.context_memory_limit,config.trace_enabled,config.credit_price,config.model_cheap??config.model,config.model_medium??config.model,config.model_smart??config.model]);
    // JSON slicing trims every tenant immediately without exposing conversation content.
    const [rows]=await c.query<RowDataPacket[]>('SELECT account_id,session_id,customer,messages FROM ai_conversations FOR UPDATE');
    for(const row of rows)await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(parseMemory(row.messages).slice(-config.memory_limit)),row.account_id,row.session_id,row.customer]);
@@ -100,6 +101,19 @@ export class AIService {
   const [rows]=await db.execute<RowDataPacket[]>('SELECT prompt,raw_output,router_context FROM ai_agent_failures WHERE id=?',[id]);
   if(!rows[0])throw new ApiError(404,'not_found','Detail kegagalan tidak ditemukan');
   return {prompt:rows[0].prompt,raw_output:rows[0].raw_output,router_context:rows[0].router_context};
+ }
+ async traceRequests(value:unknown){
+  if(typeof value!=='string'||!/^\d{1,9}$/.test(value)||Number(value)<1)throw fail('Halaman tidak valid');
+  const size=20;
+  const [counts]=await db.execute<RowDataPacket[]>('SELECT COUNT(DISTINCT request_id) AS total FROM ai_trace_log');
+  const total=Number(counts[0].total),pages=Math.max(1,Math.ceil(total/size)),page=Math.min(Number(value),pages);
+  const [items]=await db.query('SELECT request_id,account_id,session_id,MIN(created_at) AS started_at,COUNT(*) AS event_count FROM ai_trace_log GROUP BY request_id,account_id,session_id ORDER BY started_at DESC LIMIT '+size+' OFFSET '+((page-1)*size));
+  return {items,page,pages,total,page_size:size};
+ }
+ async traceLog(requestId:unknown){
+  if(typeof requestId!=='string'||!/^[0-9a-f]{1,64}$/i.test(requestId))throw fail('ID permintaan tidak valid');
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT node,state,model,attempt,duration_ms,input,output,error,created_at FROM ai_trace_log WHERE request_id=? ORDER BY id',[requestId]);
+  return rows;
  }
  async trial(account:string,body:unknown){
   const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
@@ -297,24 +311,28 @@ export class AIService {
   const deadline=Date.now()+120000;
   const retryPause=async(attempt:number)=>{await this.wait(500*2**attempt+randomInt(0,251));await guard();};
   let lastMessages:AIMessage[]|undefined,lastModel:string|undefined;
+  const trace=config.trace_enabled?(event:AITraceEvent)=>{db.execute('INSERT INTO ai_trace_log(account_id,session_id,request_id,node,state,model,attempt,duration_ms,input,output,error) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[account,session,id,event.node.slice(0,20),event.state.slice(0,20),event.model?.slice(0,100)??null,event.attempt??null,event.duration_ms??null,event.input!==undefined?JSON.stringify(event.input).slice(0,60000):null,event.output!==undefined?JSON.stringify(event.output).slice(0,60000):null,event.error?.slice(0,200)??null]).catch(()=>{});}:undefined;
   const trackedTransport:AITransport=async(selected,messages,maxWords)=>{
    lastMessages=messages;lastModel=selected.model;
+   const node=selected.call_role??'model';
    for(let attempt=0;attempt<3;attempt++){
     await guard();if(modelCalls.length>=20||Date.now()>=deadline)throw Error('ai_retry_limit');
     const entry={role:selected.call_role,model:selected.model,status:'failed',attempt:attempt+1};modelCalls.push(entry);
-    try{const result=await this.transport(selected,messages,maxWords);entry.status='responded';return result;}
-    catch(error){if(attempt===2||!transientAIError(error))throw error;await retryPause(attempt);}
+    trace?.({node,state:'running',input:messages,model:selected.model,attempt:attempt+1});
+    try{const result=await this.transport(selected,messages,maxWords);entry.status='responded';trace?.({node,state:'responded',output:result,model:selected.model,attempt:attempt+1});return result;}
+    catch(error){trace?.({node,state:'error',error:error instanceof Error?error.message:'unknown_error',attempt:attempt+1});if(attempt===2||!transientAIError(error))throw error;await retryPause(attempt);}
    }
    throw Error('ai_retry_limit');
   };
   let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
   let lastNode:string|undefined,lastTraceError:string|undefined,lastRawOutput:string|undefined;
-  config.onTrace=event=>{if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;if(typeof event.output==='string')lastRawOutput=event.output;}};
+  config.onTrace=event=>{trace?.(event);if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;if(typeof event.output==='string')lastRawOutput=event.output;}};
   try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
    await guard();
-   try{return await this.tools.execute(name,query,context);}catch(error){
-    if(name==='create_order'||!transientAIError(error)||Date.now()>=deadline)throw error;
-    await retryPause(0);return this.tools.execute(name,query,context);
+   const start=Date.now();trace?.({node:name,state:'running',input:query});
+   try{const result=await this.tools.execute(name,query,context);trace?.({node:name,state:'done',output:result,duration_ms:Date.now()-start});return result;}catch(error){
+    if(name==='create_order'||!transientAIError(error)||Date.now()>=deadline){trace?.({node:name,state:'error',error:error instanceof Error?error.message:'unknown_error',duration_ms:Date.now()-start});throw error;}
+    await retryPause(0);const result=await this.tools.execute(name,query,context);trace?.({node:name,state:'done',output:result,duration_ms:Date.now()-start});return result;
    }
   }},prepared.routerContext);fallback=result.fallback;answer=fallback?'Baik, saya konfirmasi dulu dan akan melanjutkan jawaban segera.':result.answer;agent=result.agent;}
   catch(error){generationFailed=true;answer=aiFallback;

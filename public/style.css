@@ -91,3 +91,7 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 #ai-credit-modal label{margin-bottom:6px}
 #ai-credit-modal input{max-width:160px}
 #ai-credit-summary{font-weight:650;margin:14px 0}
+.trace-event{border:1px solid #e0eae5;border-radius:10px;padding:14px 16px;margin:0 0 12px}
+.trace-event p{margin:0 0 8px;font-size:13px}
+.trace-event pre{margin:8px 0 0;font-size:12px;max-height:280px;overflow:auto}
+.trace-error{color:#b84444}
