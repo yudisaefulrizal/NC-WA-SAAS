@@ -44,12 +44,12 @@ test('Specialists receive shared history while router receives only latest input
 test('Tool loop passes trusted scope, shares results, and deduplicates identical calls',async()=>{
  let calls=0,executions=0;
  const result=await runAgents(async(_c,m)=>{
-  calls++;if(calls===1)return route('transaksi');
+  calls++;if(calls===1)return route('layanan');
   if(calls<=3)return JSON.stringify({tool:'create_order',query:'Frame Basic untuk pelanggan'});
   assert.equal(m.filter(x=>x.content.includes('Tool result create_order')).length,2);
   return JSON.stringify({answer:'Pesanan simulasi dibuat.'});
  },defaults,messages,300,context,{async execute(name,query,scope){executions++;assert.equal(name,'create_order');assert.equal(query,'Frame Basic untuk pelanggan');assert.deepEqual(scope,context);assert.equal(Object.isFrozen(scope),true);return {order_id:'SIM-test',simulasi:true};}});
- assert.equal(executions,1);assert.equal(result.agent,'transaksi');
+ assert.equal(executions,1);assert.equal(result.agent,'layanan');
 });
 test('Invalid routes cannot dispatch agents or tools',async()=>{
  for(const raw of ['not JSON',route('informasi','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'informasi',s_p_o_konteks:'   ',isi_pesan:messages.at(-1)!.content})]){
@@ -63,10 +63,10 @@ test('Tool permissions and strict arguments reject attempts to change tenant ide
    let calls=0;await assert.rejects(runAgents(async()=>++calls===1?route(agent):JSON.stringify({tool,query:'x'}),defaults,messages,300,context,{execute:async()=>{assert.fail('Forbidden tool executed');}}),/ai_invalid_tool/);
   }
  }
- let calls=0;await assert.rejects(runAgents(async()=>++calls===1?route('transaksi'):JSON.stringify({tool:'check_order',query:'ORD-1',account:'tenant-b'}),defaults,messages,300,context),/ai_invalid_tool/);
+ let calls=0;await assert.rejects(runAgents(async()=>++calls===1?route('layanan'):JSON.stringify({tool:'check_order',query:'ORD-1',account:'tenant-b'}),defaults,messages,300,context),/ai_invalid_tool/);
 });
 test('Tool errors, oversized results and endless loops fail with bounded execution',async()=>{
- const call=():AITransport=>{let n=0;return async()=>++n===1?route('transaksi'):JSON.stringify({tool:'get_products',query:String(n)});};
+ const call=():AITransport=>{let n=0;return async()=>++n===1?route('layanan'):JSON.stringify({tool:'get_products',query:String(n)});};
  await assert.rejects(runAgents(call(),defaults,messages,300,context,{async execute(){throw Error('adapter_failed');}}),/adapter_failed/);
  await assert.rejects(runAgents(call(),defaults,messages,300,context,{async execute(){return 'x'.repeat(16001);}}),/ai_tool_result_limit/);
  let executions=0;await assert.rejects(runAgents(call(),defaults,messages,300,context,{async execute(){executions++;return [];}}),/ai_invalid_tool/);assert.equal(executions,4);
@@ -90,7 +90,7 @@ test('Agent Lainnya can read knowledge, products, and order status without creat
 test('A specialist can correct invalid order input without repeating a successful mutation',async()=>{
  const {ApiError}=await import('../src/engine/sessions.js');let calls=0,mutations=0;
  const result=await runAgents(async()=>{
-  calls++;if(calls===1)return route('transaksi');
+  calls++;if(calls===1)return route('layanan');
   if(calls<=4)return JSON.stringify({tool:'create_order',query:calls===2?'invalid':calls===3?'corrected':'different'});
   return JSON.stringify({answer:'Pesanan tercatat'});
  },defaults,messages,300,context,{async execute(_name,query){if(query==='invalid')throw new ApiError(400,'invalid_request','Pilih produk dahulu');mutations++;return {order:{id:'ORD-1'}};}});
@@ -101,7 +101,7 @@ test('Short replies and topic changes are routed with previous SPO, without old 
  for(const input of ['ya','yang itu','cukup','Saya ingin komplain']){
   let calls=0;
   await runAgents(async(_c,m)=>{
-   if(calls++===0){assert.equal(m.length,3);assert.equal(m[1].content,'Konteks S-P-O sebelumnya: "pelanggan-mengonfirmasi-pesanan"');assert.equal(m[2].content,input);return route('transaksi',input);}
+   if(calls++===0){assert.equal(m.length,3);assert.equal(m[1].content,'Konteks S-P-O sebelumnya: "pelanggan-mengonfirmasi-pesanan"');assert.equal(m[2].content,input);return route('layanan',input);}
    return JSON.stringify({answer:'Baik'});
   },defaults,[...messages,{role:'user',content:input}],300,context,defaultTools,'pelanggan-mengonfirmasi-pesanan');
  }
@@ -116,7 +116,7 @@ test('Three model tiers select by role across routing, specialist tools and cont
  const config={...defaults,model_cheap:'cheap-test',model_medium:'medium-test',model_smart:'smart-test'};
  for(const agent of Object.keys(agents) as AgentName[]){
   const selected:{model:string;role:string|undefined}[]=[];let calls=0;
-  const transport:AITransport=async(c)=>{selected.push({model:c.model,role:c.call_role});if(c.call_role==='context')return 'pelanggan-menunggu-layanan';if(calls++===0)return route(agent);if(agent==='transaksi'&&calls===2)return JSON.stringify({tool:'get_products',query:''});return JSON.stringify({answer:'Baik'});};
+  const transport:AITransport=async(c)=>{selected.push({model:c.model,role:c.call_role});if(c.call_role==='context')return 'pelanggan-menunggu-layanan';if(calls++===0)return route(agent);if(agent==='layanan'&&calls===2)return JSON.stringify({tool:'get_products',query:''});return JSON.stringify({answer:'Baik'});};
   await runAgents(transport,config,messages,300,context,{execute:async()=>[]});
   await updateRouterContext(transport,config,'ya','Baik');
   assert.deepEqual(selected[0],{model:'cheap-test',role:'router'});
@@ -129,7 +129,7 @@ test('Three model tiers select by role across routing, specialist tools and cont
 test('Invalid router and specialist output is repaired once without replaying a successful order',async()=>{
  let routerCalls=0,specialistCalls=0,mutations=0;
  const result=await runAgents(async(c,m)=>{
-  if(c.call_role==='router'){if(routerCalls++===0)return 'invalid';assert.ok(m.at(-1)!.content.includes('Output sebelumnya'));return route('transaksi');}
+  if(c.call_role==='router'){if(routerCalls++===0)return 'invalid';assert.ok(m.at(-1)!.content.includes('Output sebelumnya'));return route('layanan');}
   specialistCalls++;
   if(specialistCalls===1)return JSON.stringify({tool:'create_order',query:'one'});
   if(specialistCalls===2)return '{broken';

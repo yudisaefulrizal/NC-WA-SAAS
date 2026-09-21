@@ -28,7 +28,7 @@ const configuration=async()=>({...defaults,model_cheap:'cheap',model_medium:'med
 async function input(message='Pesan produk'){return {message,profile:{lainnya:'Bisnis uji'},behavior:'Ramah',products,revision:(await workflowState()).revision};}
 const transport:AITransport=async(c,m)=>{
  const latest=m.filter(x=>x.role==='user').at(-1)!.content;
- if(c.call_role==='router')return JSON.stringify({sub_agent:latest==='statusnya?'?'dukungan':'transaksi',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:latest});
+ if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:latest});
  if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
  if(latest==='statusnya?')return m.some(x=>x.content.startsWith('Tool result check_order'))?JSON.stringify({answer:'Pesanan SIM-1 berstatus baru.'}):JSON.stringify({tool:'check_order',query:'SIM-1'});
  if(m.some(x=>x.content.startsWith('Tool result create_order')))return JSON.stringify({answer:'Pesanan SIM-1 dibuat.'});
@@ -38,7 +38,7 @@ const transport:AITransport=async(c,m)=>{
 
 test('Workflow validation keeps topology fixed and cannot grant unauthorized tools',()=>{
  assert.deepEqual(workflowInput(defaultWorkflow()),defaultWorkflow());
- for(const mutate of [(d:any)=>delete d.nodes.router,(d:any)=>d.nodes.new_agent={},(d:any)=>d.nodes.router.tools=['create_order'],(d:any)=>d.nodes.transaksi.tools=['execute_code'],(d:any)=>d.nodes.context.prompt='',(d:any)=>d.nodes.pembuka.tier='unknown']){const d=defaultWorkflow();mutate(d);assert.throws(()=>workflowInput(d));}
+ for(const mutate of [(d:any)=>delete d.nodes.router,(d:any)=>d.nodes.new_agent={},(d:any)=>d.nodes.router.tools=['create_order'],(d:any)=>d.nodes.layanan.tools=['execute_code'],(d:any)=>d.nodes.context.prompt='',(d:any)=>d.nodes.pembuka.tier='unknown']){const d=defaultWorkflow();mutate(d);assert.throws(()=>workflowInput(d));}
 });
 
 test('Draft edits are isolated, optimistic locking protects saves, publication reaches production config',async()=>{
@@ -60,7 +60,7 @@ test('Sandbox traces real agent/tool flow, keeps context across turns, and never
  assert.ok(events.some(e=>e.node==='create_order'&&e.state==='done'));assert.ok(events.some(e=>e.node==='router'&&e.state==='routed'));
  const session=events[0].session;events.length=0;
  await runner.run(owner,{...await input('statusnya?'),session},e=>events.push(structuredClone(e)));
- assert.equal(events[0].context,'pelanggan-menunggu-pesanan');assert.equal(events.at(-1).output.agent,'dukungan');assert.equal(events.at(-1).output.orders.length,1);assert.ok(events.some(e=>e.node==='check_order'&&e.output?.order?.id==='SIM-1'));
+ assert.equal(events[0].context,'pelanggan-menunggu-pesanan');assert.equal(events.at(-1).output.agent,'layanan');assert.equal(events.at(-1).output.orders.length,1);assert.ok(events.some(e=>e.node==='check_order'&&e.output?.order?.id==='SIM-1'));
  assert.ok(!JSON.stringify(events).includes('private-test-secret'));
  const [orders]=await db.execute<any[]>('SELECT id FROM ai_orders WHERE account_id=?',[owner]);const [usage]=await db.execute<any[]>('SELECT request_id FROM ai_usage WHERE account_id=?',[owner]);assert.equal(orders.length,0);assert.equal(usage.length,0);
  await assert.rejects(runner.run(client,{...await input(),session},()=>{}),{code:'studio_session_missing'});
@@ -71,11 +71,11 @@ test('Studio traces network retries and format repair without replaying order cr
  let routers=0,specialists=0;const events:any[]=[];
  const runner=new AIStudio(async(c,m,w)=>{
   if(c.call_role==='router'&&++routers===1)throw Error('ai_provider_http_503');
-  if(c.call_role==='transaksi'&&++specialists===3)return 'invalid JSON';
+  if(c.call_role==='layanan'&&++specialists===3)return 'invalid JSON';
   return transport(c,m,w);
  },configuration,async()=>{});
  await runner.run(owner,await input(),e=>events.push(e));
- assert.equal(events.at(-1).state,'done');assert.ok(events.some(e=>e.state==='retry'&&e.node==='router'));assert.ok(events.some(e=>e.state==='retry'&&e.node==='transaksi'));
+ assert.equal(events.at(-1).state,'done');assert.ok(events.some(e=>e.state==='retry'&&e.node==='router'));assert.ok(events.some(e=>e.state==='retry'&&e.node==='layanan'));
  assert.equal(events.filter(e=>e.node==='create_order'&&e.state==='running').length,1);
 });
 

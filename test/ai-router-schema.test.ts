@@ -31,7 +31,7 @@ test('Custom prompt and repair preserve enum contract before dispatch',async()=>
   if(c.call_role!=='router')return '{"answer":"Baik"}';
   assert.ok(m[0].content.includes(JSON.stringify(routerOutputSchema)));
   assert.ok(m[0].content.startsWith('Custom router'));
-  return JSON.stringify({sub_agent:++calls===1?'unknown':'transaksi',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:'ya'});
+  return JSON.stringify({sub_agent:++calls===1?'unknown':'layanan',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:'ya'});
  },{...defaults,workflow},[{role:'user',content:'ya'}],300,{account:'test',session:'test',customer:'test',requestId:'test',knowledge:''});
- assert.equal(calls,2);assert.equal(result.agent,'transaksi');
+ assert.equal(calls,2);assert.equal(result.agent,'layanan');
 });

@@ -157,7 +157,7 @@ test('Multi-agent WhatsApp flow switches agents, persists shared memory across r
  const transport:AITransport=async(_config,m)=>{
   if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-layanan';
   const input=m.filter(x=>x.role==='user').at(-1)!.content;
-  const agent=input.startsWith('info')?'informasi':input.startsWith('saran')?'konsultasi':input.startsWith('pesan')?'transaksi':'dukungan';
+  const agent=input.startsWith('info')?'informasi':'layanan';
   if(m[0].content.startsWith('Anda adalah ROUTER'))return JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan meminta layanan',isi_pesan:input});
   observed.push({input,history:m.filter(x=>x.role!=='system')});
   return JSON.stringify({answer:'Balasan '+agent});
@@ -165,11 +165,11 @@ test('Multi-agent WhatsApp flow switches agents, persists shared memory across r
  const f=await fixture(transport,false,async()=>{},[],false,true);
  await Promise.all(['info produk','saran produk','pesan produk'].map((input,i)=>f.service.incoming(f.id,f.manager,'shop',f.message('switch-'+i,input))));
  assert.deepEqual(observed.map(x=>x.input),['info produk','saran produk','pesan produk']);
- assert.ok(observed[2].history.some(x=>x.content==='Balasan konsultasi'));
+ assert.ok(observed[2].history.some(x=>x.content==='Balasan layanan'));
  const restarted=new FixtureAI(transport,async()=>{});
  await restarted.incoming(f.id,f.manager,'shop',f.message('restart','status pesanan'));
- assert.ok(observed[3].history.some(x=>x.content==='Balasan transaksi'));
- assert.deepEqual((await rows(f.id)).map(x=>x.agent).sort(),['dukungan','informasi','konsultasi','transaksi']);
+ assert.ok(observed[3].history.some(x=>x.content==='Balasan layanan'));
+ assert.deepEqual((await rows(f.id)).map(x=>x.agent).sort(),['informasi','layanan','layanan','layanan']);
  const g=await fixture(transport,false,async()=>{},[],false,true);
  await g.service.saveAssistant(g.id,'shop',{enabled:true,profile:{lainnya:'Tenant B only'},behavior:'',products_source:{mode:'endpoint',endpoint:'https://8.8.8.8/products'},orders_source:{mode:'builtin'}});
  await g.service.incoming(g.id,g.manager,'shop',g.message('switch-0','info tenant B'));
@@ -212,7 +212,7 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
   if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-pesanan';
   const input=m.filter(x=>x.role==='user').at(-1)!.content,checking=input==='Bagaimana statusnya?';
   assert.ok(!JSON.stringify(m).includes('KNOWLEDGE_PRIVATE'));
-  if(m[0].content.startsWith('Anda adalah ROUTER')){if(checking)assert.ok(m[1].content.includes('pelanggan-menunggu-pesanan'));return JSON.stringify({sub_agent:checking?'dukungan':'transaksi',s_p_o_konteks:'Pelanggan meminta pesanan',isi_pesan:input});}
+  if(m[0].content.startsWith('Anda adalah ROUTER')){if(checking)assert.ok(m[1].content.includes('pelanggan-menunggu-pesanan'));return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan meminta pesanan',isi_pesan:input});}
   const result=m.find(x=>x.content.startsWith('Tool result '+(checking?'check_order':'create_order')));
   if(result){const data=JSON.parse(result.content.slice(result.content.indexOf('{')));orderId=data.order.id;return JSON.stringify({answer:checking?'Status '+data.order.status:'Pesanan '+orderId+' tercatat'});}
   if(checking){assert.ok(m.some(x=>x.content.includes(orderId)));return JSON.stringify({tool:'check_order',query:orderId});}
@@ -231,7 +231,7 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
 test('Router context persists, feeds next turn, stays isolated and clears with memory',async()=>{
  const seen:AIMessage[][]=[];
  const transport:AITransport=async(_c,m)=>{
-  if(m[0].content.startsWith('Anda adalah ROUTER')){seen.push(m);return JSON.stringify({sub_agent:'transaksi',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.at(-1)!.content});}
+  if(m[0].content.startsWith('Anda adalah ROUTER')){seen.push(m);return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.at(-1)!.content});}
   if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-mengonfirmasi-pesanan';
   return JSON.stringify({answer:'Ingin memesan produk ini?'});
  };
@@ -297,7 +297,7 @@ test('Pause during retry cancels further calls and suppresses fallback',async()=
 test('Read tools retry once but uncertain order mutations are never replayed',async()=>{
  for(const name of ['get_products','create_order'] as const){
   let executions=0;const f=await fixture(async(c,m)=>{
-   if(c.call_role==='router')return JSON.stringify({sub_agent:'transaksi',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
+   if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
    if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
    if(m.some(x=>x.content.startsWith('Tool result')))return JSON.stringify({answer:'Baik'});
    return JSON.stringify({tool:name,query:''});

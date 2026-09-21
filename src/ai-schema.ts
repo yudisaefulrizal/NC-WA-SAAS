@@ -1,4 +1,5 @@
 import {db} from './db.js';
+import {defaultWorkflow} from './ai-workflow.js';
 export async function migrateAI(){
  const tables=[
  `CREATE TABLE IF NOT EXISTS ai_workflow (id INT PRIMARY KEY,draft JSON NOT NULL,active JSON NULL,revision INT UNSIGNED NOT NULL DEFAULT 0,active_version INT UNSIGNED NOT NULL DEFAULT 0,published_revision INT UNSIGNED NOT NULL DEFAULT 0,tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0) ENGINE=InnoDB`,
@@ -58,5 +59,12 @@ export async function migrateAI(){
  const [workflowColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','tool_defaults_version']);
  if(!workflowColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0');
  await db.query("UPDATE ai_workflow SET draft=IF(JSON_LENGTH(JSON_EXTRACT(draft,'$.nodes.lainnya.tools'))=0,JSON_SET(draft,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),draft),active=IF(active IS NULL,NULL,IF(JSON_LENGTH(JSON_EXTRACT(active,'$.nodes.lainnya.tools'))=0,JSON_SET(active,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),active)),tool_defaults_version=1 WHERE tool_defaults_version<1");
-
+ // Sub-agents transaksi/konsultasi/dukungan/keluhan merged into one "layanan" node; old node keys no longer validate, so reset to the new default topology.
+ const [mergedColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','layanan_merge_version']);
+ if(!mergedColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN layanan_merge_version INT UNSIGNED NOT NULL DEFAULT 0');
+ const [mergedRows]=await db.query<any[]>('SELECT layanan_merge_version FROM ai_workflow WHERE id=1');
+ if(mergedRows[0]&&mergedRows[0].layanan_merge_version<1){
+  const fresh=JSON.stringify(defaultWorkflow());
+  await db.query('UPDATE ai_workflow SET draft=?,active=IF(active IS NULL,NULL,?),revision=revision+1,layanan_merge_version=1 WHERE id=1',[fresh,fresh]);
+ }
 }
