@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
-import {ai,callAI,type AIConfig,type AIMessage,type AITransport} from './ai.js';
+import {ai,callAI,composeKnowledge,profileFields,type AIConfig,type AIMessage,type AITransport,type ProfileField} from './ai.js';
 import {runAgents,updateRouterContext,type AITools} from './ai-agents.js';
 import {workflowState} from './ai-workflow.js';
 import {productInput,orderInput,record,type Order} from './ai-data.js';
@@ -19,7 +19,10 @@ export class AIStudio {
  private busy=new Set<string>();
  constructor(private transport:AITransport=callAI,private configuration:()=>Promise<AIConfig>=()=>ai.config(),private wait:(ms:number)=>Promise<void>=async ms=>{await delay(ms);}){}
  async run(owner:string,value:unknown,emit:Emit,signal?:AbortSignal){
-  const body=record(value),message=text(body.message,4000).trim(),knowledge=text(body.knowledge??'',8000),behavior=text(body.behavior??'',2000);
+  const body=record(value),message=text(body.message,4000).trim(),behavior=text(body.behavior??'',2000);
+  const profileInput=record(body.profile??{});
+  const profile=Object.fromEntries(profileFields.map(field=>[field,text(profileInput[field]??'',2000)])) as Record<ProfileField,string>;
+  const knowledge=composeKnowledge(profile);
   if(!message)throw bad('Isi pesan pengujian.');
   if(!Array.isArray(body.products)||body.products.length>20)throw bad('Maksimal 20 produk simulasi.');
   const products=body.products.map(productInput);if(new Set(products.map(p=>p.id)).size!==products.length)throw bad('Kode produk harus unik.');
