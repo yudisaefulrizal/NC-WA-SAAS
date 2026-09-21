@@ -92,8 +92,14 @@ export class AIService {
   const size=20;
   const [counts]=await db.execute<RowDataPacket[]>('SELECT COUNT(*) AS total FROM ai_agent_failures');
   const total=Number(counts[0].total),pages=Math.max(1,Math.ceil(total/size)),page=Math.min(Number(value),pages);
-  const [items]=await db.query('SELECT account_id,session_id,request_id,agent,error,message,created_at FROM ai_agent_failures ORDER BY created_at DESC,id DESC LIMIT '+size+' OFFSET '+((page-1)*size));
+  const [items]=await db.query('SELECT id,account_id,session_id,request_id,agent,error,message,model,created_at FROM ai_agent_failures ORDER BY created_at DESC,id DESC LIMIT '+size+' OFFSET '+((page-1)*size));
   return {items,page,pages,total,page_size:size};
+ }
+ async agentFailureDetail(id:unknown){
+  if(typeof id!=='string'||!/^\d{1,20}$/.test(id))throw fail('ID kegagalan tidak valid');
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT prompt,raw_output FROM ai_agent_failures WHERE id=?',[id]);
+  if(!rows[0])throw new ApiError(404,'not_found','Detail kegagalan tidak ditemukan');
+  return {prompt:rows[0].prompt,raw_output:rows[0].raw_output};
  }
  async trial(account:string,body:unknown){
   const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
@@ -290,7 +296,9 @@ export class AIService {
   const modelCalls:{role:ModelRole|undefined;model:string;status:string;attempt:number}[]=[];
   const deadline=Date.now()+120000;
   const retryPause=async(attempt:number)=>{await this.wait(500*2**attempt+randomInt(0,251));await guard();};
+  let lastMessages:AIMessage[]|undefined,lastModel:string|undefined;
   const trackedTransport:AITransport=async(selected,messages,maxWords)=>{
+   lastMessages=messages;lastModel=selected.model;
    for(let attempt=0;attempt<3;attempt++){
     await guard();if(modelCalls.length>=20||Date.now()>=deadline)throw Error('ai_retry_limit');
     const entry={role:selected.call_role,model:selected.model,status:'failed',attempt:attempt+1};modelCalls.push(entry);
@@ -300,8 +308,8 @@ export class AIService {
    throw Error('ai_retry_limit');
   };
   let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
-  let lastNode:string|undefined,lastTraceError:string|undefined;
-  config.onTrace=event=>{if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;}};
+  let lastNode:string|undefined,lastTraceError:string|undefined,lastRawOutput:string|undefined;
+  config.onTrace=event=>{if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;if(typeof event.output==='string')lastRawOutput=event.output;}};
   try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
    await guard();
    try{return await this.tools.execute(name,query,context);}catch(error){
@@ -311,7 +319,7 @@ export class AIService {
   }},prepared.routerContext);fallback=result.fallback;answer=fallback?'Baik, saya konfirmasi dulu dan akan melanjutkan jawaban segera.':result.answer;agent=result.agent;}
   catch(error){generationFailed=true;answer=aiFallback;
    const errorCode=error instanceof Error?error.message:'unknown_error';
-   await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message) VALUES (?,?,?,?,?,?)',[account,session,id,lastNode??null,(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000)]).catch(()=>{});
+   await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message,model,prompt,raw_output) VALUES (?,?,?,?,?,?,?,?,?)',[account,session,id,lastNode??null,(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000),lastModel??null,lastMessages?JSON.stringify(lastMessages):null,lastRawOutput?.slice(0,65000)??null]).catch(()=>{});
   }
   // Context is internal and never billed. A failed summary clears stale context on a successful send.
   let routerContext:string|null=null;

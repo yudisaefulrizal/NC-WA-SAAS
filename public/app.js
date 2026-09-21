@@ -244,7 +244,7 @@ let failuresPage=1,failuresLoading=false;
 async function loadFailures(page=failuresPage){
  if(failuresLoading)return;failuresLoading=true;$('ai-failures-prev').disabled=$('ai-failures-next').disabled=true;
  try{const result=await api('/api/admin/ai/failures?page='+page);failuresPage=result.page;
- table('ai-failures',['Waktu','Akun','Sesi','Agent','Error','Pesan pelanggan'],result.items,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.account_id,r.session_id,r.agent||'—',r.error,r.message]);
+ table('ai-failures',['Waktu','Akun','Sesi','Agent','Model','Error','Pesan pelanggan','Tindakan'],result.items,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.account_id,r.session_id,r.agent||'—',r.model||'—',r.error,r.message,button('Detail',async()=>{const detail=await api('/api/admin/ai/failures/'+r.id);$('failure-detail-prompt').textContent=detail.prompt?JSON.stringify(detail.prompt,null,2):'Tidak tersedia.';$('failure-detail-raw').textContent=detail.raw_output||'Tidak tersedia.';$('failure-detail-dialog').showModal();})]);
  $('ai-failures-page').textContent='Halaman '+result.page+' dari '+result.pages+' · '+result.total+' kegagalan';
  $('ai-failures-prev').disabled=result.page<=1;$('ai-failures-next').disabled=result.page>=result.pages;
  }catch(error){$('ai-failures-prev').disabled=failuresPage<=1;$('ai-failures-next').disabled=false;throw error;}finally{failuresLoading=false;}

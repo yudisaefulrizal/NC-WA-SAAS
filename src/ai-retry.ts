@@ -20,7 +20,7 @@ export async function validatedAI<T>(transport:AITransport,config:AIConfig,messa
    throw error;
   }
   try{return validate(raw);}catch(error){
-   config.onTrace?.({node:config.call_role??'model',state:attempt===1?'invalid':'retry',error:error instanceof Error?error.message:'invalid_output'});
+   config.onTrace?.({node:config.call_role??'model',state:attempt===1?'invalid':'retry',error:error instanceof Error?error.message:'invalid_output',output:raw});
    if(attempt===1)throw error;
    current=[...messages,{role:'system',content:'Output sebelumnya tidak valid. '+correction}];
   }
