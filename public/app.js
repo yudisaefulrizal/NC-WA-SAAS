@@ -142,7 +142,7 @@ form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 
-const aiTabNames=['knowledge','behavior','fallback','products','orders','conversations','usage','trial'];
+const aiTabNames=['knowledge','products','behavior','fallback','orders','conversations','usage','trial'];
 function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('usaha');}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
 const knowledgeTabNames=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
