@@ -35,7 +35,7 @@ export async function migrateAI(){
  // TEXT can't carry a DEFAULT in this MySQL version; callers always coalesce NULL to '' (see ai.ts).
  const [legacyKnowledgeColumn]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','knowledge']);
  if(legacyKnowledgeColumn.length)await db.query('ALTER TABLE ai_assistants MODIFY knowledge TEXT NULL');
- const profileFields=['nama','deskripsi','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+ const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
  let addedProfilLainnya=false;
  for(const [table,column,definition] of [['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_settings','context_memory_limit','INT UNSIGNED NOT NULL DEFAULT 6'],['ai_settings','trace_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_products','unit',"VARCHAR(20) NOT NULL DEFAULT 'pcs'"],['ai_agent_failures','model','VARCHAR(100) NULL'],['ai_agent_failures','prompt','JSON NULL'],['ai_agent_failures','raw_output','MEDIUMTEXT NULL'],['ai_agent_failures','router_context','VARCHAR(200) NULL'],...profileFields.map(field=>['ai_assistants','profil_'+field,'TEXT NULL'] as [string,string,string])]){
   const [columns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,column]);
@@ -55,6 +55,12 @@ export async function migrateAI(){
  if(bidangColumn.length){
   await db.query("UPDATE ai_assistants SET profil_deskripsi=TRIM(CONCAT(COALESCE(profil_deskripsi,''),IF(profil_deskripsi IS NOT NULL AND profil_deskripsi<>'' AND profil_bidang IS NOT NULL AND profil_bidang<>'','\\n\\n',''),COALESCE(profil_bidang,''))) WHERE profil_bidang IS NOT NULL AND profil_bidang<>''");
   await db.query('ALTER TABLE ai_assistants DROP COLUMN profil_bidang');
+ }
+ // Nama/Deskripsi/Alamat/Kontak/Jam operasional merged into one free-text "Profil usaha" field (one-time carry-over before dropping).
+ const [usahaSourceColumns]=await db.execute<any[]>("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ai_assistants' AND COLUMN_NAME IN ('profil_nama','profil_deskripsi','profil_alamat','profil_kontak','profil_jam_operasional')");
+ if(usahaSourceColumns.length){
+  await db.query(`UPDATE ai_assistants SET profil_usaha=TRIM(BOTH '\\n\\n' FROM CONCAT_WS('\\n\\n',NULLIF(profil_nama,''),NULLIF(profil_deskripsi,''),NULLIF(profil_alamat,''),NULLIF(profil_kontak,''),NULLIF(profil_jam_operasional,'')))`);
+  for(const column of ['profil_nama','profil_deskripsi','profil_alamat','profil_kontak','profil_jam_operasional'])await db.query(`ALTER TABLE ai_assistants DROP COLUMN ${column}`);
  }
  const [workflowColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','tool_defaults_version']);
  if(!workflowColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0');

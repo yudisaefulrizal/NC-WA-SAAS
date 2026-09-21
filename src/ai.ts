@@ -23,9 +23,10 @@ export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/complet
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 // Product and price are handled by the dedicated products table (ai-data.ts), not free-text here.
 // Bidang is folded into Deskripsi rather than kept as its own field.
-export const profileFields=['nama','deskripsi','alamat','kontak','jam_operasional','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'] as const;
+// Nama/deskripsi/alamat/kontak/jam_operasional merged into one free-text "usaha" field.
+export const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'] as const;
 export type ProfileField=typeof profileFields[number];
-const profileLabels:Record<ProfileField,string>={nama:'Nama perusahaan/lembaga',deskripsi:'Deskripsi',alamat:'Alamat',kontak:'Kontak',jam_operasional:'Jam operasional',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ',lainnya:'Lainnya'};
+const profileLabels:Record<ProfileField,string>={usaha:'Profil usaha',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ',lainnya:'Lainnya'};
 // Only filled-in fields are sent to the agent; empty ones add no noise to the prompt.
 export function composeKnowledge(profile:Partial<Record<ProfileField,string>>){
  return profileFields.map(field=>{const value=profile[field]?.trim();return value?profileLabels[field]+': '+value:null;}).filter(Boolean).join('\n\n');
