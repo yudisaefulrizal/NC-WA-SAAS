@@ -145,7 +145,7 @@ document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.c
 const aiTabNames=['knowledge','products','behavior','fallback','orders','conversations','usage','trial'];
 function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('usaha');}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
-const knowledgeTabNames=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+const knowledgeTabNames=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
 function knowledgeTab(tab){for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
 document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
 aiTab('knowledge');
@@ -175,7 +175,7 @@ $('ai-usage-prev').onclick=()=>run(()=>loadAIUsage(aiUsagePage-1));
 $('ai-usage-next').onclick=()=>run(()=>loadAIUsage(aiUsagePage+1));
 let assistantLoad=0;
 const sourceKinds=['products','orders'];
-const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;if(external)$('ai-'+kind+'-endpoint').closest('details').open=true;}}
 for(const kind of sourceKinds)$('ai-form').elements[kind+'_mode'].onchange=sourceVisibility;
 async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;const controls=[...$('ai-form').elements].filter(x=>x.name!=='session');for(const control of controls)control.disabled=true;

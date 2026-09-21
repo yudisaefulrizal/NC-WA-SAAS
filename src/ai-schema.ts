@@ -35,16 +35,25 @@ export async function migrateAI(){
  // TEXT can't carry a DEFAULT in this MySQL version; callers always coalesce NULL to '' (see ai.ts).
  const [legacyKnowledgeColumn]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','knowledge']);
  if(legacyKnowledgeColumn.length)await db.query('ALTER TABLE ai_assistants MODIFY knowledge TEXT NULL');
- const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'];
+ const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
+ // profil_lainnya is deprecated (folded into FAQ below) but still needed transiently as the legacy knowledge carry-over target.
+ const [existingProfilLainnya]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','profil_lainnya']);
  let addedProfilLainnya=false;
+ if(legacyKnowledgeColumn.length&&!existingProfilLainnya.length){await db.query('ALTER TABLE ai_assistants ADD COLUMN profil_lainnya TEXT NULL');addedProfilLainnya=true;}
  for(const [table,column,definition] of [['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_settings','context_memory_limit','INT UNSIGNED NOT NULL DEFAULT 6'],['ai_settings','trace_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_agent_failures','model','VARCHAR(100) NULL'],['ai_agent_failures','prompt','JSON NULL'],['ai_agent_failures','raw_output','MEDIUMTEXT NULL'],['ai_agent_failures','router_context','VARCHAR(200) NULL'],...profileFields.map(field=>['ai_assistants','profil_'+field,'TEXT NULL'] as [string,string,string])]){
   const [columns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,column]);
- if(!columns.length){await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);if(table==='ai_assistants'&&column==='profil_lainnya')addedProfilLainnya=true;}
+ if(!columns.length)await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
  }
- // One-time carry-over: existing free-text knowledge moves into the new "Lainnya" field so it isn't silently dropped.
+ // One-time carry-over: existing free-text knowledge moves into "Lainnya" first, then folded into FAQ below.
  if(addedProfilLainnya)await db.query("UPDATE ai_assistants SET profil_lainnya=knowledge WHERE knowledge IS NOT NULL AND knowledge<>''");
  // knowledge is fully superseded by profil_* (composed on read); drop it now that the carry-over above ran.
  if(legacyKnowledgeColumn.length)await db.query('ALTER TABLE ai_assistants DROP COLUMN knowledge');
+ // "Lainnya" removed as a separate field; anything in it (including staff answers applied from resolved fallback tickets) folds into FAQ.
+ const [profilLainnyaColumn]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','profil_lainnya']);
+ if(profilLainnyaColumn.length){
+  await db.query("UPDATE ai_assistants SET profil_faq=TRIM(BOTH '\\n\\n' FROM CONCAT_WS('\\n\\n',NULLIF(profil_faq,''),NULLIF(profil_lainnya,'')))");
+  await db.query('ALTER TABLE ai_assistants DROP COLUMN profil_lainnya');
+ }
  // Product/price live in the dedicated products table; the freeform profile fields for them were removed.
  for(const column of ['profil_produk_layanan','profil_harga']){
   const [columns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants',column]);

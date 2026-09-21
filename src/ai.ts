@@ -24,9 +24,10 @@ export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 // Product and price are handled by the dedicated products table (ai-data.ts), not free-text here.
 // Bidang is folded into Deskripsi rather than kept as its own field.
 // Nama/deskripsi/alamat/kontak/jam_operasional merged into one free-text "usaha" field.
-export const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq','lainnya'] as const;
+// "Lainnya" removed; anything that doesn't fit another field belongs in FAQ as free text.
+export const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'] as const;
 export type ProfileField=typeof profileFields[number];
-const profileLabels:Record<ProfileField,string>={usaha:'Profil usaha',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ',lainnya:'Lainnya'};
+const profileLabels:Record<ProfileField,string>={usaha:'Profil usaha',cara_pemesanan:'Cara pemesanan',pembayaran:'Metode pembayaran',kebijakan:'Kebijakan',faq:'FAQ'};
 // Only filled-in fields are sent to the agent; empty ones add no noise to the prompt.
 export function composeKnowledge(profile:Partial<Record<ProfileField,string>>){
  return profileFields.map(field=>{const value=profile[field]?.trim();return value?profileLabels[field]+': '+value:null;}).filter(Boolean).join('\n\n');
@@ -253,8 +254,8 @@ export class AIService {
   if(!/^FB-[A-Z0-9]{8,48}$/.test(id))throw fail('ID fallback tidak valid');
   const content=text(object(body).content,2000,'Knowledge dari fallback');if(!content)throw fail('Knowledge dari fallback wajib diisi');
   return transaction(async c=>{await lockAccount(c,account);const [tickets]=await c.execute<RowDataPacket[]>("SELECT status FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=? FOR UPDATE",[id,account,session]);if(!tickets[0]||tickets[0].status!=='resolved')throw new ApiError(409,'fallback_not_ready','Tiket harus sudah selesai sebelum diterapkan.');
-   const [assistants]=await c.execute<RowDataPacket[]>('SELECT profil_lainnya FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);const previous=String(assistants[0]?.profil_lainnya??''),lainnya=(previous?previous+'\n\n':'')+content;if(lainnya.length>2000)throw fail('Bagian Lainnya melebihi batas 2.000 karakter; kosongkan sebagian sebelum menambah lagi.');
-   await c.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,profil_lainnya) VALUES (?,?,FALSE,'',?) ON DUPLICATE KEY UPDATE profil_lainnya=VALUES(profil_lainnya),revision=revision+1",[account,session,lainnya]);const knowledge=composeKnowledge({lainnya});return {ok:true,knowledge};
+   const [assistants]=await c.execute<RowDataPacket[]>('SELECT profil_faq FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);const previous=String(assistants[0]?.profil_faq??''),faq=(previous?previous+'\n\n':'')+content;if(faq.length>2000)throw fail('Bagian FAQ melebihi batas 2.000 karakter; kosongkan sebagian sebelum menambah lagi.');
+   await c.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,profil_faq) VALUES (?,?,FALSE,'',?) ON DUPLICATE KEY UPDATE profil_faq=VALUES(profil_faq),revision=revision+1",[account,session,faq]);const knowledge=composeKnowledge({faq});return {ok:true,knowledge};
   });
  }
  async conversation(account:string,session:string,customer:string,body:unknown){
