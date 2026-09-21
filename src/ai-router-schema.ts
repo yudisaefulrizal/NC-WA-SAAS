@@ -3,7 +3,7 @@ export type RouterAgentName=typeof routerAgentNames[number];
 export const routerOutputSchema={
  type:'object',
  properties:{
-  s_p_o_konteks:{type:'string',description:'Ringkasan S-P-O; usahakan tiga kata. Maksimal 200 karakter.'},
+  s_p_o_konteks:{type:'string',description:'Ringkasan S-P-O dipisahkan tanda hubung, minimal tiga kata, tambahkan kata secukupnya agar makna tetap utuh. Maksimal 200 karakter.'},
   sub_agent:{type:'string',enum:routerAgentNames},
   isi_pesan:{type:'string',description:'Pesan terbaru pelanggan persis tanpa perubahan.'},
   fallback_terkait:{type:'array',items:{type:'string'},description:'ID tiket menunggu yang relevan dari daftar yang diberikan. Gunakan [] bila tidak terkait.'},

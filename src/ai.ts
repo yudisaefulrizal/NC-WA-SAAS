@@ -18,8 +18,8 @@ import type {IncomingMessage} from './engine/incoming.js';
 import {basicWallet} from './plans.js';
 import {sendBilled} from './outbound.js';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
-export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;credit_price:number}
-export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,credit_price:0};
+export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;call_role?:ModelRole;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;context_memory_limit:number;credit_price:number}
+export const defaults:AIConfig={endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,context_memory_limit:6,credit_price:0};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 // Product and price are handled by the dedicated products table (ai-data.ts), not free-text here.
 // Bidang is folded into Deskripsi rather than kept as its own field.
@@ -69,12 +69,12 @@ export class AIService {
  async config():Promise<AIConfig>{const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');const config:AIConfig=rows[0]?{...defaults,...rows[0]}:{...defaults};for(const tier of modelTiers)config[`model_${tier}`]=config[`model_${tier}`]||config.model;config.workflow=await activeWorkflow();return config;}
  async configuration(){const {secret,workflow,onTrace,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
  async configure(actor:string,body:unknown){const input=object(body),previous=await this.config();
-  const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model_medium??input.model,100,'Model sedang'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
+  const config:AIConfig={endpoint:chatEndpoint(text(input.endpoint,512,'Endpoint')),model:text(input.model_medium??input.model,100,'Model sedang'),secret:previous.secret,input_rate:integer(input.input_rate,0,1000,'Tarif input'),output_rate:integer(input.output_rate,1,1000,'Tarif output'),memory_limit:integer(input.memory_limit,1,100,'Batas memori'),context_memory_limit:integer(input.context_memory_limit,0,100,'Batas memori Context Agent'),credit_price:integer(input.credit_price,0,1000000,'Harga per 10.000 kredit')};
   for(const tier of modelTiers){const key=('model_'+tier) as 'model_cheap'|'model_medium'|'model_smart';config[key]=text(input[key]??(tier==='medium'?config.model:previous[key])??config.model,100,'Model '+tier);if(!config[key])throw fail('Model '+tier+' wajib diisi');}
   if(!config.model)throw fail('Model wajib diisi');await validatePublicUrl(config.endpoint);
   if(input.apiKey!==undefined&&input.apiKey!==''){const key=text(input.apiKey,512,'API key');if(!key||/[\r\n]/.test(key))throw fail('API key tidak valid');config.secret=encrypt(key);}
   if(!config.secret)throw fail('API key wajib diisi');
-  await transaction(async c=>{await c.execute('INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,credit_price,model_cheap,model_medium,model_smart) VALUES (1,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart)',[config.endpoint,config.model,config.secret,config.input_rate,config.output_rate,config.memory_limit,config.credit_price,config.model_cheap??config.model,config.model_medium??config.model,config.model_smart??config.model]);
+  await transaction(async c=>{await c.execute('INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,context_memory_limit,credit_price,model_cheap,model_medium,model_smart) VALUES (1,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),context_memory_limit=VALUES(context_memory_limit),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart)',[config.endpoint,config.model,config.secret,config.input_rate,config.output_rate,config.memory_limit,config.context_memory_limit,config.credit_price,config.model_cheap??config.model,config.model_medium??config.model,config.model_smart??config.model]);
    // JSON slicing trims every tenant immediately without exposing conversation content.
    const [rows]=await c.query<RowDataPacket[]>('SELECT account_id,session_id,customer,messages FROM ai_conversations FOR UPDATE');
    for(const row of rows)await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(parseMemory(row.messages).slice(-config.memory_limit)),row.account_id,row.session_id,row.customer]);
@@ -323,7 +323,8 @@ export class AIService {
   }
   // Context is internal and never billed. A failed summary clears stale context on a successful send.
   let routerContext:string|null=null;
-  if(!generationFailed)try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer);}catch(error){
+  const contextHistory=config.context_memory_limit>0?prepared.messages.filter(m=>m.role!=='system').slice(0,-1).slice(-config.context_memory_limit):[];
+  if(!generationFailed)try{routerContext=await updateRouterContext(trackedTransport,config,message.text,answer,contextHistory);}catch(error){
    console.error('Pembaruan konteks router AI gagal.');
    const errorCode=error instanceof Error?error.message:'unknown_error';
    await db.execute('INSERT INTO ai_agent_failures(account_id,session_id,request_id,agent,error,message,model,prompt,raw_output,router_context) VALUES (?,?,?,?,?,?,?,?,?,?)',[account,session,id,'context',(lastTraceError??errorCode).slice(0,100),message.text.slice(0,4000),lastModel??null,lastMessages?JSON.stringify(lastMessages):null,lastRawOutput?.slice(0,65000)??null,prepared.routerContext]).catch(()=>{});

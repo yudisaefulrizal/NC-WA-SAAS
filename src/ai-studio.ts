@@ -79,11 +79,12 @@ export class AIStudio {
    emit({node:'input',state:'done',input:message,session:id,revision:state.revision,context:sandbox.context});
    emit({node:'memory',state:'done',output:{messages:sandbox.messages,router_context:sandbox.context}});
    emit({node:'router_memory',state:'done',output:{context:sandbox.context}});
+   const priorHistory=sandbox.messages.slice(-base.context_memory_limit);
    sandbox.messages=[...sandbox.messages,{role:'user' as const,content:message}].slice(-base.memory_limit);
    const system:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika tidak tahu, arahkan pelanggan ke admin. Balas maksimal 300 kata.'},...(behavior?[{role:'system' as const,content:behavior}]:[])];
    const result=await runAgents(transport,config,[...system,...sandbox.messages],300,{account:owner,session:'studio',customer:'628000000000',requestId:randomUUID(),knowledge,behavior},tools,sandbox.context);
    let context:string|null=null;
-   try{context=await updateRouterContext(transport,config,message,result.answer);}catch(error){if(signal?.aborted)throw error;emit({node:'context',state:'error',error:safeError(error)});}
+   try{context=await updateRouterContext(transport,config,message,result.answer,base.context_memory_limit>0?priorHistory:[]);}catch(error){if(signal?.aborted)throw error;emit({node:'context',state:'error',error:safeError(error)});}
    if(signal?.aborted)throw Error('ai_cancelled');
    sandbox.context=context;sandbox.messages=[...sandbox.messages,{role:'assistant' as const,content:result.answer}].slice(-base.memory_limit);
    emit({node:'router_memory',state:'done',output:{context}});

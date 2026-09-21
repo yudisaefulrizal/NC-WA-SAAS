@@ -107,7 +107,7 @@ test('Short replies and topic changes are routed with previous SPO, without old 
  }
 });
 test('Context Agent summarizes latest exchange and strictly validates SPO',async()=>{
- const result=await updateRouterContext(async(_c,m)=>{assert.equal(m.length,2);assert.deepEqual(JSON.parse(m[1].content),{pesan_pelanggan:'ya',jawaban_agent:'Berapa jumlah pesanan?'});return 'pelanggan-menentukan-jumlah';},defaults,'ya','Berapa jumlah pesanan?');
+ const result=await updateRouterContext(async(_c,m)=>{assert.equal(m.length,2);assert.deepEqual(JSON.parse(m[1].content),{riwayat_sebelumnya:[],pesan_pelanggan:'ya',jawaban_agent:'Berapa jumlah pesanan?'});return 'pelanggan-menentukan-jumlah';},defaults,'ya','Berapa jumlah pesanan?');
  assert.equal(result,'pelanggan-menentukan-jumlah');
  for(const raw of ['', 'pelanggan memesan barang','a-b-c\npenjelasan','a-b','{"context":"a-b-c"}','a-'.repeat(101)+'b'])await assert.rejects(updateRouterContext(async()=>raw,defaults,'ya','Baik'),/ai_invalid_context/);
 });
