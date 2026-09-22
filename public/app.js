@@ -175,7 +175,9 @@ async function loadAI(){
  await loadAssistant();
 }
 const robotIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><rect x="5" y="7" width="14" height="12" rx="4"/><path d="M9 13h.01M15 13h.01M9 17h6"/></svg>';
-const waIcon='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.2-.7.8-.8.9-.1.2-.3.2-.5.1-.2-.1-1-.4-1.9-1.2-.7-.6-1.2-1.4-1.3-1.6-.1-.2 0-.4.1-.5.1-.1.2-.3.4-.4.1-.1.2-.2.2-.4.1-.2 0-.3 0-.4-.1-.1-.6-1.4-.8-1.9-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 1.9s.8 2.2.9 2.4c.1.2 1.6 2.5 4 3.5.6.2 1 .4 1.3.5.6.2 1.1.1 1.5.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2-.1-.1-.2-.2-.4-.3z"/></svg>';
+// A neutral signal-bars icon instead of the WhatsApp glyph — repeated across every carousel card
+// (including the loop's duplicate copies), a row of WhatsApp logos read as visual noise.
+const connectedIcon='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="2" y="14" width="4" height="8" rx="1"/><rect x="10" y="10" width="4" height="12" rx="1"/><rect x="18" y="5" width="4" height="17" rx="1"/></svg>';
 let aiSessions=[],aiSessionIndex=0;
 function selectSession(id){if($('ai-session').value===id)return;$('ai-session').value=id;const index=aiSessions.findIndex(s=>s.id===id);if(index>=0)aiSessionIndex=index;renderSessionCards();run(async()=>{aiTab('knowledge');for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();aiFallbacksPage=1;await loadAssistant();});}
 // offset is the card's distance from the centered (active) card: 0 = active/editable, ±1/±2 = neighbors
@@ -186,7 +188,7 @@ function buildSessionCard(s,offset){
  card.classList.add('ai-session-depth-'+Math.min(2,Math.abs(offset)));
  const head=document.createElement('div');head.className='ai-session-card-head';
  const online=s.status==='connected';
- const status=document.createElement('span');status.className='ai-session-status '+(online?'online':'offline');status.innerHTML=waIcon;status.setAttribute('aria-label',online?'WhatsApp terhubung':'WhatsApp terputus');
+ const status=document.createElement('span');status.className='ai-session-status '+(online?'online':'offline');status.innerHTML=connectedIcon;status.setAttribute('aria-label',online?'WhatsApp terhubung':'WhatsApp terputus');
  const nameBlock=document.createElement('div');nameBlock.className='ai-session-card-name';
  const name=document.createElement('strong');name.textContent=s.id;
  const phone=document.createElement('small');phone.textContent=s.phone||'—';
