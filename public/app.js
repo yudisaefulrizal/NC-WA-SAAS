@@ -309,15 +309,28 @@ function renderSessionCards(){
  track.style.transition='';
  $('ai-session-dots').replaceChildren(...slots.map((_,i)=>{
   const dot=document.createElement('button');dot.type='button';dot.className='ai-session-dot'+(i===((aiSessionIndex%count)+count)%count?' active':'');
-  dot.setAttribute('aria-label','Slot '+(i+1));dot.onclick=()=>{aiSessionIndex=i;renderSessionCards();};
+  dot.setAttribute('aria-label','Slot '+(i+1));dot.onclick=()=>{aiSessionIndex=i;renderSessionCards();settleSession();};
   return dot;
  }));
 }
+// Makes the centered slot (after a prev/next slide or a dot click) actually become the active
+// session, instead of just looking centered while the form below still shows whichever session
+// was active before. A real session centers → selectSession() (same as clicking its card
+// directly): syncs $('ai-session').value and reloads its knowledge/products/orders tabs. A
+// placeholder centers → no session is active, so the form hides like the zero-sessions state.
+function settleSession(){
+ const slots=buildSessionSlots();if(!slots.length)return;
+ const index=((aiSessionIndex%slots.length)+slots.length)%slots.length;
+ const slot=slots[index];
+ if(slot.placeholder){if($('ai-session').value){$('ai-session').value='';run(loadAssistant);}}
+ else if(slot.id!==$('ai-session').value)selectSession(slot.id);
+}
 function slideSession(delta){const count=buildSessionSlots().length;if(!count)return;aiSessionIndex+=delta;renderSessionCards();
  // After the slide animation, if we've drifted into the buffer copies, snap back to the middle
- // copy at the equivalent position without animating, so the loop never runs out of cards.
+ // copy at the equivalent position without animating, so the loop never runs out of cards. Settling
+ // which session is active is debounced the same way, so rapid clicks don't fire a request per click.
  clearTimeout(slideSession.snapTimer);
- slideSession.snapTimer=setTimeout(()=>{const count=buildSessionSlots().length;if(aiSessionIndex<0||aiSessionIndex>=count){aiSessionIndex=((aiSessionIndex%count)+count)%count;renderSessionCards();}},360);
+ slideSession.snapTimer=setTimeout(()=>{const count=buildSessionSlots().length;if(aiSessionIndex<0||aiSessionIndex>=count){aiSessionIndex=((aiSessionIndex%count)+count)%count;renderSessionCards();}settleSession();},360);
 }
 $('ai-session-prev').onclick=()=>slideSession(-1);
 $('ai-session-next').onclick=()=>slideSession(1);
