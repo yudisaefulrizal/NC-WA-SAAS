@@ -283,7 +283,10 @@ function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-
 // A per-element timer means typing in one textarea never resets another field's pending save.
 const autosaveTimers=new WeakMap();
 let autosaveStatusToken=0;
-function autosaveStatus(state,text){const el=$('ai-save-status');const token=++autosaveStatusToken;el.className='ai-save-status '+state;el.textContent=text;if(state==='saved')setTimeout(()=>{if(token===autosaveStatusToken)el.textContent='';},2500);}
+// Shown as a small pinned icon badge (see .ai-save-status in style.css), not inline text, so it
+// never pushes the header layout around. The wording is kept as visually-hidden text inside it so
+// aria-live still announces it to assistive tech, and as a title attribute for a mouse tooltip.
+function autosaveStatus(state,text){const el=$('ai-save-status');const token=++autosaveStatusToken;el.className='ai-save-status '+state;el.title=text;el.innerHTML='';const label=document.createElement('span');label.className='sr-only';label.textContent=text;el.append(label);if(state==='saved')setTimeout(()=>{if(token===autosaveStatusToken){el.className='ai-save-status';el.title='';el.innerHTML='';}},2500);}
 async function autosaveField(field,value){const id=$('ai-session').value;if(!id)return;
  autosaveStatus('saving','Menyimpan…');
  try{const config=await api('/sessions/'+encodeURIComponent(id)+'/ai/field','PATCH',{field,value});

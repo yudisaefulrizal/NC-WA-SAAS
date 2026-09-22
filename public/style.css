@@ -91,11 +91,21 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 #ai-session-dots button.ai-session-dot{width:7px;height:7px;min-height:0;border-radius:50%;background-color:#d5dfd9;border:0;padding:0;cursor:pointer}
 #ai-session-dots button.ai-session-dot.active{background-color:#09976a}
 #ai-session-detail > .row-actions{flex-wrap:wrap;white-space:normal;margin-bottom:20px}
-.ai-save-status{font-size:12px;color:#718394;white-space:nowrap;transition:color .15s}
+/* Pinned to the far right of the tab row (row-actions is given position:relative right here, via
+   #ai-session-detail scoping, so it doesn't affect row-actions used elsewhere on the page) instead
+   of living on the credit card, which people misread as a top-up/payment indicator. Absolute +
+   high z-index means it never pushes the tab buttons around when it pops in and out. */
+#ai-session-detail .row-actions:has(#ai-save-status){position:relative}
+.ai-save-status{position:absolute;top:50%;right:0;transform:translateY(-50%) scale(.6);z-index:5;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#fff;box-shadow:0 2px 6px #12261d26;opacity:0;transition:opacity .15s,transform .15s;pointer-events:none}
+.ai-save-status.saving,.ai-save-status.saved,.ai-save-status.error{opacity:1;transform:translateY(-50%) scale(1)}
+.ai-save-status::after{font-size:12px;line-height:1}
 .ai-save-status.saving{color:#946609}
+.ai-save-status.saving::after{content:'⋯';font-weight:700}
 .ai-save-status.saved{color:#09976a}
+.ai-save-status.saved::after{content:'✓';font-weight:700}
 .ai-save-status.error{color:#c0392b}
-.ai-balance-card{display:flex;align-items:center;gap:14px;background:#e8f5ee;border-radius:12px;padding:10px 14px;white-space:nowrap}
+.ai-save-status.error::after{content:'!';font-weight:700}
+.ai-balance-card{position:relative;display:flex;align-items:center;gap:14px;background:#e8f5ee;border-radius:12px;padding:10px 14px;white-space:nowrap}
 .ai-balance-icon{flex:none;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:#c9ebd8;color:#087a56}
 .ai-balance-icon-whatsapp{background:#25d366;color:#fff}
 .ai-balance-icon svg{width:19px;height:19px}
