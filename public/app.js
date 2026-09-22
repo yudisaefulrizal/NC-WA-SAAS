@@ -300,13 +300,13 @@ function renderSessionCards(){
  // block; every other card's offset from it is just its own flat index minus that center index.
  const centerFlatIndex=middleBlock*count+aiSessionIndex;
  track.replaceChildren(...Array.from({length:copies},()=>slots).flat().map((s,i)=>buildSessionCard(s,i-centerFlatIndex)));
- // Centered peek: leave a sliver of empty space on each side so the neighboring card peeks in,
- // instead of the active card starting flush at the viewport edge — half/full/full/full/half.
- // The active card is the middle of the 3 full slots, so its left edge sits one card+gap past the
- // left sliver, not right after it.
+ // Leading peek: leave a sliver of empty space on each side so the previous card peeks in on the
+ // left and two upcoming cards are visible on the right — half/ACTIVE/full/full/half. The active
+ // card sits right after the left sliver (the first of the 3 full slots), favoring a look-ahead
+ // layout over a strictly centered one.
  const sliver=Math.max(0,viewport-aiSessionFullCards*cardWidth-(aiSessionFullCards-1)*gap)/2;
  track.style.transition='none';
- track.style.transform='translateX(-'+(centerFlatIndex*(cardWidth+gap)-sliver-cardWidth-gap)+'px)';
+ track.style.transform='translateX(-'+(centerFlatIndex*(cardWidth+gap)-sliver)+'px)';
  track.offsetHeight; // force reflow so the next transform change animates
  track.style.transition='';
  $('ai-session-dots').replaceChildren(...slots.map((_,i)=>{
