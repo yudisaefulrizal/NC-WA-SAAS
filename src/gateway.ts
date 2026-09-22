@@ -99,7 +99,7 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
   });
  });
  router.get('/stats',(_req,res)=>res.json((res.locals.manager as SessionManager).stats()));
- router.get('/sessions',(_req,res)=>res.json((res.locals.manager as SessionManager).list()));
+ router.get('/sessions',async(_req,res)=>{const list=(res.locals.manager as SessionManager).list(),assistants=await ai.enabledMap(res.locals.accountId);res.json(list.map(s=>({...s,aiEnabled:assistants[s.id]??false})));});
  router.post('/sessions',async(req,res)=>{
   SessionManager.validateId(req.body?.id);
   const connection=await db.getConnection();
@@ -113,6 +113,8 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  });
  router.get('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.assistant(res.locals.accountId,req.params.id));});
  router.put('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.saveAssistant(res.locals.accountId,req.params.id,req.body));});
+ router.patch('/sessions/:id/ai/enabled',async(req,res)=>{res.locals.manager.detail(req.params.id);if(typeof req.body?.enabled!=='boolean')throw new ApiError(400,'invalid_request','Status asisten wajib valid');res.json(await ai.setEnabled(res.locals.accountId,req.params.id,req.body.enabled));});
+ router.patch('/sessions/:id/ai/field',async(req,res)=>{res.locals.manager.detail(req.params.id);if(typeof req.body?.field!=='string')throw new ApiError(400,'invalid_request','Bidang wajib diisi');res.json(await ai.saveField(res.locals.accountId,req.params.id,req.body.field,req.body.value));});
  router.get('/sessions/:id/ai/products',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.products(res.locals.accountId,req.params.id));});
  router.put('/sessions/:id/ai/products/:product',async(req,res)=>{res.locals.manager.detail(req.params.id);const {product,replacedImageId}=await aiData.saveProduct(res.locals.accountId,req.params.id,req.params.product,record(req.body));if(replacedImageId)await productImages.remove(res.locals.accountId,replacedImageId).catch(()=>{});res.json(product);});
  router.post('/sessions/:id/ai/products',async(req,res)=>{res.locals.manager.detail(req.params.id);const {product}=await aiData.saveProduct(res.locals.accountId,req.params.id,'',record(req.body));res.json(product);});

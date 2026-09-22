@@ -142,27 +142,123 @@ form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 
-const aiTabNames=['knowledge','products','behavior','fallback','orders','conversations','usage','trial'];
+const aiTabNames=['knowledge','orders','conversations','usage','trial'];
 function aiTab(tab){for(const name of aiTabNames)$('ai-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('usaha');}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
-const knowledgeTabNames=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
+const knowledgeTabNames=['usaha','products','behavior','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
 function knowledgeTab(tab){for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
 document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
 aiTab('knowledge');
+$('ai-hero-buy').onclick=()=>{$('ai-credit-units').value='1';aiCreditSummary();$('ai-credit-modal').showModal();};
 let aiUsagePage=1,aiUsageLoading=false,aiCreditPrice=0;
 async function loadAI(){
- const [w,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/sessions'),loadAIUsage()]);
- $('ai-balance').textContent=`${w.balance} kredit AI · Input ${w.input_rate} kredit/kata · Output ${w.output_rate} kredit/kata · Tidak kedaluwarsa`;
+ const [w,waWallet,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),api('/sessions'),loadAIUsage()]);
+ $('ai-balance').textContent=`${w.balance} kredit`;
+ $('wa-balance').textContent=`${new Intl.NumberFormat('id-ID').format(waWallet.balance)} pesan`;
  aiCreditPrice=w.credit_price;
+ $('ai-hero-buy').disabled=!w.credit_price;
  if($('ai-credit-rate')){
   const rows=[`${w.balance} kredit AI tersedia`,`Input ${w.input_rate} kredit/kata · Output ${w.output_rate} kredit/kata`,'Tidak kedaluwarsa, dipakai lintas semua nomor layanan'];
   $('ai-credit-rate').replaceChildren(...rows.map(text=>{const li=document.createElement('li');const check=document.createElement('span');check.textContent='✓';check.setAttribute('aria-hidden','true');li.append(check,document.createTextNode(text));return li;}));
   $('ai-buy').disabled=!w.credit_price;
  }
- const selected=$('ai-session').value;$('ai-session').replaceChildren(new Option('Pilih sesi',''),...sessionRows.map(s=>new Option(s.id,s.id)));$('ai-session').value=selected;
-
+ const selected=$('ai-session').value;
+ aiSessions=sessionRows;
+ if(!aiSessions.some(s=>s.id===selected))$('ai-session').value=aiSessions[0]?.id??'';
+ aiSessionIndex=Math.max(0,aiSessions.findIndex(s=>s.id===$('ai-session').value));
+ renderSessionCards();
  await loadAssistant();
 }
+const robotIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><rect x="5" y="7" width="14" height="12" rx="4"/><path d="M9 13h.01M15 13h.01M9 17h6"/></svg>';
+const waIcon='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.2-.7.8-.8.9-.1.2-.3.2-.5.1-.2-.1-1-.4-1.9-1.2-.7-.6-1.2-1.4-1.3-1.6-.1-.2 0-.4.1-.5.1-.1.2-.3.4-.4.1-.1.2-.2.2-.4.1-.2 0-.3 0-.4-.1-.1-.6-1.4-.8-1.9-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 1.9s.8 2.2.9 2.4c.1.2 1.6 2.5 4 3.5.6.2 1 .4 1.3.5.6.2 1.1.1 1.5.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2-.1-.1-.2-.2-.4-.3z"/></svg>';
+let aiSessions=[],aiSessionIndex=0;
+function selectSession(id){if($('ai-session').value===id)return;$('ai-session').value=id;const index=aiSessions.findIndex(s=>s.id===id);if(index>=0)aiSessionIndex=index;renderSessionCards();run(async()=>{aiTab('knowledge');for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();aiFallbacksPage=1;await loadAssistant();});}
+// offset is the card's distance from the centered (active) card: 0 = active/editable, ±1/±2 = neighbors
+// shown for context only, faded out and with their controls disabled so they can't be edited by accident.
+function buildSessionCard(s,offset){
+ const card=document.createElement('article');card.className='ai-session-card';card.setAttribute('role','button');card.tabIndex=0;
+ const active=offset===0;card.setAttribute('aria-pressed',String(active));if(active)card.classList.add('selected');
+ card.classList.add('ai-session-depth-'+Math.min(2,Math.abs(offset)));
+ const head=document.createElement('div');head.className='ai-session-card-head';
+ const online=s.status==='connected';
+ const status=document.createElement('span');status.className='ai-session-status '+(online?'online':'offline');status.innerHTML=waIcon;status.setAttribute('aria-label',online?'WhatsApp terhubung':'WhatsApp terputus');
+ const nameBlock=document.createElement('div');nameBlock.className='ai-session-card-name';
+ const name=document.createElement('strong');name.textContent=s.id;
+ const phone=document.createElement('small');phone.textContent=s.phone||'—';
+ nameBlock.append(name,phone);
+ head.append(status,nameBlock);
+ const foot=document.createElement('div');foot.className='ai-session-card-foot';
+ const robot=document.createElement('span');robot.className='ai-session-robot'+(s.aiEnabled?' active':'');robot.innerHTML=robotIcon;
+ const toggle=document.createElement('label');toggle.className='ai-toggle';
+ const input=document.createElement('input');input.type='checkbox';input.checked=Boolean(s.aiEnabled);input.disabled=!active;
+ input.onclick=e=>e.stopPropagation();
+ input.onchange=()=>run(async()=>{const desired=input.checked;input.disabled=true;
+  try{await api('/sessions/'+encodeURIComponent(s.id)+'/ai/enabled','PATCH',{enabled:desired});s.aiEnabled=desired;if(s.id===$('ai-session').value)$('ai-session-enabled-field').value=desired?'on':'';}
+  catch(e){input.disabled=false;throw e;}
+  // Re-render so every duplicate card for this same session (when fewer real sessions than slots
+  // means one session appears more than once) reflects the new state, not just this one. This
+  // replaces `input` in the DOM, so re-enabling it here would touch a now-detached element.
+  renderSessionCards();
+ });
+ toggle.append(input,document.createElement('span'));
+ foot.append(robot,toggle);
+ card.append(head,foot);
+ card.onclick=()=>selectSession(s.id);
+ card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectSession(s.id);}};
+ return card;
+}
+// Infinite loop: render extra copies before/after the real list so sliding past either end
+// always has a next card, then snap (no transition) back into the middle copy once we pass it.
+const aiSessionFullCards=3; // 3 full cards visible (the center one editable), plus a half-card peek on each side
+function renderSessionCards(){
+ const count=aiSessions.length;
+ $('ai-session-prev').disabled=$('ai-session-next').disabled=count===0;
+ if(!count){$('ai-session-track').replaceChildren();$('ai-session-dots').replaceChildren();return;}
+ const track=$('ai-session-track');
+ const gap=12,viewport=$('ai-session-cards').getBoundingClientRect().width;
+ // Bail out while the carousel's container is hidden (width 0 — e.g. the AI tab isn't the active
+ // one yet, so a width-based layout computed now would be garbage). The ResizeObserver below
+ // re-triggers this once the container actually gets measured, so nothing is lost by waiting.
+ if(viewport<=0)return;
+ // 3 full slots + half a slot peeking on each side = 4 slots' worth of width.
+ const visibleCards=aiSessionFullCards+1;
+ const cardWidth=Math.max(120,Math.floor((viewport-gap*(visibleCards-1))/visibleCards));
+ document.documentElement.style.setProperty('--ai-card-width',cardWidth+'px');
+ // Repeat the session list enough times that sliding to either edge of the visible window, from
+ // any starting position, always lands inside the buffer — not just 3x, which isn't enough slack
+ // when there are fewer real sessions than visible slots (e.g. 1-4 sessions shown across 5 slots).
+ const copies=Math.max(3,Math.ceil((visibleCards*2+2)/count));
+ const middleBlock=Math.floor(copies/2);
+ // The active card sits at flat-array index (middleBlock*count + aiSessionIndex) in the middle
+ // block; every other card's offset from it is just its own flat index minus that center index.
+ const centerFlatIndex=middleBlock*count+aiSessionIndex;
+ track.replaceChildren(...Array.from({length:copies},()=>aiSessions).flat().map((s,i)=>buildSessionCard(s,i-centerFlatIndex)));
+ // Centered peek: shift half a card's width right so the previous card also peeks in on the left,
+ // instead of starting flush at a card edge — full/full/full/half look on both sides.
+ const sliver=Math.max(0,viewport-aiSessionFullCards*cardWidth-(aiSessionFullCards-1)*gap)/2;
+ track.style.transition='none';
+ track.style.transform='translateX(-'+(centerFlatIndex*(cardWidth+gap)-sliver)+'px)';
+ track.offsetHeight; // force reflow so the next transform change animates
+ track.style.transition='';
+ $('ai-session-dots').replaceChildren(...aiSessions.map((_,i)=>{
+  const dot=document.createElement('button');dot.type='button';dot.className='ai-session-dot'+(i===((aiSessionIndex%count)+count)%count?' active':'');
+  dot.setAttribute('aria-label','Nomor layanan '+(i+1));dot.onclick=()=>{aiSessionIndex=i;renderSessionCards();};
+  return dot;
+ }));
+}
+function slideSession(delta){if(!aiSessions.length)return;aiSessionIndex+=delta;renderSessionCards();
+ // After the slide animation, if we've drifted into the buffer copies, snap back to the middle
+ // copy at the equivalent position without animating, so the loop never runs out of cards.
+ clearTimeout(slideSession.snapTimer);
+ slideSession.snapTimer=setTimeout(()=>{const count=aiSessions.length;if(aiSessionIndex<0||aiSessionIndex>=count){aiSessionIndex=((aiSessionIndex%count)+count)%count;renderSessionCards();}},360);
+}
+$('ai-session-prev').onclick=()=>slideSession(-1);
+$('ai-session-next').onclick=()=>slideSession(1);
+// A plain 'resize' listener misses the case that actually matters here: the AI tab going from
+// display:none to visible (its container has zero width while hidden, so the width-dependent card
+// sizing computed at that point is garbage). ResizeObserver fires whenever the box actually changes
+// size for any reason, including becoming visible, so the carousel re-measures correctly every time.
+new ResizeObserver(()=>renderSessionCards()).observe($('ai-session-cards'));
 async function loadAIUsage(page=aiUsagePage){
  if(aiUsageLoading)return;aiUsageLoading=true;$('ai-usage-prev').disabled=$('ai-usage-next').disabled=true;
  try{const result=await api('/api/ai/usage?page='+page);aiUsagePage=result.page;const rows=result.items;
@@ -177,15 +273,63 @@ let assistantLoad=0;
 const sourceKinds=['products','orders'];
 const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
 function sourceVisibility(){for(const kind of sourceKinds){const external=$('ai-form').elements[kind+'_mode'].value==='endpoint';$('ai-'+kind+'-endpoint').hidden=!external;$('ai-form').elements[kind+'_endpoint'].required=external;if(external)$('ai-'+kind+'-endpoint').closest('details').open=true;}}
-for(const kind of sourceKinds)$('ai-form').elements[kind+'_mode'].onchange=sourceVisibility;
-async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;const controls=[...$('ai-form').elements].filter(x=>x.name!=='session');for(const control of controls)control.disabled=true;
+
+// Autosave: each field saves itself, debounced, instead of one big "Simpan semua tab" submit.
+// A per-element timer means typing in one textarea never resets another field's pending save.
+const autosaveTimers=new WeakMap();
+let autosaveStatusToken=0;
+function autosaveStatus(state,text){const el=$('ai-save-status');const token=++autosaveStatusToken;el.className='ai-save-status '+state;el.textContent=text;if(state==='saved')setTimeout(()=>{if(token===autosaveStatusToken)el.textContent='';},2500);}
+async function autosaveField(field,value){const id=$('ai-session').value;if(!id)return;
+ autosaveStatus('saving','Menyimpan…');
+ try{const config=await api('/sessions/'+encodeURIComponent(id)+'/ai/field','PATCH',{field,value});
+  if(id!==$('ai-session').value)return; // user switched sessions while this was in flight
+  applyAssistantConfig(config,{keepFocus:true});
+  autosaveStatus('saved','Tersimpan');
+ }catch(e){autosaveStatus('error',e.message);throw e;}
+}
+function debounceAutosave(el,field,value,delay=800){clearTimeout(autosaveTimers.get(el));autosaveTimers.set(el,setTimeout(()=>run(()=>autosaveField(field,value)),delay));}
+for(const field of profileFields){const el=$('ai-form').elements['profile_'+field];el.oninput=()=>debounceAutosave(el,field,el.value);}
+{const el=$('ai-form').elements.behavior;el.oninput=()=>debounceAutosave(el,'behavior',el.value);}
+{const el=$('ai-form').elements.fallback_number;el.oninput=()=>debounceAutosave(el,'fallback_number',el.value);}
+$('ai-form').elements.fallback_notify.onchange=e=>run(()=>autosaveField('fallback_notify',e.target.checked));
+for(const kind of sourceKinds){
+ const sourceValue=()=>({mode:$('ai-form').elements[kind+'_mode'].value,endpoint:$('ai-form').elements[kind+'_endpoint'].value,token:$('ai-form').elements[kind+'_token'].value||undefined,clear_token:$('ai-form').elements[kind+'_clear_token'].checked});
+ $('ai-form').elements[kind+'_mode'].onchange=()=>{sourceVisibility();run(()=>autosaveField(kind+'_source',sourceValue()));};
+ $('ai-form').elements[kind+'_clear_token'].onchange=()=>run(()=>autosaveField(kind+'_source',sourceValue()));
+ const endpointEl=$('ai-form').elements[kind+'_endpoint'];endpointEl.oninput=()=>debounceAutosave(endpointEl,kind+'_source',sourceValue());
+ const tokenEl=$('ai-form').elements[kind+'_token'];tokenEl.oninput=()=>{if(tokenEl.value)debounceAutosave(tokenEl,kind+'_source',sourceValue());};
+}
+// keepFocus:true (autosave response) skips whichever field the user is actively typing in, so a
+// round-trip triggered by their own keystrokes never overwrites what they're still typing.
+function applyAssistantConfig(config,{keepFocus=false}={}){
+ const active=keepFocus?document.activeElement:null;
+ const setValue=(el,value)=>{if(el!==active)el.value=value;};
+ for(const field of profileFields)setValue($('ai-form').elements['profile_'+field],config.profile?.[field]??'');
+ setValue($('ai-form').elements.behavior,config.behavior??'');
+ setValue($('ai-form').elements.fallback_number,config.fallback_number??'');
+ if($('ai-form').elements.fallback_notify!==active)$('ai-form').elements.fallback_notify.checked=Boolean(config.fallback_notify);
+ $('ai-session-enabled-field').value=config.enabled?'on':'';
+ for(const kind of sourceKinds){const src=config[kind+'_source']||{mode:'builtin',endpoint:'',has_token:false};
+  if($('ai-form').elements[kind+'_mode']!==active)$('ai-form').elements[kind+'_mode'].value=src.mode;
+  setValue($('ai-form').elements[kind+'_endpoint'],src.endpoint);
+  // The token input always reads back empty (the stored secret is never sent to the client); leave
+  // it alone if the user is mid-edit so their unsent keystrokes aren't wiped by the save response.
+  if($('ai-form').elements[kind+'_token']!==active)$('ai-form').elements[kind+'_token'].value='';
+  if($('ai-form').elements[kind+'_clear_token']!==active)$('ai-form').elements[kind+'_clear_token'].checked=false;
+  $('ai-'+kind+'-token-status').textContent=src.has_token?'Token tersimpan terenkripsi.':'Tanpa token.';
+  $('ai-'+kind+'-source-note').textContent=src.mode==='builtin'?'Asisten menggunakan tabel ini.':'Asisten menggunakan custom endpoint. Data tabel NC-WA tetap tersimpan dan dapat dikelola di bawah.';
+ }
+ sourceVisibility();
+}
+async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session').value;
+ // .elements includes every form-associated control in the DOM subtree, named or not — that also
+ // catches the nameless per-card toggles inside the session carousel, which must keep their own
+ // disabled state (only the centered card's toggle is editable) instead of following this form.
+ const controls=[...$('ai-form').elements].filter(x=>x.name&&x.name!=='session');for(const control of controls)control.disabled=true;
  $('ai-session-detail').hidden=!id;$('ai-session-placeholder').hidden=Boolean(id);$('ai-trial-session').value=id;
  $('ai-product-add').disabled=$('ai-order-add').disabled=true;
  try{const config=id?await api('/sessions/'+encodeURIComponent(id)+'/ai'):{enabled:false,profile:{},behavior:''};if(generation!==assistantLoad)return;
- for(const field of profileFields)$('ai-form').elements['profile_'+field].value=config.profile?.[field]??'';
- for(const name of ['behavior','fallback_number'])$('ai-form').elements[name].value=config[name]??'';$('ai-form').elements.fallback_notify.checked=Boolean(config.fallback_notify);$('ai-form').elements.enabled.checked=Boolean(config.enabled);
- for(const kind of sourceKinds){const src=config[kind+'_source']||{mode:'builtin',endpoint:'',has_token:false};$('ai-form').elements[kind+'_mode'].value=src.mode;$('ai-form').elements[kind+'_endpoint'].value=src.endpoint;$('ai-form').elements[kind+'_token'].value='';$('ai-form').elements[kind+'_clear_token'].checked=false;$('ai-'+kind+'-token-status').textContent=src.has_token?'Token tersimpan terenkripsi.':'Tanpa token.';$('ai-'+kind+'-source-note').textContent=src.mode==='builtin'?'Asisten menggunakan tabel ini.':'Asisten menggunakan custom endpoint. Data tabel NC-WA tetap tersimpan dan dapat dikelola di bawah.';}
- sourceVisibility();
+ applyAssistantConfig(config);
  if(id){await Promise.all([loadConversations(),loadAIData(id,generation)]);}else{for(const name of ['ai-conversations','ai-products','ai-orders','ai-fallbacks'])$(name).replaceChildren();}
  }finally{if(generation===assistantLoad){for(const control of controls)control.disabled=!id;$('ai-product-add').disabled=$('ai-order-add').disabled=!id;}}}
 async function loadAIData(id=$('ai-session').value,generation=assistantLoad){if(!id)return;const base='/sessions/'+encodeURIComponent(id)+'/ai';const [products,orders]=await Promise.all([api(base+'/products'),api(base+'/orders')]);if(generation!==assistantLoad||id!==$('ai-session').value)return;
@@ -238,8 +382,6 @@ async function loadConversations(){
   return [r.customer,r.message_count,r.router_context||'—',r.paused?'Dijeda':r.full_auto?'Full auto':'Aktif',actions];
  });
 }
-$('ai-session').onchange=()=>run(async()=>{if($('ai-session').value)aiTab('knowledge');for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();aiFallbacksPage=1;await loadAssistant();});
-form('ai-form',async data=>{if(!data.session)throw Error('Pilih sesi terlebih dahulu.');const profile=Object.fromEntries(profileFields.map(field=>[field,data['profile_'+field]]));const payload={enabled:data.enabled==='on',profile,behavior:data.behavior,fallback_number:data.fallback_number,fallback_notify:data.fallback_notify==='on'};for(const kind of sourceKinds)payload[kind+'_source']={mode:data[kind+'_mode'],endpoint:data[kind+'_endpoint'],token:data[kind+'_token'],clear_token:data[kind+'_clear_token']==='on'};await api('/sessions/'+encodeURIComponent(data.session)+'/ai','PUT',payload);await loadAssistant();$('message').textContent='Pengaturan asisten tersimpan.';});
 form('ai-trial-form',async data=>{$('ai-trial-error').textContent='';$('ai-trial-answer').hidden=true;try{const result=await api('/api/ai/trial','POST',{session:data.session,question:data.question});$('ai-trial-answer-text').textContent=result.answer;$('ai-trial-answer').hidden=false;await loadAI();}catch(e){$('ai-trial-error').textContent=e.message;}});
 function aiCreditSummary(){const units=Number($('ai-credit-units').value),valid=Number.isSafeInteger(units)&&units>=1&&units<=100;$('ai-credit-summary').textContent=valid&&aiCreditPrice?`${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(aiCreditPrice*units)}`:'Jumlah unit harus bilangan 1–100.';$('ai-credit-confirm').disabled=!valid||!aiCreditPrice;return valid?units:null;}
 $('ai-credit-units').oninput=aiCreditSummary;

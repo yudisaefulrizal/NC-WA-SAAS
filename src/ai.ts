@@ -161,6 +161,43 @@ export class AIService {
   const [items]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC,request_id DESC LIMIT '+size+' OFFSET '+((page-1)*size),[account]);
   return {items,page,pages,total,page_size:size};
  }
+ async enabledMap(account:string){
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT session_id,enabled FROM ai_assistants WHERE account_id=?',[account]);
+  return Object.fromEntries(rows.map(row=>[String(row.session_id),Boolean(row.enabled)])) as Record<string,boolean>;
+ }
+ async setEnabled(account:string,session:string,enabled:boolean){
+  await db.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior) VALUES (?,?,?,'') ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),revision=revision+1",[account,session,enabled]);
+  return {enabled};
+ }
+ // Autosave: one field at a time, read-modify-write against the stored row so an in-flight edit
+ // in another tab never gets clobbered by a save that only carries a single field's value.
+ async saveField(account:string,session:string,field:string,value:unknown){
+  if(profileFields.includes(field as ProfileField)){
+   const column='profil_'+field;
+   await db.execute(`INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,${column}) VALUES (?,?,FALSE,'',?) ON DUPLICATE KEY UPDATE ${column}=VALUES(${column}),revision=revision+1`,[account,session,text(value,2000,profileLabels[field as ProfileField])]);
+   return this.assistant(account,session);
+  }
+  if(field==='behavior'){
+   await db.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior) VALUES (?,?,FALSE,?) ON DUPLICATE KEY UPDATE behavior=VALUES(behavior),revision=revision+1",[account,session,text(value,2000,'Perilaku AI')]);
+   return this.assistant(account,session);
+  }
+  if(field==='fallback_number'||field==='fallback_notify'){
+   const [rows]=await db.execute<RowDataPacket[]>('SELECT fallback_number,fallback_notify FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);
+   const current={fallback_number:String(rows[0]?.fallback_number??''),fallback_notify:Boolean(rows[0]?.fallback_notify)};
+   const fallbackNumber=field==='fallback_number'?(value===''?'':text(value,20,'Nomor fallback')):current.fallback_number;
+   if(fallbackNumber&&!/^[1-9][0-9]{5,14}$/.test(fallbackNumber))throw fail('Nomor fallback harus nomor internasional tanpa +');
+   const fallbackNotify=field==='fallback_notify'?value===true:current.fallback_notify;
+   await db.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,fallback_number,fallback_notify) VALUES (?,?,FALSE,'',?,?) ON DUPLICATE KEY UPDATE fallback_number=VALUES(fallback_number),fallback_notify=VALUES(fallback_notify),revision=revision+1",[account,session,fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify]);
+   return this.assistant(account,session);
+  }
+  if(field==='products_source'||field==='orders_source'){
+   const kind=field==='products_source'?'products':'orders';
+   const input=await sourceInput(value);
+   await transaction(async c=>{await lockAccount(c,account);await saveSource(c,account,session,kind,input);});
+   return this.assistant(account,session);
+  }
+  throw fail('Bidang tidak dikenal');
+ }
  async assistant(account:string,session:string){
   const profileColumns=profileFields.map(field=>'profil_'+field).join(',');
   const [rows]=await db.execute<RowDataPacket[]>(`SELECT enabled,behavior,fallback_number,fallback_notify,revision,${profileColumns} FROM ai_assistants WHERE account_id=? AND session_id=?`,[account,session]);
@@ -306,13 +343,16 @@ export class AIService {
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
    await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,?,'generating',?,?,?,?,?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,assistantRevision:current[0].revision,knowledge,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
+   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,knowledge,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
   });if(!prepared)return;
   const jid=message.from+'@s.whatsapp.net';
   // Read/presence are best effort and never add a message or a credit charge.
   await manager.read(session,jid,message.messageId).catch(()=>{});
+  // Assistant config (knowledge/behavior/fallback) can autosave mid-flight; a request already in
+  // progress finishes with the config it started with rather than being cancelled by every edit.
+  // Disabling the assistant is the one config change that still cancels in-flight work immediately.
   const guard=async()=>{const enabled=await this.assistant(account,session);const [rows]=await db.execute<RowDataPacket[]>('SELECT paused,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',[account,session,message.from]);
-   if(!enabled.enabled||enabled.revision!==prepared.assistantRevision||rows[0]?.paused||rows[0]?.revision!==prepared.revision)throw new ApiError(409,'ai_cancelled','Asisten atau konteks percakapan telah berubah');};
+   if(!enabled.enabled||rows[0]?.paused||rows[0]?.revision!==prepared.revision)throw new ApiError(409,'ai_cancelled','Asisten atau konteks percakapan telah berubah');};
   const modelCalls:{role:ModelRole|undefined;model:string;status:string;attempt:number}[]=[];
   const deadline=Date.now()+120000;
   const retryPause=async(attempt:number)=>{await this.wait(500*2**attempt+randomInt(0,251));await guard();};
