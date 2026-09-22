@@ -185,7 +185,6 @@ async function loadAI(){
 // Poll session status every 12s while the Asisten AI tab is open, so a WhatsApp logout from the
 // phone or a QR scan finished in another tab/device reflects on the carousel without a reload.
 setInterval(()=>{if(!document.hidden&&!$('ai').hidden)void run(refreshSessionCards);},12000);
-const robotIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><rect x="5" y="7" width="14" height="12" rx="4"/><path d="M9 13h.01M15 13h.01M9 17h6"/></svg>';
 // A neutral signal-bars icon instead of the WhatsApp glyph — repeated across every carousel card
 // (including the loop's duplicate copies), a row of WhatsApp logos read as visual noise.
 const connectedIcon='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="2" y="14" width="4" height="8" rx="1"/><rect x="10" y="10" width="4" height="12" rx="1"/><rect x="18" y="5" width="4" height="17" rx="1"/></svg>';
@@ -252,8 +251,10 @@ function buildSessionCard(s,offset){
  nameBlock.append(name,phone);
  head.append(status,nameBlock);
  const foot=document.createElement('div');foot.className='ai-session-card-foot';
- const robot=document.createElement('span');robot.className='ai-session-robot'+(s.aiEnabled?' active':'');robot.innerHTML=robotIcon;
- const toggle=document.createElement('label');toggle.className='ai-toggle';
+ const toggle=document.createElement('label');toggle.className='ai-toggle'+(s.aiEnabled?' active':'');
+ // Not a <span> — the global .ai-toggle span selector styles the switch pill itself, and would
+ // otherwise paint this label the same way, making it look like a second toggle next to the real one.
+ const robot=document.createElement('strong');robot.className='ai-session-robot';robot.textContent='AI Asisten';
  const input=document.createElement('input');input.type='checkbox';input.checked=Boolean(s.aiEnabled);input.disabled=!active;
  input.onclick=e=>e.stopPropagation();
  input.onchange=()=>run(async()=>{const desired=input.checked;input.disabled=true;
@@ -264,8 +265,8 @@ function buildSessionCard(s,offset){
   // replaces `input` in the DOM, so re-enabling it here would touch a now-detached element.
   renderSessionCards();
  });
- toggle.append(input,document.createElement('span'));
- foot.append(robot,toggle);
+ toggle.append(robot,input,document.createElement('span'));
+ foot.append(toggle);
  card.append(head,foot);
  card.onclick=()=>selectSession(s.id);
  card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectSession(s.id);}};
@@ -273,7 +274,10 @@ function buildSessionCard(s,offset){
 }
 // Infinite loop: render extra copies before/after the real list so sliding past either end
 // always has a next card, then snap (no transition) back into the middle copy once we pass it.
-const aiSessionFullCards=3; // 3 full cards visible (the center one editable), plus a half-card peek on each side
+// 3 full cards visible (the center one editable), plus a half-card peek on each side — but on
+// phone-width viewports (matching the 760px breakpoint used elsewhere for the AI tab), just 1 card
+// filling the viewport edge-to-edge, since 3 cards at the 120px floor don't fit a phone screen.
+function aiSessionFullCardsFor(viewport){return viewport<760?1:3;}
 // aiSessionIndex indexes into the slot list (real sessions + placeholders), not just aiSessions —
 // selectSession() passes the real session's position in aiSessions, which is always <= its
 // position in slots since real sessions are placed first by buildSessionSlots().
@@ -287,8 +291,10 @@ function renderSessionCards(){
  // one yet, so a width-based layout computed now would be garbage). The ResizeObserver below
  // re-triggers this once the container actually gets measured, so nothing is lost by waiting.
  if(viewport<=0)return;
- // 3 full slots + half a slot peeking on each side = 4 slots' worth of width.
- const visibleCards=aiSessionFullCards+1;
+ // N full slots + half a slot peeking on each side = N+1 slots' worth of width — except at 1 full
+ // card (phone width), where the single card fills the viewport edge-to-edge with no peek at all.
+ const aiSessionFullCards=aiSessionFullCardsFor(viewport);
+ const visibleCards=aiSessionFullCards===1?1:aiSessionFullCards+1;
  const cardWidth=Math.max(120,Math.floor((viewport-gap*(visibleCards-1))/visibleCards));
  document.documentElement.style.setProperty('--ai-card-width',cardWidth+'px');
  // Repeat the slot list enough times that sliding to either edge of the visible window, from
@@ -344,7 +350,7 @@ new ResizeObserver(()=>renderSessionCards()).observe($('ai-session-cards'));
 async function loadAIUsage(page=aiUsagePage){
  if(aiUsageLoading)return;aiUsageLoading=true;$('ai-usage-prev').disabled=$('ai-usage-next').disabled=true;
  try{const result=await api('/api/ai/usage?page='+page);aiUsagePage=result.page;const rows=result.items;
- table('ai-usage',['Waktu','Sesi','Pelanggan','Agent','Status','Kata input','Kata output','Tarif input / output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,r.agent||'—',({fallback_sent:'Pesan bantuan terkirim',fallback_generated:'Menyiapkan pesan bantuan',fallback_send_failed:'Pesan bantuan gagal terkirim',fallback_send_unknown:'Pengiriman bantuan belum pasti',sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,`${r.input_rate} / ${r.output_rate}`,r.charged]);
+ table('ai-usage',['Waktu','Sesi','Pelanggan','Status','Kata input','Kata output','Kredit dipotong'],rows,r=>[new Date(r.created_at).toLocaleString('id-ID'),r.session_id,r.customer,({fallback_sent:'Pesan bantuan terkirim',fallback_generated:'Menyiapkan pesan bantuan',fallback_send_failed:'Pesan bantuan gagal terkirim',fallback_send_unknown:'Pengiriman bantuan belum pasti',sent:'Terkirim',generating:'Memproses',generated:'Menunggu pengiriman',cancelled:'Dibatalkan',provider_failed:'AI gagal / hasil tidak valid',interrupted:'Terhenti saat restart',send_failed:'WhatsApp gagal',send_unknown:'Pengiriman belum pasti'})[r.status]||r.status,r.input_words,r.output_words,r.charged]);
  $('ai-usage-page').textContent='Halaman '+result.page+' dari '+result.pages+' · '+result.total+' riwayat';
  $('ai-usage-prev').disabled=result.page<=1;$('ai-usage-next').disabled=result.page>=result.pages;
  }catch(error){$('ai-usage-prev').disabled=aiUsagePage<=1;$('ai-usage-next').disabled=false;throw error;}finally{aiUsageLoading=false;}
@@ -402,7 +408,6 @@ function applyAssistantConfig(config,{keepFocus=false}={}){
   if($('ai-form').elements[kind+'_token']!==active)$('ai-form').elements[kind+'_token'].value='';
   if($('ai-form').elements[kind+'_clear_token']!==active)$('ai-form').elements[kind+'_clear_token'].checked=false;
   $('ai-'+kind+'-token-status').textContent=src.has_token?'Token tersimpan terenkripsi.':'Tanpa token.';
-  $('ai-'+kind+'-source-note').textContent=src.mode==='builtin'?'Asisten menggunakan tabel ini.':'Asisten menggunakan custom endpoint. Data tabel NC-WA tetap tersimpan dan dapat dikelola di bawah.';
  }
  sourceVisibility();
 }
@@ -456,7 +461,7 @@ aiDataForm('ai-order-edit-form',async data=>{await api('/sessions/'+encodeURICom
 async function loadConversations(){
  const id=$('ai-session').value,generation=assistantLoad;if(!id)return;
  const [rows,savedContacts]=await Promise.all([api('/sessions/'+encodeURIComponent(id)+'/ai/conversations'),api('/auto-share/contacts')]);if(id!==$('ai-session').value||generation!==assistantLoad)return;
- table('ai-conversations',['Pelanggan','Memori','Konteks S-P-O','Status','Tindakan'],rows,r=>{
+ table('ai-conversations',['Pelanggan','Memori','Konteks','Status','Tindakan'],rows,r=>{
   const actions=document.createElement('div');actions.className='row-actions';
   const update=async body=>{await api('/sessions/'+encodeURIComponent(id)+'/ai/conversations/'+encodeURIComponent(r.customer),'PUT',body);await loadConversations();};
   actions.append(button(r.paused?'Lanjutkan AI':'Jeda AI',()=>update({paused:!r.paused,full_auto:false})),
