@@ -65,7 +65,7 @@ document.addEventListener('click',e=>{if(!$('settings-menu-list').hidden&&!setti
 let qrTimer,qrGeneration=0;
 function closeQr(){qrGeneration++;clearTimeout(qrTimer);$('pairing').close();$('qrimage').removeAttribute('src');}
 async function sessions(){const data=await api('/sessions');$('stat-active').textContent=data.filter(s=>s.status==='connected'&&s.serviceActive!==false).length;for(const [id,label] of [['sendconnection','Pilih sesi'],['hookconnection','Semua sesi']]){const select=$(id),current=select.value;select.replaceChildren(new Option(label,''),...data.filter(s=>s.serviceActive!==false).map(s=>new Option(s.id+(s.phone?' · '+s.phone:''),s.id)));select.value=current;}table('sessions',['Sesi','Nomor WhatsApp','Status','Pesan ke webhook','Tindakan'],data,s=>{const badge=document.createElement('span');badge.className='badge '+(s.serviceActive===false?'inactive':s.status);badge.textContent=s.serviceActive===false?'Nonaktif (batas paket)':({connected:'Terhubung',qr_required:'Menunggu QR',connecting:'Menghubungkan',logged_out:'Terputus'})[s.status]||s.status;const actions=document.createElement('div');actions.className='row-actions';if(s.serviceActive!==false&&s.status!=='connected')actions.append(button(s.status==='logged_out'?'Pasang ulang':'Lihat QR',async()=>{if(s.status==='logged_out')await api('/sessions/'+encodeURIComponent(s.id)+'/reconnect','POST');await pair(s.id);}));actions.append(button('Logout',async()=>{if(!confirm('Putuskan perangkat WhatsApp ini?'))return;await api('/sessions/'+encodeURIComponent(s.id)+'/logout','POST');await sessions();}),button('Hapus',async()=>{if(!confirm('Hapus sesi dan data koneksi perangkat ini?'))return;await api('/sessions/'+encodeURIComponent(s.id),'DELETE');await sessions();}));const select=document.createElement('select');select.setAttribute('aria-label','Filter pesan '+s.id);for(const [value,label] of Object.entries({all:'Semua pesan',private:'Pesan pribadi',group:'Pesan grup'}))select.append(new Option(label,value));select.value=s.filter;select.disabled=s.serviceActive===false;select.onchange=()=>run(()=>api('/sessions/'+encodeURIComponent(s.id)+'/filter','PUT',{filter:select.value}));return [s.id,s.phone||'—',badge,select,actions];});}
-async function pair(id){closeQr();const generation=qrGeneration;$('pairing').showModal();const poll=async()=>{try{const state=await api('/sessions/'+encodeURIComponent(id)+'/qr');if(generation!==qrGeneration)return;$('qrstatus').textContent=state.status==='connected'?'WhatsApp tersambung.':'Scan QR melalui WhatsApp → Perangkat tertaut.';$('qrimage').hidden=!state.qr;if(state.qr)$('qrimage').src=state.qr;if(state.status==='connected'){await sessions();return;}qrTimer=setTimeout(poll,3000);}catch(e){if(generation===qrGeneration)$('qrstatus').textContent=e.message;}};await poll();}
+async function pair(id){closeQr();const generation=qrGeneration;$('pairing').showModal();const poll=async()=>{try{const state=await api('/sessions/'+encodeURIComponent(id)+'/qr');if(generation!==qrGeneration)return;$('qrstatus').textContent=state.status==='connected'?'WhatsApp tersambung.':'Scan QR melalui WhatsApp → Perangkat tertaut.';$('qrimage').hidden=!state.qr;if(state.qr)$('qrimage').src=state.qr;if(state.status==='connected'){await sessions();if(!$('ai').hidden)await loadAI();return;}qrTimer=setTimeout(poll,3000);}catch(e){if(generation===qrGeneration)$('qrstatus').textContent=e.message;}};await poll();}
 $('pairing').addEventListener('cancel',e=>{e.preventDefault();closeQr();});$('closeqr').onclick=closeQr;$('refreshsessions').onclick=()=>run(sessions);$('refreshusage').onclick=()=>run(usage);
 form('sessionform',async data=>{await api('/sessions','POST',data);await sessions();$('sessionform').reset();$('addconnection').close();await pair(data.id);});
 let sendAttempt;
@@ -156,8 +156,19 @@ document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowl
 aiTab('knowledge');
 $('ai-hero-buy').onclick=()=>{$('ai-credit-units').value='1';aiCreditSummary();$('ai-credit-modal').showModal();};
 let aiUsagePage=1,aiUsageLoading=false,aiCreditPrice=0;
+// Pulls fresh connection status (and aiEnabled) for the carousel cards without touching knowledge,
+// products, orders, etc. — cheap enough to poll periodically so a phone-side logout or a QR scan
+// completed elsewhere shows up without the user having to reload the page.
+async function refreshSessionCards(){
+ const sessionRows=await api('/sessions');
+ const selected=$('ai-session').value;
+ aiSessions=sessionRows;
+ if(!aiSessions.some(s=>s.id===selected))$('ai-session').value=aiSessions[0]?.id??'';
+ aiSessionIndex=Math.max(0,aiSessions.findIndex(s=>s.id===$('ai-session').value));
+ renderSessionCards();
+}
 async function loadAI(){
- const [w,waWallet,sessionRows]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),api('/sessions'),loadAIUsage()]);
+ const [w,waWallet]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),refreshSessionCards(),loadAIUsage()]);
  $('ai-balance').textContent=`${w.balance} kredit`;
  $('wa-balance').textContent=`${new Intl.NumberFormat('id-ID').format(waWallet.balance)} pesan`;
  aiCreditPrice=w.credit_price;
@@ -167,17 +178,24 @@ async function loadAI(){
   $('ai-credit-rate').replaceChildren(...rows.map(text=>{const li=document.createElement('li');const check=document.createElement('span');check.textContent='✓';check.setAttribute('aria-hidden','true');li.append(check,document.createTextNode(text));return li;}));
   $('ai-buy').disabled=!w.credit_price;
  }
- const selected=$('ai-session').value;
- aiSessions=sessionRows;
- if(!aiSessions.some(s=>s.id===selected))$('ai-session').value=aiSessions[0]?.id??'';
- aiSessionIndex=Math.max(0,aiSessions.findIndex(s=>s.id===$('ai-session').value));
- renderSessionCards();
  await loadAssistant();
 }
+// Poll session status every 12s while the Asisten AI tab is open, so a WhatsApp logout from the
+// phone or a QR scan finished in another tab/device reflects on the carousel without a reload.
+setInterval(()=>{if(!document.hidden&&!$('ai').hidden)void run(refreshSessionCards);},12000);
 const robotIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3"/><rect x="5" y="7" width="14" height="12" rx="4"/><path d="M9 13h.01M15 13h.01M9 17h6"/></svg>';
 // A neutral signal-bars icon instead of the WhatsApp glyph — repeated across every carousel card
 // (including the loop's duplicate copies), a row of WhatsApp logos read as visual noise.
 const connectedIcon='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="2" y="14" width="4" height="8" rx="1"/><rect x="10" y="10" width="4" height="12" rx="1"/><rect x="18" y="5" width="4" height="17" rx="1"/></svg>';
+const qrIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v.01"/></svg>';
+// qr_required/logged_out need the user to actually do something (scan or reconnect), so the status
+// icon becomes a clickable QR glyph there; connecting is a passive wait, so it stays signal-bars.
+const sessionStatusMeta={
+ connected:{cls:'online',icon:connectedIcon,label:'WhatsApp terhubung',clickable:false},
+ connecting:{cls:'connecting',icon:connectedIcon,label:'Menghubungkan…',clickable:false},
+ qr_required:{cls:'offline',icon:qrIcon,label:'Menunggu scan QR — klik untuk menampilkan QR',clickable:true},
+ logged_out:{cls:'offline',icon:qrIcon,label:'WhatsApp terputus — klik untuk memasang ulang',clickable:true},
+};
 let aiSessions=[],aiSessionIndex=0;
 function selectSession(id){if($('ai-session').value===id)return;$('ai-session').value=id;const index=aiSessions.findIndex(s=>s.id===id);if(index>=0)aiSessionIndex=index;renderSessionCards();run(async()=>{aiTab('knowledge');for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();aiFallbacksPage=1;await loadAssistant();});}
 // offset is the card's distance from the centered (active) card: 0 = active/editable, ±1/±2 = neighbors
@@ -187,8 +205,12 @@ function buildSessionCard(s,offset){
  const active=offset===0;card.setAttribute('aria-pressed',String(active));if(active)card.classList.add('selected');
  card.classList.add('ai-session-depth-'+Math.min(2,Math.abs(offset)));
  const head=document.createElement('div');head.className='ai-session-card-head';
- const online=s.status==='connected';
- const status=document.createElement('span');status.className='ai-session-status '+(online?'online':'offline');status.innerHTML=connectedIcon;status.setAttribute('aria-label',online?'WhatsApp terhubung':'WhatsApp terputus');
+ const meta=sessionStatusMeta[s.status]??sessionStatusMeta.logged_out;
+ const status=document.createElement(meta.clickable?'button':'span');status.className='ai-session-status '+meta.cls;status.innerHTML=meta.icon;status.setAttribute('aria-label',meta.label);
+ if(meta.clickable){
+  status.type='button';
+  status.onclick=e=>{e.stopPropagation();run(async()=>{if(s.status==='logged_out')await api('/sessions/'+encodeURIComponent(s.id)+'/reconnect','POST');await pair(s.id);});};
+ }
  const nameBlock=document.createElement('div');nameBlock.className='ai-session-card-name';
  const name=document.createElement('strong');name.textContent=s.id;
  const phone=document.createElement('small');phone.textContent=s.phone||'—';

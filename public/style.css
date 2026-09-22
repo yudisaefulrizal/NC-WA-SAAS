@@ -75,10 +75,14 @@ body.client-workspace:has(#paket:not([hidden])){background:radial-gradient(ellip
 .ai-session-card.selected{border-color:#09976a;box-shadow:0 0 0 3px #09976a1a}
 .ai-session-card.ai-session-depth-1,.ai-session-card.ai-session-depth-2{opacity:.35}
 .ai-session-card-head{display:flex;align-items:center;gap:10px}
-.ai-session-status{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.ai-session-status{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;border:0;padding:0;font:inherit;background-image:none}
+button.ai-session-status{cursor:pointer;border:0;box-shadow:none}
 .ai-session-status svg{width:18px;height:18px}
-.ai-session-status.online{background:#1fb35a}
-.ai-session-status.offline{background:#9aa5a1}
+/* background-image:none is repeated here (not just above) because .workspace button sets the
+   gradient via the background shorthand with higher specificity than the base rule above. */
+.ai-session-card button.ai-session-status.online,.ai-session-status.online{background-color:#1fb35a;background-image:none}
+.ai-session-card button.ai-session-status.offline,.ai-session-status.offline{background-color:#9aa5a1;background-image:none}
+.ai-session-card button.ai-session-status.connecting,.ai-session-status.connecting{background-color:#e0a52c;background-image:none}
 .ai-session-card-head strong{font-size:14px;color:#153247;overflow-wrap:anywhere;min-width:0}
 .ai-session-card-name{display:flex;flex-direction:column;gap:2px;min-width:0}
 .ai-session-card-name small{color:#718394;font-size:12px}
