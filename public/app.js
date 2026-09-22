@@ -168,7 +168,9 @@ async function refreshSessionCards(){
  renderSessionCards();
 }
 async function loadAI(){
- const [w,waWallet]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),refreshSessionCards(),loadAIUsage()]);
+ const [w,waWallet]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),loadAIUsage()]);
+ aiSessionLimit=waWallet.session_limit;
+ await refreshSessionCards();
  $('ai-balance').textContent=`${w.balance} kredit`;
  $('wa-balance').textContent=`${new Intl.NumberFormat('id-ID').format(waWallet.balance)} pesan`;
  aiCreditPrice=w.credit_price;
@@ -196,11 +198,44 @@ const sessionStatusMeta={
  qr_required:{cls:'offline',icon:qrIcon,label:'Menunggu scan QR — klik untuk menampilkan QR',clickable:true},
  logged_out:{cls:'offline',icon:qrIcon,label:'WhatsApp terputus — klik untuk memasang ulang',clickable:true},
 };
-let aiSessions=[],aiSessionIndex=0;
+let aiSessions=[],aiSessionIndex=0,aiSessionLimit=1;
+const addIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+const upgradeIcon='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+// Carousel slots beyond the real sessions: "add" (still within session_limit, opens the connect
+// modal) vs "upgrade" (past session_limit, sends to /dashboard/paket). Slot count is always at
+// least 5 — a small plan (limit<5) fills the remainder up to 5 with upgrade slots; a plan already
+// at/above 5 shows only its real "add" slots, plus exactly one upgrade slot once the quota is full.
+function buildSessionSlots(){
+ const used=aiSessions.length,limit=Math.max(1,aiSessionLimit);
+ const slots=aiSessions.slice();
+ if(limit<5){
+  for(let i=used;i<limit;i++)slots.push({placeholder:'add'});
+  for(let i=Math.max(limit,used);i<5;i++)slots.push({placeholder:'upgrade'});
+ }else{
+  for(let i=used;i<limit;i++)slots.push({placeholder:'add'});
+  if(used>=limit)slots.push({placeholder:'upgrade'});
+ }
+ return slots;
+}
 function selectSession(id){if($('ai-session').value===id)return;$('ai-session').value=id;const index=aiSessions.findIndex(s=>s.id===id);if(index>=0)aiSessionIndex=index;renderSessionCards();run(async()=>{aiTab('knowledge');for(const dialog of ['ai-product-dialog','ai-order-dialog','ai-order-edit-dialog'])$(dialog).close();aiFallbacksPage=1;await loadAssistant();});}
+// Placeholder slot beyond the real sessions: "add" opens the connect modal (still within
+// session_limit), "upgrade" sends to the purchase page (quota exhausted). Kept visually close to a
+// real session card (same class, depth fade, selectable-looking) but with no status/toggle/id.
+function buildPlaceholderCard(kind,offset){
+ const card=document.createElement('article');card.className='ai-session-card placeholder placeholder-'+kind;card.setAttribute('role','button');card.tabIndex=0;
+ card.classList.add('ai-session-depth-'+Math.min(2,Math.abs(offset)));
+ const icon=document.createElement('span');icon.className='ai-session-placeholder-icon';icon.innerHTML=kind==='add'?addIcon:upgradeIcon;
+ const label=document.createElement('strong');label.textContent=kind==='add'?'+ Tambah sesi':'Tingkatkan paket';
+ card.append(icon,label);
+ const activate=()=>{if(kind==='add'){$('sessionform').reset();$('addconnection').showModal();}else{history.pushState(null,'','/dashboard/paket');navigate();window.scrollTo(0,0);}};
+ card.onclick=activate;
+ card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();activate();}};
+ return card;
+}
 // offset is the card's distance from the centered (active) card: 0 = active/editable, ±1/±2 = neighbors
 // shown for context only, faded out and with their controls disabled so they can't be edited by accident.
 function buildSessionCard(s,offset){
+ if(s.placeholder)return buildPlaceholderCard(s.placeholder,offset);
  const card=document.createElement('article');card.className='ai-session-card';card.setAttribute('role','button');card.tabIndex=0;
  const active=offset===0;card.setAttribute('aria-pressed',String(active));if(active)card.classList.add('selected');
  card.classList.add('ai-session-depth-'+Math.min(2,Math.abs(offset)));
@@ -239,8 +274,11 @@ function buildSessionCard(s,offset){
 // Infinite loop: render extra copies before/after the real list so sliding past either end
 // always has a next card, then snap (no transition) back into the middle copy once we pass it.
 const aiSessionFullCards=3; // 3 full cards visible (the center one editable), plus a half-card peek on each side
+// aiSessionIndex indexes into the slot list (real sessions + placeholders), not just aiSessions —
+// selectSession() passes the real session's position in aiSessions, which is always <= its
+// position in slots since real sessions are placed first by buildSessionSlots().
 function renderSessionCards(){
- const count=aiSessions.length;
+ const slots=buildSessionSlots(),count=slots.length;
  $('ai-session-prev').disabled=$('ai-session-next').disabled=count===0;
  if(!count){$('ai-session-track').replaceChildren();$('ai-session-dots').replaceChildren();return;}
  const track=$('ai-session-track');
@@ -253,15 +291,15 @@ function renderSessionCards(){
  const visibleCards=aiSessionFullCards+1;
  const cardWidth=Math.max(120,Math.floor((viewport-gap*(visibleCards-1))/visibleCards));
  document.documentElement.style.setProperty('--ai-card-width',cardWidth+'px');
- // Repeat the session list enough times that sliding to either edge of the visible window, from
+ // Repeat the slot list enough times that sliding to either edge of the visible window, from
  // any starting position, always lands inside the buffer — not just 3x, which isn't enough slack
- // when there are fewer real sessions than visible slots (e.g. 1-4 sessions shown across 5 slots).
+ // when there are fewer slots than visible cards (e.g. 1-4 slots shown across 5 visible positions).
  const copies=Math.max(3,Math.ceil((visibleCards*2+2)/count));
  const middleBlock=Math.floor(copies/2);
  // The active card sits at flat-array index (middleBlock*count + aiSessionIndex) in the middle
  // block; every other card's offset from it is just its own flat index minus that center index.
  const centerFlatIndex=middleBlock*count+aiSessionIndex;
- track.replaceChildren(...Array.from({length:copies},()=>aiSessions).flat().map((s,i)=>buildSessionCard(s,i-centerFlatIndex)));
+ track.replaceChildren(...Array.from({length:copies},()=>slots).flat().map((s,i)=>buildSessionCard(s,i-centerFlatIndex)));
  // Centered peek: shift half a card's width right so the previous card also peeks in on the left,
  // instead of starting flush at a card edge — full/full/full/half look on both sides.
  const sliver=Math.max(0,viewport-aiSessionFullCards*cardWidth-(aiSessionFullCards-1)*gap)/2;
@@ -269,17 +307,17 @@ function renderSessionCards(){
  track.style.transform='translateX(-'+(centerFlatIndex*(cardWidth+gap)-sliver)+'px)';
  track.offsetHeight; // force reflow so the next transform change animates
  track.style.transition='';
- $('ai-session-dots').replaceChildren(...aiSessions.map((_,i)=>{
+ $('ai-session-dots').replaceChildren(...slots.map((_,i)=>{
   const dot=document.createElement('button');dot.type='button';dot.className='ai-session-dot'+(i===((aiSessionIndex%count)+count)%count?' active':'');
-  dot.setAttribute('aria-label','Nomor layanan '+(i+1));dot.onclick=()=>{aiSessionIndex=i;renderSessionCards();};
+  dot.setAttribute('aria-label','Slot '+(i+1));dot.onclick=()=>{aiSessionIndex=i;renderSessionCards();};
   return dot;
  }));
 }
-function slideSession(delta){if(!aiSessions.length)return;aiSessionIndex+=delta;renderSessionCards();
+function slideSession(delta){const count=buildSessionSlots().length;if(!count)return;aiSessionIndex+=delta;renderSessionCards();
  // After the slide animation, if we've drifted into the buffer copies, snap back to the middle
  // copy at the equivalent position without animating, so the loop never runs out of cards.
  clearTimeout(slideSession.snapTimer);
- slideSession.snapTimer=setTimeout(()=>{const count=aiSessions.length;if(aiSessionIndex<0||aiSessionIndex>=count){aiSessionIndex=((aiSessionIndex%count)+count)%count;renderSessionCards();}},360);
+ slideSession.snapTimer=setTimeout(()=>{const count=buildSessionSlots().length;if(aiSessionIndex<0||aiSessionIndex>=count){aiSessionIndex=((aiSessionIndex%count)+count)%count;renderSessionCards();}},360);
 }
 $('ai-session-prev').onclick=()=>slideSession(-1);
 $('ai-session-next').onclick=()=>slideSession(1);

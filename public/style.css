@@ -91,6 +91,18 @@ button.ai-session-status{cursor:pointer;border:0;box-shadow:none}
 .ai-session-robot.active{background:#e4f6ee;color:#09976a}
 .ai-session-robot svg{width:19px;height:19px}
 .ai-session-carousel .icon-button{flex:none;align-self:center;width:38px;height:38px;padding:0;border-radius:50%}
+.ai-session-card.placeholder{align-items:center;justify-content:center;text-align:center;gap:10px;border-style:dashed;background:#fafcfb}
+.ai-session-card.placeholder .ai-session-placeholder-icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center}
+.ai-session-card.placeholder .ai-session-placeholder-icon svg{width:18px;height:18px}
+.ai-session-card.placeholder strong{font-size:13px;font-weight:600}
+.ai-session-card.placeholder-add{border-color:#bcdccd}
+.ai-session-card.placeholder-add:hover{border-color:#09976a}
+.ai-session-card.placeholder-add .ai-session-placeholder-icon{background:#e4f6ee;color:#09976a}
+.ai-session-card.placeholder-add strong{color:#09976a}
+.ai-session-card.placeholder-upgrade{border-color:#e7d9b3}
+.ai-session-card.placeholder-upgrade:hover{border-color:#c99a2e}
+.ai-session-card.placeholder-upgrade .ai-session-placeholder-icon{background:#fbf1dc;color:#c99a2e}
+.ai-session-card.placeholder-upgrade strong{color:#a97c1c}
 .ai-session-dots{display:flex;justify-content:center;gap:6px;margin-top:12px}
 #ai-session-dots button.ai-session-dot{width:7px;height:7px;min-height:0;border-radius:50%;background-color:#d5dfd9;border:0;padding:0;cursor:pointer}
 #ai-session-dots button.ai-session-dot.active{background-color:#09976a}
