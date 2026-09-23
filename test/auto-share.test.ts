@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {db} from '../src/db.js';
 import {createAutoShare,contactInput,templateInput,jobInput,nextSchedule,randomDelay} from '../src/auto-share.js';
-import {parsePlaceholders,renderTemplate,validateSourceData} from '../src/auto-share-source.js';
+import {decodeHeaders,mediaVariable,parsePlaceholders,renderTemplate,validateHeaders,validateSourceData,validateSourceMedia} from '../src/auto-share-source.js';
 import {migrateAutoShare} from '../src/auto-share-schema.js';
 import {AssetStore} from '../src/engine/assets.js';
 import {SessionManager,ApiError} from '../src/engine/sessions.js';
@@ -27,8 +27,8 @@ const pngFixture=Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108
 // Fake source transport and media download: the substitution rules are exercised without a network.
 let sourceReply:unknown={data:{jumlah:247,sisa_kuota:53,buka:true}};
 let sourceError:Error|null=null;
-const sourceCalls:string[]=[];
-const fakeSource=async(endpoint:string)=>{sourceCalls.push(endpoint);if(sourceError)throw sourceError;return sourceReply;};
+const sourceCalls:{endpoint:string;headers:Record<string,string>}[]=[];
+const fakeSource=async(endpoint:string,headers:Record<string,string>)=>{sourceCalls.push({endpoint,headers});if(sourceError)throw sourceError;return sourceReply;};
 const fakeDownload=async(url:string)=>{const dir=await mkdtemp(join(tmpdir(),'nc-wa-src-'));const path=join(dir,'media');await writeFile(path,pngFixture);return {path,mimetype:'image/png',cleanup:async()=>{await rm(dir,{recursive:true,force:true});}};};
 const service=createAutoShare(manager,assets,async(ms:number)=>{delays.push(ms);},fakeSource,fakeDownload as any);
 const app=express();app.use(express.json());
@@ -187,6 +187,8 @@ integration('legacy migration preserves schedules and is repeatable without resu
 });
 test('template source substitution formats values and refuses gaps',()=>{
  assert.deepEqual(parsePlaceholders('Halo {{jumlah}} dan {{ sisa }} lalu {{jumlah}}'),['jumlah','sisa']);
+ // camelCase keys are common in existing APIs, so uppercase is allowed in names.
+ assert.deepEqual(parsePlaceholders('Total {{totalSantri}}'),['totalSantri']);
  assert.deepEqual(parsePlaceholders('Tanpa variabel'),[]);
  // {{{{ is the escape for a literal {{, so it is not collected as a placeholder.
  assert.deepEqual(parsePlaceholders('Kurung {{{{jumlah}}}}'),[]);
@@ -195,12 +197,20 @@ test('template source substitution formats values and refuses gaps',()=>{
  assert.equal(data.jumlah,'1.247');assert.equal(data.buka,'Ya');assert.equal(data.tutup,'Tidak');assert.equal(data.nama,'Gelombang 2');
  assert.equal(renderTemplate('Pendaftar {{jumlah}} · {{nama}}',data),'Pendaftar 1.247 · Gelombang 2');
  assert.throws(()=>renderTemplate('Sisa {{tidak_ada}}',data),/tidak tersedia/);
- assert.throws(()=>validateSourceData({data:[1,2]}),/objek "data"/);
- assert.throws(()=>validateSourceData({}),/objek "data"/);
+ // An endpoint that answers with its own flat object needs no "data" wrapper.
+ const bare=validateSourceData({madrasah:'Madrasah TA 2728: total 102 santri',mahad_aly:"Ma'had 'Aly TA 2627: total 91 santri"});
+ assert.equal(bare.madrasah,'Madrasah TA 2728: total 102 santri');
+ assert.equal(validateSourceData({totalSantri:102}).totalSantri,'102');
+ // A wrapper still wins when present, so "data" is never mistaken for a variable.
+ assert.deepEqual(Object.keys(validateSourceData({data:{jumlah:1},lain:'abaikan'})),['jumlah']);
+ // Sentences assembled server-side are common, so the value cap is generous.
+ assert.equal(validateSourceData({kalimat:'x'.repeat(1000)}).kalimat.length,1000);
+ assert.throws(()=>validateSourceData([1,2]),/objek JSON/);
+ assert.throws(()=>validateSourceData({}),/tidak memuat satu variabel/);
  assert.throws(()=>validateSourceData({data:{nested:{a:1}}}),/harus teks/);
  assert.throws(()=>validateSourceData({data:{kosong:null}}),/harus teks/);
- assert.throws(()=>validateSourceData({data:{'Huruf-Besar':1}}),/Nama variabel/);
- assert.throws(()=>validateSourceData({data:{panjang:'x'.repeat(201)}}),/melebihi 200/);
+ assert.throws(()=>validateSourceData({data:{'Tanda-Hubung':1}}),/Nama variabel/);
+ assert.throws(()=>validateSourceData({data:{panjang:'x'.repeat(1001)}}),/melebihi 1000/);
  assert.throws(()=>validateSourceData({data:Object.fromEntries([...Array(51)].map((_,i)=>['k'+i,1]))}),/maksimal 50/);
  // A template without a source would send "{{jumlah}}" verbatim, so it is rejected up front.
  assert.throws(()=>templateInput({name:'Lupa',message:'Ada {{jumlah}}'}),/sumber data endpoint/);
@@ -209,21 +219,41 @@ test('template source substitution formats values and refuses gaps',()=>{
  assert.throws(()=>templateInput({name:'Http',message:'x',source_mode:'endpoint',source_endpoint:'http://a.test/x'}),/HTTPS/);
  assert.equal(templateInput({name:'Ok',message:'Ada {{jumlah}}',source_mode:'endpoint',source_endpoint:'https://a.test/x'}).source.mode,'endpoint');
 });
+test('custom source headers are validated and legacy tokens still decode',()=>{
+ assert.deepEqual(validateHeaders([{name:'X-API-Key',value:'abc'},{name:'Authorization',value:'Bearer xyz'}]),{'X-API-Key':'abc',Authorization:'Bearer xyz'});
+ assert.deepEqual(validateHeaders(undefined),{});
+ // Blank names are dropped so an empty row in the form is simply ignored.
+ assert.deepEqual(validateHeaders([{name:'  ',value:'x'}]),{});
+ assert.throws(()=>validateHeaders([{name:'Host',value:'evil.test'}]),/diatur otomatis/);
+ assert.throws(()=>validateHeaders([{name:'Content-Length',value:'0'}]),/diatur otomatis/);
+ assert.throws(()=>validateHeaders([{name:'Bad Header',value:'x'}]),/hanya boleh huruf/);
+ // A newline would let the value inject a second header into the request.
+ assert.throws(()=>validateHeaders([{name:'X-Key',value:'a\r\nX-Evil: 1'}]),/baris baru/);
+ assert.throws(()=>validateHeaders([{name:'X-Key',value:'a'},{name:'x-key',value:'b'}]),/lebih dari sekali/);
+ assert.throws(()=>validateHeaders([...Array(11)].map((_,i)=>({name:'X-H'+i,value:'v'}))),/maksimal 10/);
+ assert.throws(()=>validateHeaders([{name:'X-Key',value:'x'.repeat(1025)}]),/maksimal 1024/);
+ // Templates saved before custom headers existed stored a bare token.
+ assert.deepEqual(decodeHeaders('rahasia-lama'),{Authorization:'Bearer rahasia-lama'});
+ assert.deepEqual(decodeHeaders('{"X-API-Key":"abc"}'),{'X-API-Key':'abc'});
+ assert.deepEqual(decodeHeaders(''),{});
+});
 integration('endpoint-sourced templates substitute live values and never touch the gallery quota',async()=>{
  const a=await user();
- sourceError=null;sourceReply={data:{jumlah:1247,sisa_kuota:53},media:{url:'https://example.com/poster.png',filename:'poster.png'}};
+ sourceError=null;sourceReply={jumlah:1247,sisa_kuota:53,poster:'https://example.com/poster.png'};
  await request(app).post('/contacts').set('account',a).send({nomor:'628111000111'}).expect(201);
  const contacts=(await request(app).get('/contacts').set('account',a)).body;
- const template=(await request(app).post('/templates').set('account',a).send({name:'PPDB',media_type:'image',media_source:'endpoint',message:'Pendaftar {{jumlah}}, sisa {{sisa_kuota}}',source_mode:'endpoint',source_endpoint:'https://ppdb.test/statistik',source_token:'rahasia'}).expect(201)).body;
- // The stored token is never echoed back to the browser.
+ const template=(await request(app).post('/templates').set('account',a).send({name:'PPDB',media_type:'image',media_source:'endpoint',media_variable:'poster',message:'Pendaftar {{jumlah}}, sisa {{sisa_kuota}}',source_mode:'endpoint',source_endpoint:'https://ppdb.test/statistik',source_headers:[{name:'X-API-Key',value:'rahasia'}]}).expect(201)).body;
+ // Header values never reach the browser; only their names come back so the form can render rows.
  const listed=(await request(app).get('/templates').set('account',a)).body.find((t:any)=>t.id===template.id);
- assert.equal(listed.has_token,true);assert.equal(listed.source_secret,undefined);
+ assert.deepEqual(listed.source_header_names,['X-API-Key']);assert.equal(listed.source_secret,undefined);
+ sourceCalls.length=0;
  const quotaBefore=(await request(app).get('/assets').set('account',a)).body;
  const job=(await request(app).post('/jobs').set('account',a).send({...data(a,[contacts[0].id]),template_ids:[template.id]}).expect(201)).body;
  const run=(await request(app).post('/jobs/'+job.id+'/send').set('account',a).send({template_id:template.id}).expect(202)).body;
  // Temporary run media stays out of the gallery listing and its usage totals.
  const quotaDuring=(await request(app).get('/assets').set('account',a)).body;
  assert.equal(quotaDuring.used_count,quotaBefore.used_count);assert.equal(quotaDuring.used_bytes,quotaBefore.used_bytes);
+ assert.equal(sourceCalls.at(-1)?.headers['X-API-Key'],'rahasia');
  await service.tick();
  assert.equal(payloads.at(-1).caption,'Pendaftar 1.247, sisa 53');
  assert.equal(payloads.at(-1).type,'image');
@@ -257,4 +287,20 @@ integration('a failing source cancels the run, records why, and still advances t
  assert.equal(second.status,'failed');
  assert.match((await request(app).get('/runs/'+second.id).set('account',a)).body[0].error,/tidak tersedia/);
  sourceReply={data:{jumlah:247,sisa_kuota:53,buka:true}};
+});
+test('media comes from a chosen variable holding a link',async()=>{
+ const data={poster:'https://example.com/poster.png',jumlah:'247',kosong:'',bukan:'bukan alamat'};
+ assert.equal((await validateSourceMedia(data,'poster')).url,'https://example.com/poster.png');
+ // The filename is derived from the link so the endpoint need not supply one.
+ assert.equal((await validateSourceMedia(data,'poster')).filename,'poster.png');
+ await assert.rejects(()=>validateSourceMedia(data,'tidak_ada'),/tidak tersedia/);
+ await assert.rejects(()=>validateSourceMedia(data,'kosong'),/kosong/);
+ await assert.rejects(()=>validateSourceMedia(data,'bukan'),/alamat HTTPS/);
+ // A variable holding a plain number is a common mistake worth a clear message.
+ await assert.rejects(()=>validateSourceMedia(data,'jumlah'),/alamat HTTPS/);
+ assert.throws(()=>mediaVariable(''),/Pilih variabel media/);
+ assert.throws(()=>mediaVariable('nama-salah'),/Pilih variabel media/);
+ assert.equal(mediaVariable('poster'),'poster');
+ // Picking endpoint media without naming the variable must not save.
+ assert.throws(()=>templateInput({name:'M',media_type:'image',media_source:'endpoint',message:'x',source_mode:'endpoint',source_endpoint:'https://a.test/x'}),/Pilih variabel media/);
 });

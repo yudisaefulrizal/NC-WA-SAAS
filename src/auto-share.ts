@@ -12,7 +12,7 @@ import {AssetStore,sniffMediaType} from './engine/assets.js';
 import {sendBilled} from './outbound.js';
 import {encrypt,decrypt} from './payments.js';
 import {downloadPublicMedia} from './engine/download.js';
-import {fetchSource,maxSourceMediaBytes,parsePlaceholders,renderTemplate,sourceInput,validateSourceData,validateSourceMedia,type SourceTransport} from './auto-share-source.js';
+import {decodeHeaders,fetchSource,maxSourceMediaBytes,mediaVariable,parsePlaceholders,renderTemplate,sourceInput,validateHeaders,validateSourceData,validateSourceMedia,type SourceHeaders,type SourceTransport} from './auto-share-source.js';
 
 const invalid=(message:string)=>new ApiError(400,'invalid_request',message);
 export function contactInput(body:unknown){
@@ -65,13 +65,18 @@ export function nextSchedule(due:Date,minutes:number,now:Date){
  return new Date(due.getTime()+(Math.max(0,Math.floor((now.getTime()-due.getTime())/step))+1)*step);
 }
 const jsonArray=(v:unknown):string[]=>typeof v==='string'?JSON.parse(v):v as string[];
-// Keeps the stored token when the endpoint is unchanged and no new token is typed; drops it as soon
+// Keeps the stored headers when the endpoint is unchanged and none were submitted; drops them as soon
 // as the endpoint moves, so a secret is never sent to a host it was not issued for.
 function secretFor(source:ReturnType<typeof sourceInput>,previous:Record<string,unknown>|null){
- if(source.mode==='none'||source.clearToken)return null;
- if(source.token)return encrypt(source.token);
- if(previous&&previous.source_secret&&previous.source_endpoint===source.endpoint)return previous.source_secret as string;
- return null;
+ if(source.mode==='none')return null;
+ const kept=previous&&previous.source_secret&&previous.source_endpoint===source.endpoint?previous.source_secret as string:null;
+ if(source.headers===undefined)return kept;
+ const stored=decodeHeaders(kept?decrypt(kept):'');
+ // A blank value means "keep the stored secret for this header" so it never has to be retyped.
+ const merged:SourceHeaders={};
+ for(const [name,value] of Object.entries(source.headers))merged[name]=value||stored[name]||'';
+ const present=Object.entries(merged).filter(([,value])=>value);
+ return present.length?encrypt(JSON.stringify(Object.fromEntries(present))):null;
 }
 function expose(r:RowDataPacket){return {...r,contacts:jsonArray(r.contacts),groups:jsonArray(r.groups_json),enabled:!!r.enabled,template_ids:jsonArray(r.template_ids)};}
 async function lockJob(c:PoolConnection,account:string,id:string){
@@ -114,20 +119,20 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
  // Runs before any transaction: a template source may take seconds to answer, and the account row
  // is locked for the whole of enqueue. Returns null when the template needs no remote data.
  async function prefetchSource(account:string,job:RowDataPacket,templateId:string):Promise<ResolvedSource|null>{
-  const [rows]=await db.execute<RowDataPacket[]>('SELECT id,message,media_type,media_source,source_mode,source_endpoint,source_secret FROM auto_share_templates WHERE account_id=? AND id=?',[account,templateId]);
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT id,message,media_type,media_source,media_variable,source_mode,source_endpoint,source_secret FROM auto_share_templates WHERE account_id=? AND id=?',[account,templateId]);
   const t=rows[0];
   if(!t||t.source_mode!=='endpoint')return null;
-  const secret=t.source_secret?decrypt(t.source_secret as string):'';
-  const body=await source(t.source_endpoint as string,secret);
+  const headers=decodeHeaders(t.source_secret?decrypt(t.source_secret as string):'');
+  const body=await source(t.source_endpoint as string,headers);
   const data=validateSourceData(body);
   // Fail before any download when the text needs a value the source did not send.
   renderTemplate(t.message as string,data);
   const runId=randomUUID();
   if(t.media_source!=='endpoint')return {runId,templateId,data,assetId:null,filename:null};
-  const media=await validateSourceMedia(body);
+  const media=await validateSourceMedia(data,t.media_variable as string);
   const file=await download(media.url,{maxBytes:maxSourceMediaBytes});
   try{
-   const name=media.filename??decodeURIComponent(new URL(media.url).pathname.split('/').pop()||'media');
+   const name=media.filename??'media';
    const saved=await assets.saveTemporary(account,runId,name,createReadStream(file.path),maxSourceMediaBytes);
    if(saved.mediaType!==t.media_type)throw invalid('Media dari sumber data bertipe '+saved.mediaType+', tidak sesuai template '+t.media_type);
    return {runId,templateId,data,assetId:saved.id,filename:saved.filename};
@@ -185,9 +190,9 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
  router.put('/contacts/:id',async(req,res)=>res.json(await saveContact(res.locals.accountId,req.params.id,req.body,true)));
  router.delete('/contacts/:id',async(req,res)=>{await db.execute('DELETE FROM daftar_kontak WHERE account_id=? AND id=?',[res.locals.accountId,req.params.id]);res.json({ok:true});});
  async function accountLock(c:PoolConnection,account:string){await c.execute('SELECT id FROM accounts WHERE id=? FOR UPDATE',[account]);}
- router.get('/templates',async(_req,res)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,media_source,source_secret FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);
-  // The stored token never leaves the server; the form only needs to know whether one exists.
-  res.json(rows.map(({source_secret,...t})=>({...t,has_token:Boolean(source_secret)})));});
+ router.get('/templates',async(_req,res)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,media_source,media_variable,source_secret FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);
+  // Header values never leave the server; the form only needs their names to render the rows.
+  res.json(rows.map(({source_secret,...t})=>({...t,source_header_names:Object.keys(decodeHeaders(source_secret?decrypt(source_secret as string):''))})));});
  async function saveTemplate(account:string,id:string,body:unknown,update:boolean){
   const v=templateInput(body),c=await db.getConnection();
   try{await c.beginTransaction();await accountLock(c,account);
@@ -199,8 +204,8 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
     filename=rows[0].filename;
    }
    if(update){const [rows]=await c.execute<RowDataPacket[]>('SELECT source_endpoint,source_secret FROM auto_share_templates WHERE account_id=? AND id=? FOR UPDATE',[account,id]);if(!rows.length)throw new ApiError(404,'not_found','Template tidak ditemukan');
-    await c.execute('UPDATE auto_share_templates SET name=?,message=?,media_type=?,asset_id=?,filename=?,source_mode=?,source_endpoint=?,source_secret=?,media_source=? WHERE account_id=? AND id=?',[v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,rows[0]),v.source.media,account,id]);
-   }else await c.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,source_secret,media_source,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,?,?,?,?,?,?,?,'',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[id,account,v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,null),v.source.media]);
+    await c.execute('UPDATE auto_share_templates SET name=?,message=?,media_type=?,asset_id=?,filename=?,source_mode=?,source_endpoint=?,source_secret=?,media_source=?,media_variable=? WHERE account_id=? AND id=?',[v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,rows[0]),v.source.media,v.source.variable,account,id]);
+   }else await c.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,source_secret,media_source,media_variable,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[id,account,v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,null),v.source.media,v.source.variable]);
    await c.commit();return {id};
   }catch(e){await c.rollback();throw e;}finally{c.release();}
  }
@@ -208,16 +213,20 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
  router.post('/templates/test-source',async(req,res)=>{
   const b=object(req.body),account=res.locals.accountId;
   const endpoint=requiredString(b.source_endpoint,'Endpoint',512);
-  let secret=typeof b.source_token==='string'&&b.source_token?b.source_token:'';
-  if(!secret&&typeof b.template_id==='string'&&b.template_id){
+  const typed=validateHeaders(b.source_headers);
+  let stored:SourceHeaders={};
+  if(typeof b.template_id==='string'&&b.template_id){
    const [rows]=await db.execute<RowDataPacket[]>('SELECT source_endpoint,source_secret FROM auto_share_templates WHERE account_id=? AND id=?',[account,b.template_id]);
-   if(rows[0]?.source_secret&&rows[0].source_endpoint===endpoint)secret=decrypt(rows[0].source_secret as string);
+   if(rows[0]?.source_secret&&rows[0].source_endpoint===endpoint)stored=decodeHeaders(decrypt(rows[0].source_secret as string));
   }
-  const body=await source(endpoint,secret);
+  // A blank value falls back to the stored secret so the test works without retyping it.
+  const headers:SourceHeaders={};
+  for(const [name,value] of Object.entries(typed))if(value||stored[name])headers[name]=value||stored[name];
+  const body=await source(endpoint,headers);
   const variables=validateSourceData(body);
   let media=null;
   if(b.media_source==='endpoint'){
-   const found=await validateSourceMedia(body);
+   const found=await validateSourceMedia(variables,mediaVariable(b.media_variable));
    const file=await download(found.url,{maxBytes:maxSourceMediaBytes});
    try{
     const head=await readFile(file.path);
@@ -226,7 +235,9 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
     media={url:found.url,media_type:sniffed.mediaType,size_bytes:head.length};
    }finally{await file.cleanup();}
   }
-  res.json({ok:true,variables,media});
+  // The raw body is echoed back so a mis-shaped response is visible in the dialog, capped so a large
+  // payload never bloats the form.
+  res.json({ok:true,variables,media,raw:JSON.stringify(body,null,1).slice(0,2000)});
  });
  router.post('/templates',async(req,res)=>res.status(201).json(await saveTemplate(res.locals.accountId,randomUUID(),req.body,false)));
  router.put('/templates/:id',async(req,res)=>res.json(await saveTemplate(res.locals.accountId,req.params.id,req.body,true)));
