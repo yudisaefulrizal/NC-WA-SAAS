@@ -199,3 +199,15 @@ Kontak tujuan berpindah dari `<select multiple>` ke daftar checkbox dengan penca
 Dua bug ditemukan oleh pemeriksaan browser, bukan oleh pembacaan kode: `<select>` wajib yang kosong memblokir submit dengan pesan bawaan peramban yang tidak menyebut penyebabnya. Terjadi pada pilihan asset saat galeri tidak memuat jenis media terkait, dan pada pilihan sesi saat akun belum punya sesi WhatsApp. Keduanya kini menampilkan keterangan pengganti, dan ketiadaan sesi juga muncul pada daftar "Lengkapi dulu".
 
 Bukti: `scripts/browser-job-form-check.ts` lulus pada viewport 1280 px dan 390 px, mencakup daftar penghalang, pratinjau rotasi, pencarian kontak, perhitungan tumpang tindih, penolakan waktu lampau, serta simpan dan buka ulang yang memulihkan kontak, kelompok, dan urutan template. Regresi penuh 143/144 dengan satu kegagalan batas memori AI pra-eksisting. TypeScript check, build, dan sintaks JavaScript lulus. Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.
+
+### Rapikan otomatis pesan Auto Share dengan AI — 23 September 2026
+
+Perapihan berjalan di `prefetchSource` tepat setelah `renderTemplate`, bukan saat template disimpan, karena template hanya memuat placeholder sementara kalimat sesungguhnya baru terbentuk setelah substitusi. Letaknya di luar transaksi seperti pengambilan data, sehingga panggilan AI tidak menahan kunci akun, dan tetap satu panggilan per pengiriman bukan per kontak.
+
+`src/auto-share-tidy.ts` menelan seluruh kegagalan dengan sengaja: provider mati, kredit tidak cukup, atau hasil yang ditolak semuanya mengembalikan teks asli beserta alasannya, lalu pengiriman berjalan normal. Ini kebalikan dari kegagalan sumber data yang wajib membatalkan pengiriman karena datanya memang tidak ada. `acceptTidyResult` menolak hasil kosong, melebihi 10.000 karakter, atau menyusut di bawah 40% panjang asli sebagai tanda model meringkas alih-alih memformat ulang.
+
+Kredit memakai pola reserve lalu settle seperti asisten: saldo dikunci `FOR UPDATE`, dipesan sebelum panggilan, dan selisihnya dikembalikan setelahnya. Baris `ai_usage` memakai agent `rapikan` agar pemakaian ini terpisah dari percakapan asisten. Prompt owner disimpan pada `ai_settings.tidy_prompt` dan kosong berarti `defaultTidyPrompt`.
+
+Endpoint `test-source` mengembalikan pratinjau pesan akhir termasuk hasil perapihan. Tanpa itu pengguna menyalakan jadwal untuk keluaran yang tidak pernah dilihatnya, karena hasil perapihan tidak dapat diperiksa setelah terkirim.
+
+Bukti: 17/17 tes Auto Share lulus, regresi penuh 145/146 dengan satu kegagalan batas memori AI pra-eksisting, dua pemeriksaan browser lulus pada desktop dan ponsel, TypeScript check dan build lulus. Migrasi dijalankan pada database pengembangan. Pengiriman WhatsApp nyata dan panggilan AI sungguhan belum diuji; pengujian memakai transport tiruan. Tidak ada commit/push/deploy.

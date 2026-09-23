@@ -664,6 +664,10 @@ function shareMediaFields(){const f=$('share-template-form'),type=f.elements.med
  if(audio&&source){f.elements.source_mode.value='none';return shareMediaFields();}
  $('share-source-mode').closest('label').hidden=audio;
  $('share-source-fields').hidden=!source;f.elements.source_endpoint.required=source;
+ // Tidying rewrites the substituted text, so it only applies where a source supplies that text.
+ const tidyable=source&&!audio;
+ $('share-tidy-field').hidden=!tidyable;$('share-tidy-hint').hidden=!tidyable;
+ if(!tidyable)f.elements.tidy.checked=false;
  $('share-media-fields').hidden=!media;f.elements.message.required=!media;f.elements.message.disabled=audio;
  // Media from the endpoint is only reachable once a data source exists, so hide the impossible option.
  const remoteOption=$('share-media-source').querySelector('option[value="endpoint"]');

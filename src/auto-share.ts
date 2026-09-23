@@ -12,6 +12,8 @@ import {AssetStore,sniffMediaType} from './engine/assets.js';
 import {sendBilled} from './outbound.js';
 import {encrypt,decrypt} from './payments.js';
 import {downloadPublicMedia} from './engine/download.js';
+import {tidyMessage} from './auto-share-tidy.js';
+import {ai} from './ai.js';
 import {decodeHeaders,fetchSource,maxSourceMediaBytes,mediaVariable,parsePlaceholders,renderTemplate,sourceInput,validateHeaders,validateSourceData,validateSourceMedia,type SourceHeaders,type SourceTransport} from './auto-share-source.js';
 
 const invalid=(message:string)=>new ApiError(400,'invalid_request',message);
@@ -42,7 +44,13 @@ export function templateInput(body:unknown){
  // Without this a template silently sends "{{jumlah}}" as literal text.
  if(source.mode==='none'&&placeholders.length)throw invalid('Teks memakai {{'+placeholders[0]+'}}; pilih sumber data endpoint terlebih dahulu');
  const assetId=type!=='text'&&source.media==='asset'?requiredString(b.asset_id,'Asset',36):null;
- return {name,message,type,assetId,source};
+ if(b.tidy!==undefined&&typeof b.tidy!=='boolean')throw invalid('Pilihan rapikan otomatis tidak valid');
+ const tidy=b.tidy===true;
+ // Static text is cheaper to rewrite once by hand than on every send, so tidying is offered only
+ // where the text is assembled fresh each time.
+ if(tidy&&source.mode!=='endpoint')throw invalid('Rapikan otomatis hanya untuk template dengan sumber data endpoint');
+ if(tidy&&type==='audio')throw invalid('Template audio tidak memiliki teks untuk dirapikan');
+ return {name,message,type,assetId,source,tidy};
 }
 export function jobInput(body:unknown,now=Date.now()){
  const b=object(body),name=requiredString(b.name,'Nama',100),session=requiredString(b.session_id,'Sesi',64);
@@ -85,7 +93,7 @@ async function lockJob(c:PoolConnection,account:string,id:string){
 }
 // Resolved content for one run: fetched outside the transaction so a slow endpoint never holds the
 // account lock. runId is minted here because temporary media must be stored under it before insert.
-export interface ResolvedSource {runId:string;templateId:string;data:Record<string,string>;assetId:string|null;filename:string|null}
+export interface ResolvedSource {runId:string;templateId:string;data:Record<string,string>;assetId:string|null;filename:string|null;message?:string;tidied?:boolean;tidyNote?:string|null}
 async function enqueue(c:PoolConnection,t:RowDataPacket,source:string,selected?:string,resolved?:ResolvedSource|null){
  const [active]=await c.execute<RowDataPacket[]>("SELECT id FROM auto_share_runs WHERE account_id=? AND job_id=? AND status IN ('queued','running') LIMIT 1",[t.account_id,t.id]);
  if(active.length)throw new ApiError(409,'already_running','Template ini masih dalam antrean atau sedang dikirim');
@@ -105,37 +113,41 @@ async function enqueue(c:PoolConnection,t:RowDataPacket,source:string,selected?:
  // The prefetch ran before the lock, so confirm rotation still points at the template it fetched.
  if(resolved&&resolved.templateId!==templateId)throw invalid('Template berubah saat data sumber diambil; coba lagi');
  const id=resolved?resolved.runId:randomUUID();
- const message=v.source_mode==='endpoint'?renderTemplate(v.message as string,resolved!.data):v.message;
+ // The prefetch already substituted and, when asked, tidied the text outside this transaction.
+ const message=v.source_mode==='endpoint'?(resolved!.message??renderTemplate(v.message as string,resolved!.data)):v.message;
  const assetId=v.media_source==='endpoint'?resolved!.assetId:v.asset_id;
  const filename=v.media_source==='endpoint'?resolved!.filename:v.filename;
  const sourceData=v.source_mode==='endpoint'?JSON.stringify(resolved!.data):null;
- await c.execute('INSERT INTO auto_share_runs(id,account_id,job_id,job_name,template_id,template_name,session_id,message,source,media_type,asset_id,filename,source_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',[id,t.account_id,t.id,t.name,v.id,v.name,t.session_id,message,source,v.media_type,assetId,filename,sourceData]);
+ await c.execute('INSERT INTO auto_share_runs(id,account_id,job_id,job_name,template_id,template_name,session_id,message,source,media_type,asset_id,filename,source_data,tidied,tidy_note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[id,t.account_id,t.id,t.name,v.id,v.name,t.session_id,message,source,v.media_type,assetId,filename,sourceData,Boolean(resolved?.tidied),resolved?.tidyNote??null]);
  if(source==='schedule')await c.execute('UPDATE auto_share_jobs SET rotation_index=? WHERE id=?',[(t.rotation_index+1)%templates.length,t.id]);
  for(let i=0;i<targets.length;i++)await c.execute('INSERT INTO auto_share_deliveries(id,run_id,nomor,position) VALUES (?,?,?,?)',[randomUUID(),id,targets[i],i]);
  return {id,total:targets.length};
 }
-export function createAutoShare(getManager:(account:string)=>Promise<SessionManager>,assets:AssetStore,delay=sleep,source:SourceTransport=fetchSource,download=downloadPublicMedia){
+export function createAutoShare(getManager:(account:string)=>Promise<SessionManager>,assets:AssetStore,delay=sleep,source:SourceTransport=fetchSource,download=downloadPublicMedia,aiConfig=()=>ai.config()){
  const router=express.Router();
  // Runs before any transaction: a template source may take seconds to answer, and the account row
  // is locked for the whole of enqueue. Returns null when the template needs no remote data.
  async function prefetchSource(account:string,job:RowDataPacket,templateId:string):Promise<ResolvedSource|null>{
-  const [rows]=await db.execute<RowDataPacket[]>('SELECT id,message,media_type,media_source,media_variable,source_mode,source_endpoint,source_secret FROM auto_share_templates WHERE account_id=? AND id=?',[account,templateId]);
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT id,message,media_type,media_source,media_variable,source_mode,source_endpoint,source_secret,tidy FROM auto_share_templates WHERE account_id=? AND id=?',[account,templateId]);
   const t=rows[0];
   if(!t||t.source_mode!=='endpoint')return null;
   const headers=decodeHeaders(t.source_secret?decrypt(t.source_secret as string):'');
   const body=await source(t.source_endpoint as string,headers);
   const data=validateSourceData(body);
   // Fail before any download when the text needs a value the source did not send.
-  renderTemplate(t.message as string,data);
+  const substituted=renderTemplate(t.message as string,data);
+  // Cosmetic only: a failed rewrite keeps the substituted text and the send goes ahead.
+  const tidy=t.tidy?await tidyMessage(account,substituted,await aiConfig()):{message:substituted,tidied:false,reason:null};
   const runId=randomUUID();
-  if(t.media_source!=='endpoint')return {runId,templateId,data,assetId:null,filename:null};
+  const resolved={runId,templateId,data,message:tidy.message,tidied:tidy.tidied,tidyNote:tidy.reason};
+  if(t.media_source!=='endpoint')return {...resolved,assetId:null,filename:null};
   const media=await validateSourceMedia(data,t.media_variable as string);
   const file=await download(media.url,{maxBytes:maxSourceMediaBytes});
   try{
    const name=media.filename??'media';
    const saved=await assets.saveTemporary(account,runId,name,createReadStream(file.path),maxSourceMediaBytes);
    if(saved.mediaType!==t.media_type)throw invalid('Media dari sumber data bertipe '+saved.mediaType+', tidak sesuai template '+t.media_type);
-   return {runId,templateId,data,assetId:saved.id,filename:saved.filename};
+   return {...resolved,assetId:saved.id,filename:saved.filename};
   }catch(error){await assets.removeRunAssets(runId).catch(()=>{});throw error;}
   finally{await file.cleanup();}
  }
@@ -190,7 +202,7 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
  router.put('/contacts/:id',async(req,res)=>res.json(await saveContact(res.locals.accountId,req.params.id,req.body,true)));
  router.delete('/contacts/:id',async(req,res)=>{await db.execute('DELETE FROM daftar_kontak WHERE account_id=? AND id=?',[res.locals.accountId,req.params.id]);res.json({ok:true});});
  async function accountLock(c:PoolConnection,account:string){await c.execute('SELECT id FROM accounts WHERE id=? FOR UPDATE',[account]);}
- router.get('/templates',async(_req,res)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,media_source,media_variable,source_secret FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);
+ router.get('/templates',async(_req,res)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,media_source,media_variable,tidy,source_secret FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);
   // Header values never leave the server; the form only needs their names to render the rows.
   res.json(rows.map(({source_secret,...t})=>({...t,source_header_names:Object.keys(decodeHeaders(source_secret?decrypt(source_secret as string):''))})));});
  async function saveTemplate(account:string,id:string,body:unknown,update:boolean){
@@ -204,8 +216,8 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
     filename=rows[0].filename;
    }
    if(update){const [rows]=await c.execute<RowDataPacket[]>('SELECT source_endpoint,source_secret FROM auto_share_templates WHERE account_id=? AND id=? FOR UPDATE',[account,id]);if(!rows.length)throw new ApiError(404,'not_found','Template tidak ditemukan');
-    await c.execute('UPDATE auto_share_templates SET name=?,message=?,media_type=?,asset_id=?,filename=?,source_mode=?,source_endpoint=?,source_secret=?,media_source=?,media_variable=? WHERE account_id=? AND id=?',[v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,rows[0]),v.source.media,v.source.variable,account,id]);
-   }else await c.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,source_secret,media_source,media_variable,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[id,account,v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,null),v.source.media,v.source.variable]);
+    await c.execute('UPDATE auto_share_templates SET name=?,message=?,media_type=?,asset_id=?,filename=?,source_mode=?,source_endpoint=?,source_secret=?,media_source=?,media_variable=?,tidy=? WHERE account_id=? AND id=?',[v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,rows[0]),v.source.media,v.source.variable,v.tidy,account,id]);
+   }else await c.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,source_secret,media_source,media_variable,tidy,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[id,account,v.name,v.message,v.type,v.assetId,filename,v.source.mode,v.source.endpoint,secretFor(v.source,null),v.source.media,v.source.variable,v.tidy]);
    await c.commit();return {id};
   }catch(e){await c.rollback();throw e;}finally{c.release();}
  }
@@ -237,7 +249,17 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
   }
   // The raw body is echoed back so a mis-shaped response is visible in the dialog, capped so a large
   // payload never bloats the form.
-  res.json({ok:true,variables,media,raw:JSON.stringify(body,null,1).slice(0,2000)});
+  // Shows what a send would actually produce, including the optional rewrite, so a schedule is
+  // never switched on for output nobody has seen.
+  let preview=null;
+  if(typeof b.message==='string'&&b.message.trim()){
+   try{
+    const substituted=renderTemplate(b.message,variables);
+    const tidy=b.tidy===true?await tidyMessage(account,substituted,await aiConfig()):{message:substituted,tidied:false,reason:null};
+    preview={message:tidy.message,tidied:tidy.tidied,note:tidy.reason};
+   }catch(error){preview={message:null,tidied:false,note:error instanceof ApiError?error.message:'Gagal menyusun pratinjau'};}
+  }
+  res.json({ok:true,variables,media,preview,raw:JSON.stringify(body,null,1).slice(0,2000)});
  });
  router.post('/templates',async(req,res)=>res.status(201).json(await saveTemplate(res.locals.accountId,randomUUID(),req.body,false)));
  router.put('/templates/:id',async(req,res)=>res.json(await saveTemplate(res.locals.accountId,req.params.id,req.body,true)));

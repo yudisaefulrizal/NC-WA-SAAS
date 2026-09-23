@@ -27,6 +27,8 @@ export async function migrateAI(){
  if(!contextColumns.length)await db.query('ALTER TABLE ai_conversations ADD COLUMN router_context VARCHAR(200) NULL');
  const [usageColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_usage','agent']);
  if(!usageColumns.length)await db.query('ALTER TABLE ai_usage ADD COLUMN agent VARCHAR(20) NULL');
+ const [tidyPrompt]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_settings','tidy_prompt']);
+ if(!tidyPrompt.length)await db.query("ALTER TABLE ai_settings ADD COLUMN tidy_prompt TEXT NULL");
  const [assistantFallback]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','fallback_number']);
  if(!assistantFallback.length)await db.query("ALTER TABLE ai_assistants ADD COLUMN fallback_number VARCHAR(20) NOT NULL DEFAULT ''");
  const [assistantFallbackNotify]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','fallback_notify']);

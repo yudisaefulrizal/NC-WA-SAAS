@@ -151,3 +151,14 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Pratinjau rotasi menampilkan urutan tiga template pertama saat lebih dari satu template dipakai.
 - [x] Dropdown sesi menampilkan keterangan saat belum ada sesi WhatsApp, menggantikan form yang terkunci tanpa penjelasan.
 - [x] Tes: `scripts/browser-job-form-check.ts` lulus desktop dan ponsel; regresi penuh 143/144 (satu kegagalan batas memori AI pra-eksisting). TypeScript check, build, dan sintaks JavaScript lulus.
+
+## Rapikan otomatis pesan Auto Share dengan AI — 23 September 2026
+
+- [x] Checkbox "Rapikan otomatis dengan AI" pada template bersumber data endpoint; teks hasil substitusi dirapikan Model Murah sekali per pengiriman, bukan per kontak.
+- [x] Prompt dapat diatur owner pada Pengaturan AI (`ai_settings.tidy_prompt`); kosong berarti memakai prompt bawaan sehingga fitur langsung berfungsi.
+- [x] Kegagalan AI, kredit tidak cukup, atau hasil yang ditolak tidak membatalkan pengiriman: pesan tetap terkirim apa adanya dan alasannya dicatat pada `auto_share_runs.tidy_note`.
+- [x] Hasil ditolak bila kosong, melebihi 10.000 karakter, atau menyusut di bawah 40% panjang asli sebagai tanda model memotong isi.
+- [x] Kredit dipesan lalu diselesaikan mengikuti pola asisten; kredit untuk panggilan gagal dikembalikan penuh dan tercatat di `ai_usage` dengan agent `rapikan`.
+- [x] Tombol Tes koneksi menampilkan pratinjau pesan akhir termasuk hasil perapihan, sehingga jadwal tidak dinyalakan untuk keluaran yang belum pernah dilihat.
+- [x] Perapihan hanya ditawarkan untuk template bersumber endpoint dan bukan audio; teks statis lebih murah dirapikan sekali saat menyimpan.
+- [x] Tes: 17/17 Auto Share lulus; regresi penuh 145/146 (satu kegagalan batas memori AI pra-eksisting). Pemeriksaan browser lulus desktop dan ponsel. TypeScript check, build, dan sintaks JavaScript lulus.

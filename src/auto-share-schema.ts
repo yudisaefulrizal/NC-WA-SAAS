@@ -63,6 +63,9 @@ export async function migrateAutoShare(){
  await column('auto_share_templates','source_secret','TEXT NULL');
  await column('auto_share_templates','media_source',"VARCHAR(16) NOT NULL DEFAULT 'asset'");
  await column('auto_share_templates','media_variable',"VARCHAR(40) NOT NULL DEFAULT ''");
+ await column('auto_share_templates','tidy','BOOLEAN NOT NULL DEFAULT FALSE');
+ await column('auto_share_runs','tidied','BOOLEAN NOT NULL DEFAULT FALSE');
+ await column('auto_share_runs','tidy_note','VARCHAR(60) NULL');
  await column('auto_share_runs','source_data','JSON NULL');
  // Assets fetched from a template source belong to one run only: excluded from the account quota
  // and removed once the run settles. No foreign key, so deleting a run never drops the row before

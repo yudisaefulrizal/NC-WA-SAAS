@@ -9,6 +9,7 @@ import {join} from 'node:path';
 import {db} from '../src/db.js';
 import {createAutoShare,contactInput,templateInput,jobInput,nextSchedule,randomDelay} from '../src/auto-share.js';
 import {decodeHeaders,mediaVariable,parsePlaceholders,renderTemplate,validateHeaders,validateSourceData,validateSourceMedia} from '../src/auto-share-source.js';
+import {acceptTidyResult,defaultTidyPrompt,tidyMessage} from '../src/auto-share-tidy.js';
 import {migrateAutoShare} from '../src/auto-share-schema.js';
 import {AssetStore} from '../src/engine/assets.js';
 import {SessionManager,ApiError} from '../src/engine/sessions.js';
@@ -30,7 +31,13 @@ let sourceError:Error|null=null;
 const sourceCalls:{endpoint:string;headers:Record<string,string>}[]=[];
 const fakeSource=async(endpoint:string,headers:Record<string,string>)=>{sourceCalls.push({endpoint,headers});if(sourceError)throw sourceError;return sourceReply;};
 const fakeDownload=async(url:string)=>{const dir=await mkdtemp(join(tmpdir(),'nc-wa-src-'));const path=join(dir,'media');await writeFile(path,pngFixture);return {path,mimetype:'image/png',cleanup:async()=>{await rm(dir,{recursive:true,force:true});}};};
-const service=createAutoShare(manager,assets,async(ms:number)=>{delays.push(ms);},fakeSource,fakeDownload as any);
+// Tidying is optional decoration, so the fake transport can fail freely: the send must survive it.
+let tidyReply='Pendaftar 1.247 santri.\n\nSisa kuota 53.';
+let tidyError:Error|null=null;
+const tidyCalls:string[]=[];
+const fakeTidyTransport=async(_config:any,messages:any[])=>{tidyCalls.push(messages.at(-1).content);if(tidyError)throw tidyError;return tidyReply;};
+const tidyConfig={endpoint:'https://ai.test/v1/chat/completions',model:'m',model_cheap:'m-cheap',secret:'x',input_rate:1,output_rate:1,memory_limit:60,context_memory_limit:6,trace_enabled:false,credit_price:0,tidy_prompt:''} as any;
+const service=createAutoShare(manager,assets,async(ms:number)=>{delays.push(ms);},fakeSource,fakeDownload as any,async()=>tidyConfig);
 const app=express();app.use(express.json());
 app.get('/public/assets/:token',async(req,res)=>{const file=await assets.getByToken(req.params.token);res.set('Content-Type',file.mimetype).sendFile(file.path);});
 app.use((req,res,next)=>{res.locals.accountId=req.get('account');next();});app.use(service.router);app.use((e:Error,_req:express.Request,res:express.Response,_next:express.NextFunction)=>res.status(e instanceof ApiError?e.status:500).json({message:e.message}));
@@ -303,4 +310,38 @@ test('media comes from a chosen variable holding a link',async()=>{
  assert.equal(mediaVariable('poster'),'poster');
  // Picking endpoint media without naming the variable must not save.
  assert.throws(()=>templateInput({name:'M',media_type:'image',media_source:'endpoint',message:'x',source_mode:'endpoint',source_endpoint:'https://a.test/x'}),/Pilih variabel media/);
+});
+
+test('tidy results are accepted only when they still look like the message',()=>{
+ const original='Pendaftar 1247 santri. Sisa kuota 53.';
+ assert.equal(acceptTidyResult(original,'  Pendaftar 1.247 santri.\n\nSisa kuota 53.  '),'Pendaftar 1.247 santri.\n\nSisa kuota 53.');
+ assert.equal(acceptTidyResult(original,'   '),null);
+ // A rewrite that drops most of the text means the model summarised instead of reformatting.
+ assert.equal(acceptTidyResult(original,'Oke.'),null);
+ assert.equal(acceptTidyResult(original,'x'.repeat(10001)),null);
+ assert.ok(defaultTidyPrompt.includes('Pertahankan seluruh angka'));
+ // Tidying is offered only where a source supplies the text.
+ assert.throws(()=>templateInput({name:'Statis',message:'Halo',tidy:true}),/sumber data endpoint/);
+ assert.throws(()=>templateInput({name:'Audio',media_type:'audio',asset_id:randomUUID(),message:'',tidy:true,source_mode:'endpoint',source_endpoint:'https://a.test/x'}),/audio tidak mendukung|tidak memiliki teks/);
+ assert.equal(templateInput({name:'Ok',message:'Ada {{jumlah}}',tidy:true,source_mode:'endpoint',source_endpoint:'https://a.test/x'}).tidy,true);
+});
+integration('a failing tidy never blocks the broadcast',async()=>{
+ const a=await user();
+ // No AI credit at all: the send must still go out with the substituted text.
+ sourceError=null;sourceReply={data:{jumlah:7}};
+ const config={...tidyConfig};
+ const poor=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
+ assert.equal(poor.tidied,false);assert.equal(poor.reason,'kredit_tidak_cukup');
+ assert.equal(poor.message,'Pendaftar 7 santri berdasarkan data terbaru.');
+ await db.execute('INSERT INTO ai_wallets VALUES (?,100000) ON DUPLICATE KEY UPDATE balance=100000',[a]);
+ tidyError=Error('provider down');
+ const broken=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
+ assert.equal(broken.tidied,false);assert.equal(broken.message,'Pendaftar 7 santri berdasarkan data terbaru.');
+ // Credit reserved for a failed call is returned rather than kept.
+ const [wallet]=await db.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[a]);
+ assert.equal(Number(wallet[0].balance),100000);
+ tidyError=null;
+ const good=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
+ assert.equal(good.tidied,true);assert.equal(good.message,tidyReply);
+ assert.ok(tidyCalls.at(-1)?.includes('Pendaftar 7 santri'));
 });
