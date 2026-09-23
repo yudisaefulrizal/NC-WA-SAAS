@@ -135,3 +135,15 @@ Penyebabnya `public/app.js`: penanganan submit `share-template-form` tidak menye
 Perbaikannya mengembalikan `tidy` ke payload. `scripts/browser-template-source-check.ts` kini mencegat permintaan POST `/auto-share/templates` dan memeriksa isi payload memuat `tidy`, `source_mode`, dan `source_endpoint`; dikonfirmasi menangkap kesalahan ini dengan mengembalikan bug sementara lalu menjalankan ulang pemeriksaan.
 
 Pelajarannya: memverifikasi pratinjau saja tidak cukup, karena pratinjau dan pengiriman membaca sumber nilai yang berbeda. Payload penyimpanan perlu diperiksa tersendiri.
+
+## Centangan rapikan tidak muncul kembali saat template dibuka ulang — 23 September 2026
+
+Bug kedua pada rangkaian yang sama, terpisah dari kegagalan payload sebelumnya. Penelusuran melalui peramban sungguhan memperlihatkan penyimpanan sudah benar (`POST` memuat `tidy:true` dan kolom `tidy` bernilai 1), tetapi membuka template yang sama untuk diubah menampilkan kotak centang kosong.
+
+Penyebabnya `openShareTemplate` tidak pernah memulihkan `tidy` dari data template; barisnya hilang pada suntingan yang memindahkan tombol pratinjau. Akibatnya setiap penyuntingan berikutnya menyimpan ulang template dengan centangan kosong, sehingga nilai yang sudah benar pun ikut hilang.
+
+Pemulihan ditempatkan setelah `shareMediaFields()` karena fungsi itu mengosongkan centangan ketika menilai perapihan tidak berlaku; menyetelnya lebih dulu akan langsung tertimpa. `$('share-preview')` juga direset agar pratinjau template sebelumnya tidak tertinggal.
+
+`scripts/browser-template-source-check.ts` kini membuka ulang template yang baru disimpan dan memeriksa centangan, sumber data, serta endpoint dipulihkan. Dikonfirmasi menangkap kesalahan ini dengan mengembalikan bug sementara lalu menjalankan ulang. Pemeriksaan posisi notifikasi dipindah ke sebelum dialog dibuka kembali, karena notifikasi memang menghilang setelahnya.
+
+Pelajarannya sama dengan catatan sebelumnya dan kini lebih jelas: memeriksa payload penyimpanan saja belum cukup, perjalanan bolak-balik simpan lalu buka ulang perlu diperiksa utuh.

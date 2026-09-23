@@ -727,12 +727,16 @@ $('share-source-test').onclick=()=>void run(async()=>{const f=$('share-template-
  shareMediaFields();});
 function openShareTemplate(t={}){const f=$('share-template-form');f.reset();
  $('share-source-vars').replaceChildren();$('share-source-result').replaceChildren();$('share-header-rows').replaceChildren();
+ $('share-preview').hidden=true;$('share-preview-text').textContent='';
  for(const key of ['id','name','message'])f.elements[key].value=t[key]||'';
  f.elements.source_mode.value=t.source_mode||'none';f.elements.source_endpoint.value=t.source_endpoint||'';
  f.elements.media_type.value=t.media_type||'text';f.elements.media_source.value=t.media_source||'asset';
  for(const name of t.source_header_names||[])shareHeaderRow(name,true);
  if(t.media_variable)shareOptions('share-media-variable',[[t.media_variable,t.media_variable]]);
- shareMediaFields();if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
+ // shareMediaFields() clears the tick when it decides tidying does not apply, so the saved value is
+ // restored after it runs rather than before.
+ shareMediaFields();f.elements.tidy.checked=Boolean(t.tidy);
+ if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
 $('share-add-template').onclick=()=>openShareTemplate();
 form('share-template-form',async data=>{const f=$('share-template-form'),source=f.elements.source_mode.value==='endpoint';
  await api('/auto-share/templates'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',{name:data.name,message:data.message,media_type:data.media_type,

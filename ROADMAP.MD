@@ -177,3 +177,11 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Pemeriksaan browser mencegat POST `/auto-share/templates` dan memastikan payload memuat `tidy`, `source_mode`, dan `source_endpoint`.
 - [x] Pemeriksaan dikonfirmasi menangkap kesalahan tersebut dengan mengembalikan bug sementara lalu menjalankan ulang.
 - [x] Tes: 17/17 Auto Share lulus; regresi penuh 147/148 (satu kegagalan batas memori AI pra-eksisting).
+
+## Perbaikan centangan rapikan tidak dipulihkan — 23 September 2026
+
+- [x] `openShareTemplate` memulihkan `tidy` dari data template; sebelumnya centangan selalu kosong saat template dibuka untuk diubah, sehingga penyuntingan berikutnya menghapus nilai yang sudah tersimpan.
+- [x] Pemulihan ditempatkan setelah `shareMediaFields()` yang mengosongkan centangan saat menilai perapihan tidak berlaku.
+- [x] Area pratinjau direset saat dialog dibuka agar hasil template sebelumnya tidak tertinggal.
+- [x] Pemeriksaan browser memverifikasi perjalanan bolak-balik: simpan lalu buka ulang wajib memulihkan centangan, sumber data, dan endpoint.
+- [x] Tes: 17/17 Auto Share lulus; regresi penuh 147/148 (satu kegagalan batas memori AI pra-eksisting).

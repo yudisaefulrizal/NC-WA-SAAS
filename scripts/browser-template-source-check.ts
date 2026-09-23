@@ -129,12 +129,22 @@ try{
   assert.equal(savedBody.tidy,true,'pilihan rapikan tidak ikut tersimpan');
   assert.equal(savedBody.source_mode,'endpoint','sumber data tidak ikut tersimpan');
   assert.equal(savedBody.source_endpoint,'https://ppdb.example.com/statistik','endpoint tidak ikut tersimpan');
+
   const covered=await page.locator('#message').evaluate(el=>{
    const box=el.getBoundingClientRect();
    const hit=document.elementFromPoint(box.left+box.width/2,box.top+box.height/2);
    return !(hit===el||el.contains(hit));
   });
   assert.equal(covered,false,'notifikasi tertutup elemen lain meski dialog sudah ditutup');
+
+  // Saving is only half the round trip: reopening must show back what was stored, otherwise the next
+  // edit silently saves the checkbox as unticked.
+  await page.locator('#share-template-list').getByRole('button',{name:'Ubah',exact:true}).first().click();
+  await page.locator('#share-template-dialog[open]').waitFor();
+  assert.equal(await page.locator('#share-tidy').isChecked(),true,'pilihan rapikan tidak dipulihkan saat template dibuka ulang');
+  assert.equal(await page.locator('#share-source-mode').inputValue(),'endpoint','sumber data tidak dipulihkan');
+  assert.equal(await page.locator('[name="source_endpoint"]').inputValue(),'https://ppdb.example.com/statistik','endpoint tidak dipulihkan');
+  await page.locator('#share-template-dialog [data-close="share-template-dialog"]').click();
 
   // Nothing above may rely on a thrown-away page error.
   assert.deepEqual(errors,[],'error JavaScript di halaman: '+errors.join(' | '));
