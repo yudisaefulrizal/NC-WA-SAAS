@@ -99,3 +99,21 @@ Eksekusi serial tetap menghasilkan kegagalan tes memori AI yang sama (118/119 lu
 Kegagalan ini pra-eksisting dan berasal dari refaktor profil AI, bukan dari pekerjaan sumber data template. Diverifikasi dengan menyimpan sementara seluruh perubahan (`git stash -u`) lalu menjalankan ulang runner: kegagalan muncul identik pada baris yang sama dengan pohon kerja bersih. Tidak diubah dalam pekerjaan ini karena berada di luar cakupan Auto Share; perbaikannya adalah menambahkan `profile` pada pemanggilan di skrip atau membuat `profile` opsional di `saveAssistant`.
 
 Akibatnya alur browser desktop/mobile untuk tab Auto Share belum terverifikasi pada pekerjaan sumber data template. Tes backend Auto Share 13/13 lulus dan regresi penuh 141/142 (satu kegagalan batas memori AI yang juga pra-eksisting).
+
+## Skrip pemeriksaan browser Auto Share tersandung langkah AI — 23 September 2026
+
+Setelah `saveAssistant` diperbaiki panggilannya, `scripts/browser-auto-share-check.ts` berhenti di langkah berikutnya: `page.locator('#ai-session option[value="shop"]').waitFor()` kehabisan waktu. Elemen `#ai-session` masih ada di `public/index.html`, jadi penyebabnya adalah perubahan cara pemilihan sesi pada halaman AI menjadi carousel, bukan Auto Share.
+
+Perbaikan skrip itu dibatalkan (`git checkout`) agar pekerjaan sumber data template tidak menyeret refactor halaman AI. Sebagai gantinya dibuat `scripts/browser-template-source-check.ts` yang memverifikasi dialog template secara langsung pada viewport desktop 1280 px dan ponsel 390 px: blok endpoint hanya muncul saat sumber dipilih, opsi media endpoint tidak ditawarkan sebelum itu, baris header dapat ditambah dan nilainya terkirim ke server, tombol tes menampilkan variabel beserta respons mentah, klik variabel menyisipkannya ke posisi kursor, dan memilih kembali "Tidak ada" menciutkan seluruh blok. Skrip baru dijalankan lebih dulu di runner agar kegagalan lama tidak menutupi hasilnya.
+
+Panggilan endpoint sungguhan tidak dilakukan pada pemeriksaan browser karena `validatePublicUrl` menolak alamat loopback; permintaan dialog dicegat di sisi browser, sedangkan transport sebenarnya diuji pada tes backend.
+
+## Gangguan server saat simpan template dan notifikasi tertutup dialog — 23 September 2026
+
+Dua keluhan terpisah dari pengujian manual.
+
+**Gangguan server saat menyimpan template.** Migrasi belum dijalankan pada database pengembangan setelah kolom sumber data ditambahkan, sehingga `INSERT`/`UPDATE` pada `auto_share_templates` menyebut kolom yang belum ada dan gagal sebagai `internal_error`. Diverifikasi lewat `information_schema`: kelima kolom (`source_mode`, `source_endpoint`, `source_secret`, `media_source`, `media_variable`) tidak ada sama sekali. Setelah `npx tsx --env-file=.env src/migrate.ts`, seluruh kolom termasuk `share_assets.run_id` dan `auto_share_runs.source_data` terpasang. Bukan perubahan kode; migrasi memang perlu dijalankan di setiap lingkungan sebelum fitur ini dipakai.
+
+**Notifikasi tertutup dialog.** `#message` memakai `z-index:10`, sedangkan dialog yang dibuka `showModal()` dipromosikan ke top layer browser yang selalu berada di atas seluruh konteks penumpukan. Menaikkan angka z-index karena itu tidak menyelesaikan apa pun. `#message` diubah menjadi `popover="manual"` agar ikut naik ke top layer, dibuka dan ditutup terpusat oleh satu `MutationObserver` sehingga 35 pemanggilan `textContent` yang sudah ada tidak perlu diubah. `showPopover()`/`hidePopover()` melempar bila status sudah sesuai, jadi keduanya dibungkus `try`.
+
+**Temuan sampingan.** Pemeriksaan browser menemukan form template terkunci tanpa pesan yang berguna ketika jenis konten media dipilih sementara galeri tidak memuat asset berjenis itu: `<select name="asset_id">` kosong tetapi `required`, sehingga submit diblokir dengan pesan bawaan peramban "Please select an item in the list." Kini daftar diisi placeholder "Belum ada asset <jenis> di galeri" sehingga penyebabnya terbaca.

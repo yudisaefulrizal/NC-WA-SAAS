@@ -159,3 +159,43 @@ Media dari sumber disimpan lewat `AssetStore.saveTemporary` dengan `run_id` teri
 Kegagalan sumber dibungkus `ApiError('invalid_request')` agar jatuh ke cabang pencatatan run gagal yang sudah ada di `schedule()`; `next_at` tetap bergeser sehingga satu endpoint mati tidak menghentikan jadwal permanen. Error non-`ApiError` akan menghentikan tick untuk semua akun, jadi `fetchSource` menjamin semua kegagalan jaringan terbungkus.
 
 Bukti: 13/13 tes Auto Share lulus pada MySQL sementara, regresi penuh 141/142 dengan satu kegagalan batas memori AI yang sudah tercatat di DEBUG.MD dan berada di luar Auto Share. TypeScript check, build, dan sintaks JavaScript lulus. Pemeriksaan browser tidak berjalan karena `scripts/browser-auto-share-check.ts` berhenti pada `saveAssistant`; kegagalan ini pra-eksisting dan diverifikasi dengan menjalankan runner pada pohon kerja bersih (lihat DEBUG.MD). Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.
+
+### Form sumber data dipilih di awal dan header bebas — 23 September 2026
+
+Dialog template disusun ulang mengikuti urutan keputusan: nama, sumber data, jenis konten, lalu teks. Sumber data berada di awal karena menentukan bentuk field di bawahnya; memilih "Tidak ada" mengembalikan form ke bentuk sebelum fitur ini. Opsi media "Dari endpoint" disembunyikan selama sumber data belum aktif, sehingga penambal auto-reset pada versi sebelumnya tidak lagi diperlukan. Daftar variabel dipindah ke atas kolom teks agar terlihat saat menulis pesan.
+
+Bearer token tunggal diganti header bebas: `validateHeaders` menolak nama di luar `[A-Za-z0-9-]`, header yang diatur transport (`Host`, `Content-Length`, `Connection`, `Accept-Encoding`, dan sejenisnya), nilai bermuatan CRLF yang dapat menyuntikkan header tambahan, nama ganda tanpa memandang huruf besar-kecil, serta batas 10 header dan 1024 karakter. Seluruh header disimpan terenkripsi sebagai satu JSON di `source_secret`; `decodeHeaders` masih mengenali token tunggal versi lama sebagai `Authorization: Bearer`, jadi template lama tidak perlu migrasi. Nilai kosong pada form berarti "pertahankan yang tersimpan" sehingga rahasia tidak perlu diketik ulang, dan mengganti URL endpoint tetap melepas seluruh header.
+
+Verifikasi browser dipisah ke `scripts/browser-template-source-check.ts` karena `browser-auto-share-check.ts` tersandung regresi halaman AI di luar Auto Share (lihat DEBUG.MD). Bukti: 14/14 tes Auto Share lulus, regresi penuh 142/143 dengan satu kegagalan batas memori AI pra-eksisting, pemeriksaan browser form baru lulus pada desktop dan ponsel, TypeScript check dan build lulus. Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.
+
+### Kontrak sumber data menerima respons apa adanya — 23 September 2026
+
+`validateSourceData` tidak lagi mewajibkan pembungkus `data`. Bila respons memuat key `data` berisi objek, isinya yang dibaca; bila tidak, objek akar dipakai langsung. Endpoint yang sudah berjalan karena itu tidak perlu direstrukturisasi. Pada respons tanpa pembungkus, key `media` berisi objek dilewati agar tidak ditolak sebagai nilai yang bukan teks, karena key itu memang blok media.
+
+Batas panjang nilai dinaikkan dari 200 menjadi 1000 karakter setelah pengujian terhadap `https://mahadalyusro.sch.id/cekpsb`, yang mengembalikan kalimat statistik siap pakai sepanjang 379–516 karakter per kunci. Pola itu sah dan justru praktis: perakitan kalimat terjadi di sisi penyedia data, template hanya menempelkan. Nama variabel juga menerima huruf besar agar kunci `camelCase` tetap berlaku.
+
+Batasan yang tetap dipertahankan: objek datar saja, tanpa array maupun objek bersarang. Melonggarkannya berarti membangun bahasa query mini (`{{santri[0].nama}}`) yang membuat kegagalan sulit dijelaskan kepada pengguna; jalan keluarnya adalah meratakan respons di sisi penyedia data.
+
+Bukti: 14/14 tes Auto Share lulus, regresi penuh 142/143 dengan satu kegagalan batas memori AI pra-eksisting, pemeriksaan browser form lulus pada desktop dan ponsel, TypeScript check dan build lulus. Substitusi diverifikasi terhadap respons nyata endpoint tersebut. Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.
+
+### Media sumber data dipilih dari variabel — 23 September 2026
+
+`validateSourceMedia` tidak lagi membaca blok `media` khusus dari respons, melainkan menerima peta variabel hasil `validateSourceData` beserta nama variabel yang dipilih pengguna (`auto_share_templates.media_variable`). Konsekuensinya kontrak endpoint menjadi satu bentuk saja: objek datar berisi variabel, sebagian di antaranya kebetulan berupa alamat file. Key `media` karena itu kehilangan arti khusus, dan pengecualian yang sempat ditambahkan pada `validateSourceData` dihapus kembali.
+
+Nama berkas diturunkan dari segmen terakhir path URL, sehingga penyedia data tidak perlu mengirim `filename`. Jenis media tetap disahkan `sniffMediaType` dari byte asli setelah diunduh, jadi variabel yang menunjuk file dengan jenis tidak sesuai template tetap ditolak.
+
+Di dashboard, daftar pilihan variabel media diisi dari hasil Tes koneksi; saat template lama dibuka, pilihan tersimpan ditambahkan lebih dulu agar tetap terbaca sebelum tes dijalankan. `mediaVariable` menegakkan tata nama yang sama dengan placeholder, dan `templateInput` menolak penyimpanan bila sumber media endpoint dipilih tanpa menyebut variabelnya.
+
+Bukti: 15/15 tes Auto Share lulus, regresi penuh 143/144 dengan satu kegagalan batas memori AI pra-eksisting, pemeriksaan browser lulus pada desktop dan ponsel, TypeScript check dan build lulus. Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.
+
+### Perbaikan UX form pengiriman/jadwal — 23 September 2026
+
+Analisis menemukan tiga penolakan `jobInput` yang tidak memiliki penanda apa pun di form, sehingga baru terlihat setelah tombol simpan ditekan. `shareJobBlocker()` kini mencerminkan validasi tersebut di sisi klien dan menonaktifkan tombol simpan selama ada yang kurang; input waktu juga memakai atribut `min` agar waktu lampau tidak dapat dipilih sejak awal. Validasi server tidak diubah dan tetap menjadi penentu akhir.
+
+`shareJobSummary()` menghitung tujuan unik dari gabungan kontak dan kelompok, termasuk jumlah nomor yang tumpang tindih. Backend memang mendeduplikasi pada `enqueue`, tetapi sebelumnya pengguna tidak punya cara mengetahui berapa penerima sebenarnya sebelum menyimpan.
+
+Kontak tujuan berpindah dari `<select multiple>` ke daftar checkbox dengan pencarian. Kontrol lama mensyaratkan Ctrl/Cmd yang tidak ada di ponsel, dan tidak dapat disaring ketika kontak bertambah banyak. Kelompok tetap memakai multi-select karena jumlahnya sedikit.
+
+Dua bug ditemukan oleh pemeriksaan browser, bukan oleh pembacaan kode: `<select>` wajib yang kosong memblokir submit dengan pesan bawaan peramban yang tidak menyebut penyebabnya. Terjadi pada pilihan asset saat galeri tidak memuat jenis media terkait, dan pada pilihan sesi saat akun belum punya sesi WhatsApp. Keduanya kini menampilkan keterangan pengganti, dan ketiadaan sesi juga muncul pada daftar "Lengkapi dulu".
+
+Bukti: `scripts/browser-job-form-check.ts` lulus pada viewport 1280 px dan 390 px, mencakup daftar penghalang, pratinjau rotasi, pencarian kontak, perhitungan tumpang tindih, penolakan waktu lampau, serta simpan dan buka ulang yang memulihkan kontak, kelompok, dan urutan template. Regresi penuh 143/144 dengan satu kegagalan batas memori AI pra-eksisting. TypeScript check, build, dan sintaks JavaScript lulus. Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.

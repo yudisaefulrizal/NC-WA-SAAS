@@ -102,3 +102,52 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Tes: 13/13 Auto Share lulus; regresi penuh 141/142 (satu kegagalan batas memori AI pra-eksisting, lihat DEBUG.MD). TypeScript check, build, dan sintaks JavaScript lulus.
 - [ ] Alur browser belum terverifikasi: `scripts/browser-auto-share-check.ts` berhenti pada `saveAssistant` karena kegagalan pra-eksisting di luar Auto Share (lihat DEBUG.MD).
 - [ ] Verifikasi endpoint dan media sumber pada perangkat WhatsApp nyata (pengujian menggunakan transport/unduhan tiruan).
+
+## Form sumber data dipilih di awal dan header bebas — 23 September 2026
+
+- [x] Urutan form template mengikuti keputusan: nama, sumber data, lalu jenis konten dan teks. Memilih "Tidak ada" membuat form kembali seperti semula.
+- [x] Blok endpoint hanya muncul saat sumber data dipilih; opsi media "Dari endpoint" tidak ditawarkan sebelum sumber data aktif, sehingga pilihan yang pasti ditolak tidak lagi tampil.
+- [x] Bearer token tunggal diganti header bebas (nama dan nilai), mencakup API key dengan nama header apa pun. Maksimal 10 header, nilai 1024 karakter, menolak header yang diatur otomatis dan nilai bermuatan baris baru.
+- [x] Nilai header disimpan terenkripsi sebagai satu JSON; template lama yang menyimpan token tunggal tetap terbaca sebagai `Authorization: Bearer`.
+- [x] Tombol Tes menampilkan jumlah variabel, respons mentah endpoint, dan daftar variabel yang dapat diklik untuk disisipkan ke posisi kursor.
+- [x] Daftar variabel dipindah ke atas kolom teks agar terlihat saat menulis pesan.
+- [x] Tes: 14/14 Auto Share lulus; regresi penuh 142/143 (satu kegagalan batas memori AI pra-eksisting). `scripts/browser-template-source-check.ts` lulus pada desktop dan ponsel. TypeScript check, build, dan sintaks JavaScript lulus.
+
+## Kontrak sumber data menerima respons apa adanya — 23 September 2026
+
+- [x] Pembungkus `data` tidak lagi wajib: respons berupa objek datar di akar diterima langsung, sehingga endpoint yang sudah ada tidak perlu diubah. Bila `data` ada, isinya tetap yang dipakai.
+- [x] Batas panjang nilai dinaikkan 200 menjadi 1000 karakter, agar kalimat yang sudah dirakit di sisi server dapat dipakai langsung sebagai satu variabel.
+- [x] Nama variabel menerima huruf besar, sehingga kunci `camelCase` milik API yang sudah ada tetap berlaku.
+- [x] Pada respons tanpa pembungkus, key `media` berisi objek diperlakukan sebagai blok media dan tidak ikut dibaca sebagai variabel.
+- [x] Diverifikasi terhadap endpoint nyata `https://mahadalyusro.sch.id/cekpsb`: empat variabel terbaca (`darul_ilmi`, `madrasah`, `mahdon_tarbawi`, `mahad_aly`) dan tersubstitusi tanpa perubahan apa pun di sisi penyedia data.
+- [x] Tes: 14/14 Auto Share lulus; regresi penuh 142/143 (satu kegagalan batas memori AI pra-eksisting). Pemeriksaan browser form lulus desktop dan ponsel. TypeScript check, build, dan sintaks JavaScript lulus.
+
+## Media sumber data dipilih dari variabel — 23 September 2026
+
+- [x] Blok `media` khusus dihapus dari kontrak: alamat file cukup dikirim sebagai variabel biasa, lalu dipilih pada dialog template melalui "Variabel berisi link media".
+- [x] Endpoint tidak perlu format khusus apa pun; satu respons objek datar melayani teks maupun media.
+- [x] Nama berkas diturunkan dari alamatnya, sehingga penyedia data tidak perlu mengirim `filename`.
+- [x] Daftar pilihan variabel media terisi dari hasil Tes koneksi; pilihan tersimpan tetap terbaca saat template dibuka kembali.
+- [x] Pesan kesalahan spesifik untuk variabel yang tidak ada, kosong, atau bukan alamat HTTPS publik.
+- [x] Tes: 15/15 Auto Share lulus; regresi penuh 143/144 (satu kegagalan batas memori AI pra-eksisting). Pemeriksaan browser form lulus desktop dan ponsel. TypeScript check, build, dan sintaks JavaScript lulus.
+
+## Perbaikan notifikasi dan form template — 23 September 2026
+
+- [x] Notifikasi `#message` naik ke top layer melalui `popover`, sehingga tidak lagi tertutup dialog yang dibuka `showModal()`; z-index saja tidak cukup untuk elemen top layer.
+- [x] Pembukaan dan penutupan notifikasi dipusatkan pada satu `MutationObserver`, tanpa mengubah 35 pemanggilan yang sudah ada.
+- [x] Dropdown asset menampilkan keterangan saat galeri tidak memuat jenis media yang dipilih, menggantikan form yang terkunci tanpa penjelasan.
+- [x] Migrasi kolom sumber data dijalankan pada database pengembangan; kegagalan simpan template sebelumnya berasal dari kolom yang belum ada, bukan dari kode (lihat DEBUG.MD).
+- [x] Pemeriksaan browser diperluas: menyimpan template sampai tuntas dan memastikan notifikasi benar-benar berada di lapisan teratas.
+- [x] Tes: 15/15 Auto Share lulus; regresi penuh 143/144 (satu kegagalan batas memori AI pra-eksisting). TypeScript check, build, dan sintaks JavaScript lulus.
+
+## Perbaikan UX form pengiriman/jadwal — 23 September 2026
+
+- [x] Seluruh penolakan `jobInput` kini terlihat sebelum permintaan dikirim: template kosong, tujuan kosong, waktu kosong, dan waktu di masa lalu ditampilkan sebagai daftar "Lengkapi dulu" dengan tombol simpan dinonaktifkan.
+- [x] Input waktu memakai atribut `min`, sehingga waktu lampau tidak dapat dipilih dari pemilih tanggal.
+- [x] Ringkasan tujuan menampilkan jumlah tujuan unik beserta jumlah nomor yang tumpang tindih antara kontak dan kelompok, menjawab "ini terkirim ke berapa orang" sebelum disimpan.
+- [x] Kontak tujuan diganti daftar checkbox dengan kotak pencarian, menggantikan `<select multiple>` yang memerlukan Ctrl/Cmd dan tidak dapat dipakai di ponsel.
+- [x] Checkbox aktifkan jadwal, waktu, dan pengulangan dikelompokkan dalam satu fieldset; bidang waktu diredupkan saat jadwal tidak diaktifkan.
+- [x] Peringatan muncul bila sesi pengirim tidak berstatus connected atau sudah tidak tersedia, tanpa memblokir penyimpanan.
+- [x] Pratinjau rotasi menampilkan urutan tiga template pertama saat lebih dari satu template dipakai.
+- [x] Dropdown sesi menampilkan keterangan saat belum ada sesi WhatsApp, menggantikan form yang terkunci tanpa penjelasan.
+- [x] Tes: `scripts/browser-job-form-check.ts` lulus desktop dan ponsel; regresi penuh 143/144 (satu kegagalan batas memori AI pra-eksisting). TypeScript check, build, dan sintaks JavaScript lulus.

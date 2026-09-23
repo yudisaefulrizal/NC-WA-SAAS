@@ -21,6 +21,10 @@ try{
  await run(['src/migrate.ts']);
  if(process.argv.includes('--all')){const {readdir}=await import('node:fs/promises');await run(['--test','--test-concurrency=1',...(await readdir('test')).filter(f=>f.endsWith('.test.ts')).map(f=>'test/'+f)]);}
  else await run(['--test','test/auto-share.test.ts']);
+ await run(['scripts/browser-template-source-check.ts']);
+ await run(['scripts/browser-job-form-check.ts']);
+ // browser-auto-share-check masih gagal pada langkah AI karena regresi di luar Auto Share
+ // (lihat DEBUG.MD). Dijalankan terakhir agar kegagalan lama itu tidak menutupi hasil di atasnya.
  await run(['scripts/browser-auto-share-check.ts']);
 }finally{
  if(connection){try{await connection.query('SHUTDOWN');}catch{}await connection.end().catch(()=>{});}

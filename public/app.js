@@ -1,6 +1,16 @@
 const $=id=>document.getElementById(id),fields=id=>Object.fromEntries(new FormData($(id)));
 async function api(path,method='GET',body,headers={}){const response=await fetch(path,{method,headers:{'Content-Type':'application/json',...headers},body:body?JSON.stringify(body):undefined});const data=await response.json().catch(()=>({error:'rate_limited'}));if(!response.ok){const messages={invalid_request:'Periksa isian formulir.',unauthorized:'Email, password, atau kredensial tidak valid.',account_exists:'Email sudah terdaftar.',invalid_origin:'Buka alamat aplikasi yang dikonfigurasi.',forbidden:'Akses tidak diizinkan.',internal_error:'Terjadi gangguan server.',rate_limited:'Terlalu banyak permintaan; coba lagi nanti.'};const e=Error(data.message||messages[data.error]||data.error);e.status=response.status;throw e;}return data;}
 async function run(fn){$('message').textContent='';try{await fn();}catch(e){$('message').textContent=e.message;}}
+// A dialog opened with showModal() sits in the browser's top layer, above every z-index, so the
+// notification has to join that layer to stay visible. It is a popover, shown and hidden here
+// centrally: the 35 call sites keep assigning textContent as before.
+{const banner=$('message');
+ const sync=()=>{const wanted=Boolean(banner.textContent.trim());
+  // Both calls throw if the state already matches, and hidePopover() also throws when the element
+  // is not connected, so each is guarded rather than tracked with a flag.
+  try{if(wanted)banner.showPopover();else banner.hidePopover();}catch{}};
+ new MutationObserver(sync).observe(banner,{childList:true,characterData:true,subtree:true});
+ sync();}
 // type='button' is essential: these buttons render inside #ai-form (Kelola/Edit rows, etc.) and a
 // bare <button> defaults to type=submit, which used to be harmless only because the old "Simpan
 // semua tab" submit handler called preventDefault() on every submit of that form. Now that submit
@@ -544,70 +554,177 @@ async function loadShareAssets(){
 }
 function shareTemplateAssetOptions(){
  const type=$('share-template-form').elements.media_type.value;
- shareOptions('share-template-asset',shareAssets.filter(a=>a.media_type===type).map(a=>[a.id,a.filename]));
+ const matching=shareAssets.filter(a=>a.media_type===type).map(a=>[a.id,a.filename]);
+ // An empty required <select> blocks submit with a native message that never says what is missing,
+ // so an explanatory placeholder takes its place when the gallery has nothing of this type.
+ shareOptions('share-template-asset',matching.length?matching:[['','Belum ada asset '+type+' di galeri']]);
+}
+let shareSelectedContacts=new Set();
+// Rendered as checkboxes rather than <select multiple>: the native control needs Ctrl/Cmd, which
+// phones do not have, and it cannot be searched once the contact list grows.
+function renderShareContacts(){
+ const query=$('share-contact-search').value.trim().toLowerCase();
+ const matching=shareContacts.filter(c=>!query||c.nomor.toLowerCase().includes(query)||(c.kelompkontak||'').toLowerCase().includes(query));
+ $('share-target-contacts').replaceChildren(...matching.map(c=>{
+  const row=document.createElement('label');row.className='check-row';
+  const box=document.createElement('input');box.type='checkbox';box.value=c.id;box.checked=shareSelectedContacts.has(c.id);
+  box.onchange=()=>{box.checked?shareSelectedContacts.add(c.id):shareSelectedContacts.delete(c.id);shareJobSummary();};
+  row.append(box,document.createTextNode(' '+c.nomor+(c.kelompkontak?' — '+c.kelompkontak:'')));return row;}));
+ const empty=$('share-contact-empty');
+ empty.hidden=Boolean(matching.length);
+ if(!matching.length)empty.textContent=shareContacts.length?'Tidak ada kontak yang cocok dengan pencarian.':'Belum ada kontak. Tambahkan di tab Kontak terlebih dahulu.';
+ shareJobSummary();
+}
+// Answers the question that matters right before saving: how many people actually receive this?
+function shareJobSummary(){
+ const f=$('share-job-form');
+ const groups=Array.from(f.elements.groups.selectedOptions,o=>o.value);
+ const reached=new Set();
+ for(const c of shareContacts)if(shareSelectedContacts.has(c.id)||groups.includes(c.kelompkontak))reached.add(c.nomor);
+ const overlap=shareSelectedContacts.size+shareContacts.filter(c=>groups.includes(c.kelompkontak)).length-reached.size;
+ const summary=$('share-target-summary');
+ summary.textContent=reached.size
+  ? reached.size+' tujuan unik · '+shareSelectedContacts.size+' kontak + '+groups.length+' kelompok'+(overlap>0?' ('+overlap+' nomor tumpang tindih, dikirim sekali)':'')
+  : 'Belum ada tujuan dipilih.';
+ summary.classList.toggle('is-empty',!reached.size);
+ shareJobBlocker();
+}
+// Mirrors jobInput() so its three rejections surface before the request instead of after it.
+function shareJobBlocker(){
+ const f=$('share-job-form');
+ const groups=Array.from(f.elements.groups.selectedOptions,o=>o.value);
+ const reasons=[];
+ if(!f.elements.session_id.value)reasons.push('hubungkan sesi WhatsApp di menu Sesi');
+ if(!shareOrder.length)reasons.push('pilih minimal satu template');
+ if(!shareSelectedContacts.size&&!groups.length)reasons.push('pilih kontak atau kelompok tujuan');
+ if(f.elements.enabled.checked&&!f.elements.next_at.value)reasons.push('isi waktu pengiriman pertama');
+ if(f.elements.enabled.checked&&f.elements.next_at.value&&new Date(f.elements.next_at.value).getTime()<=Date.now())reasons.push('waktu pengiriman harus di masa depan');
+ const blocker=$('share-job-blocker');
+ blocker.hidden=!reasons.length;
+ blocker.textContent=reasons.length?'Lengkapi dulu: '+reasons.join(', ')+'.':'';
+ $('share-job-save').disabled=Boolean(reasons.length);
+}
+function shareScheduleFields(){
+ const f=$('share-job-form'),on=f.elements.enabled.checked;
+ $('share-schedule-fields').classList.toggle('is-off',!on);
+ f.elements.next_at.required=on;
+ // Blocks a past time in the picker itself rather than letting the server reject it later.
+ const now=new Date(Date.now()+60000);
+ f.elements.next_at.min=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
+ shareJobBlocker();
+}
+function shareSessionWarning(){
+ const f=$('share-job-form'),session=shareSessions.find(s=>s.id===f.elements.session_id.value);
+ const warning=$('share-session-warning');
+ const bad=f.elements.session_id.value&&(!session||session.status!=='connected');
+ warning.hidden=!bad;
+ if(bad)warning.textContent=session
+  ? 'Sesi ini berstatus '+session.status+'. Jadwal tetap tersimpan, tetapi pengiriman akan gagal selama sesi belum terhubung.'
+  : 'Sesi ini tidak lagi tersedia. Pilih sesi lain agar pengiriman dapat berjalan.';
 }
 async function openShareJob(t={}){
  await loadAutoShare();const f=$('share-job-form');f.reset();
- shareOptions('share-session',shareSessions.map(s=>[s.id,s.id+' ('+s.status+')']));
+ // An empty required <select> blocks submit with a native message that never names the cause.
+ shareOptions('share-session',shareSessions.length?shareSessions.map(s=>[s.id,s.id+' ('+s.status+')']):[['','Belum ada sesi WhatsApp']]);
  if(t.session_id&&!shareSessions.some(s=>s.id===t.session_id))$('share-session').add(new Option(t.session_id+' (tidak tersedia)',t.session_id));
- shareOptions('share-target-contacts',shareContacts.map(c=>[c.id,c.nomor+(c.kelompkontak?' — '+c.kelompkontak:'')]));
  shareOptions('share-target-groups',[...new Set(shareContacts.map(c=>c.kelompkontak).filter(Boolean))].sort().map(g=>[g,g]));
  for(const key of ['id','name'])f.elements[key].value=t[key]||'';
- shareOrder=[...(t.template_ids||[])];shareOptions('share-choose-template',shareTemplates.map(v=>[v.id,v.name]));renderShareOrder();
+ shareOrder=[...(t.template_ids||[])];shareOptions('share-choose-template',shareTemplates.map(v=>[v.id,v.name]));
  if(t.session_id)f.elements.session_id.value=t.session_id;
  f.elements.enabled.checked=!!t.enabled;f.elements.interval_minutes.value=String(t.interval_minutes||0);
  if(t.next_at){const d=new Date(t.next_at);f.elements.next_at.value=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}
- for(const key of ['contacts','groups'])for(const option of f.elements[key].options)option.selected=(t[key]||[]).includes(option.value);
+ for(const option of f.elements.groups.options)option.selected=(t.groups||[]).includes(option.value);
+ shareSelectedContacts=new Set(t.contacts||[]);
+ $('share-contact-search').value='';renderShareContacts();renderShareOrder();
+ shareScheduleFields();shareSessionWarning();
  $('share-timezone').textContent='Zona waktu: '+Intl.DateTimeFormat().resolvedOptions().timeZone+'.';$('share-job-dialog').showModal();
 }
 $('share-add-job').onclick=()=>run(()=>openShareJob());
+$('share-contact-search').oninput=renderShareContacts;
+$('share-target-groups').onchange=shareJobSummary;
+$('share-session').onchange=shareSessionWarning;
+$('share-job-form').elements.enabled.onchange=shareScheduleFields;
+$('share-job-form').elements.next_at.oninput=shareJobBlocker;
 form('share-contact-form',async data=>{await api('/auto-share/contacts'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',{nomor:data.nomor,kelompkontak:data.kelompkontak});$('share-contact-dialog').close();await loadAutoShare();if($('ai-session').value)await loadConversations();$('message').textContent='Kontak tersimpan.';});
-form('share-job-form',async data=>{const f=$('share-job-form');const body={name:data.name,template_ids:shareOrder,session_id:data.session_id,contacts:Array.from(f.elements.contacts.selectedOptions,o=>o.value),groups:Array.from(f.elements.groups.selectedOptions,o=>o.value),enabled:f.elements.enabled.checked,next_at:data.next_at?new Date(data.next_at).toISOString():null,interval_minutes:Number(data.interval_minutes)};await api('/auto-share/jobs'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',body);$('share-job-dialog').close();await loadAutoShare();$('message').textContent='Pengiriman tersimpan.';});
+form('share-job-form',async data=>{const f=$('share-job-form');const body={name:data.name,template_ids:shareOrder,session_id:data.session_id,contacts:[...shareSelectedContacts],groups:Array.from(f.elements.groups.selectedOptions,o=>o.value),enabled:f.elements.enabled.checked,next_at:data.next_at?new Date(data.next_at).toISOString():null,interval_minutes:Number(data.interval_minutes)};await api('/auto-share/jobs'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',body);$('share-job-dialog').close();await loadAutoShare();$('message').textContent='Pengiriman tersimpan.';});
 function renderShareOrder(){
  $('share-order').replaceChildren(...shareOrder.map((id,index)=>{const li=document.createElement('li');li.append(document.createTextNode((shareTemplates.find(t=>t.id===id)?.name||'Template tidak tersedia')+' '));
  const up=button('Naik',async()=>{[shareOrder[index-1],shareOrder[index]]=[shareOrder[index],shareOrder[index-1]];renderShareOrder();});up.type='button';up.disabled=index===0;
  const down=button('Turun',async()=>{[shareOrder[index+1],shareOrder[index]]=[shareOrder[index],shareOrder[index+1]];renderShareOrder();});down.type='button';down.disabled=index===shareOrder.length-1;
  const remove=button('Hapus dari urutan',async()=>{shareOrder.splice(index,1);renderShareOrder();});remove.type='button';li.append(up,down,remove);return li;}));
+ // Spells out the first few sends so a multi-template rotation is not left to the imagination.
+ const preview=$('share-rotation-preview');
+ preview.hidden=shareOrder.length<2;
+ if(!preview.hidden)preview.textContent='Urutan kirim: '+shareOrder.slice(0,3).map(id=>shareTemplates.find(t=>t.id===id)?.name||'?').join(' → ')+(shareOrder.length>3?' → …':'')+', lalu kembali ke awal.';
+ shareJobBlocker();
 }
 $('share-append-template').onclick=()=>{const id=$('share-choose-template').value;if(id&&!shareOrder.includes(id)){shareOrder.push(id);renderShareOrder();}};
-function shareMediaFields(){const f=$('share-template-form'),type=f.elements.media_type.value,media=type!=='text',audio=type==='audio';
+function shareMediaFields(){const f=$('share-template-form'),type=f.elements.media_type.value,media=type!=='text',audio=type==='audio',source=f.elements.source_mode.value==='endpoint';
+ // Audio carries no caption, so a data source would have nowhere to write its values.
+ if(audio&&source){f.elements.source_mode.value='none';return shareMediaFields();}
+ $('share-source-mode').closest('label').hidden=audio;
+ $('share-source-fields').hidden=!source;f.elements.source_endpoint.required=source;
  $('share-media-fields').hidden=!media;f.elements.message.required=!media;f.elements.message.disabled=audio;
- // Audio has no caption, so a data source would have nowhere to write its values.
- if(audio)f.elements.source_mode.value='none';
+ // Media from the endpoint is only reachable once a data source exists, so hide the impossible option.
+ const remoteOption=$('share-media-source').querySelector('option[value="endpoint"]');
+ remoteOption.hidden=!source;
+ if(!source&&f.elements.media_source.value==='endpoint')f.elements.media_source.value='asset';
  if(!media)f.elements.media_source.value='asset';
  const remote=media&&f.elements.media_source.value==='endpoint';
  $('share-asset-field').hidden=remote;f.elements.asset_id.required=media&&!remote;
- $('share-source-mode').closest('label').hidden=audio;shareSourceFields();shareTemplateAssetOptions();}
-function shareSourceFields(){const f=$('share-template-form'),on=f.elements.source_mode.value==='endpoint';
- $('share-source-fields').hidden=!on;f.elements.source_endpoint.required=on;
- if(!on&&f.elements.media_source.value==='endpoint'){f.elements.media_source.value='asset';$('share-asset-field').hidden=false;f.elements.asset_id.required=f.elements.media_type.value!=='text';}}
+ $('share-media-variable-field').hidden=!remote;f.elements.media_variable.required=remote;
+ $('share-variable-bar').hidden=!source||!$('share-source-vars').childElementCount;
+ shareTemplateAssetOptions();}
+function shareHeaderRow(name='',stored=false){
+ const row=document.createElement('div');row.className='header-row';
+ const key=document.createElement('input');key.placeholder='X-API-Key';key.maxLength=64;key.value=name;key.dataset.headerName='';
+ const value=document.createElement('input');value.type='password';value.autocomplete='new-password';value.maxLength=1024;value.dataset.headerValue='';
+ value.placeholder=stored?'Tersimpan — kosongkan untuk mempertahankan':'Nilai header';
+ const drop=button('×',()=>{row.remove();});drop.className='secondary';drop.title='Hapus header';
+ row.append(key,value,drop);$('share-header-rows').append(row);return row;}
+$('share-header-add').onclick=()=>shareHeaderRow();
+function shareHeaders(){return [...$('share-header-rows').querySelectorAll('.header-row')]
+ .map(row=>({name:row.querySelector('[data-header-name]').value.trim(),value:row.querySelector('[data-header-value]').value}))
+ .filter(h=>h.name);}
 $('share-media-type').onchange=shareMediaFields;
 $('share-media-source').onchange=shareMediaFields;
 $('share-source-mode').onchange=shareMediaFields;
 $('share-source-test').onclick=()=>void run(async()=>{const f=$('share-template-form');
- const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_token:f.elements.source_token.value||undefined,template_id:f.elements.id.value||undefined,media_source:f.elements.media_source.value});
- const names=Object.keys(result.variables);
- const box=$('share-source-vars');box.replaceChildren();
- if(!names.length)box.append('Endpoint tidak mengembalikan variabel apa pun.');
- for(const name of names){const b=button('{{'+name+'}} = '+result.variables[name],()=>{
+ const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,media_source:f.elements.media_source.value});
+ const names=Object.keys(result.variables),vars=$('share-source-vars');vars.replaceChildren();
+ for(const name of names){const chip=button('{{'+name+'}} = '+result.variables[name],()=>{
   // Insert at the caret so a variable can be dropped mid-sentence.
   const area=f.elements.message,at=area.selectionStart??area.value.length;
   area.value=area.value.slice(0,at)+'{{'+name+'}}'+area.value.slice(area.selectionEnd??at);
   area.focus();area.selectionStart=area.selectionEnd=at+name.length+4;});
-  b.className='secondary';box.append(b,' ');}
- if(result.media)box.append(document.createElement('br'),'Media: '+result.media.media_type+' · '+Math.round(result.media.size_bytes/1024)+' KB');});
-function openShareTemplate(t={}){const f=$('share-template-form');f.reset();$('share-source-vars').replaceChildren();
+  chip.className='secondary';vars.append(chip,' ');}
+ const chosen=f.elements.media_variable.value;
+ shareOptions('share-media-variable',names.map(n=>[n,n]));
+ if(names.includes(chosen))f.elements.media_variable.value=chosen;
+ const box=$('share-source-result');box.replaceChildren();
+ const summary=document.createElement('p');
+ summary.textContent=names.length?names.length+' variabel tersedia.':'Endpoint tidak mengembalikan variabel apa pun.';
+ box.append(summary);
+ if(result.media){const m=document.createElement('p');m.textContent='Media: '+result.media.media_type+' · '+Math.round(result.media.size_bytes/1024)+' KB';box.append(m);}
+ const raw=document.createElement('details'),caption=document.createElement('summary');
+ caption.textContent='Lihat respons endpoint';const pre=document.createElement('pre');pre.textContent=result.raw;
+ raw.append(caption,pre);box.append(raw);
+ shareMediaFields();});
+function openShareTemplate(t={}){const f=$('share-template-form');f.reset();
+ $('share-source-vars').replaceChildren();$('share-source-result').replaceChildren();$('share-header-rows').replaceChildren();
  for(const key of ['id','name','message'])f.elements[key].value=t[key]||'';
- f.elements.media_type.value=t.media_type||'text';f.elements.source_mode.value=t.source_mode||'none';
- f.elements.media_source.value=t.media_source||'asset';f.elements.source_endpoint.value=t.source_endpoint||'';
- $('share-source-token-status').textContent=t.has_token?'Token tersimpan. Kosongkan untuk mempertahankannya.':'Belum ada token tersimpan.';
+ f.elements.source_mode.value=t.source_mode||'none';f.elements.source_endpoint.value=t.source_endpoint||'';
+ f.elements.media_type.value=t.media_type||'text';f.elements.media_source.value=t.media_source||'asset';
+ for(const name of t.source_header_names||[])shareHeaderRow(name,true);
+ if(t.media_variable)shareOptions('share-media-variable',[[t.media_variable,t.media_variable]]);
  shareMediaFields();if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
 $('share-add-template').onclick=()=>openShareTemplate();
-form('share-template-form',async data=>{const f=$('share-template-form');
+form('share-template-form',async data=>{const f=$('share-template-form'),source=f.elements.source_mode.value==='endpoint';
  await api('/auto-share/templates'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',{name:data.name,message:data.message,media_type:data.media_type,
   asset_id:f.elements.media_source.value==='endpoint'?null:(data.asset_id||null),
   source_mode:data.source_mode,media_source:data.media_source,source_endpoint:data.source_endpoint||'',
-  source_token:data.source_token||undefined,source_clear_token:f.elements.source_clear_token.checked});
+  source_headers:source?shareHeaders():undefined,
+  media_variable:f.elements.media_source.value==='endpoint'?f.elements.media_variable.value:undefined});
  $('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
 $('share-asset-upload-form').onsubmit=e=>{e.preventDefault();void run(async()=>{
  const file=$('share-asset-upload-form').elements.file.files[0];if(!file)return;
