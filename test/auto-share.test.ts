@@ -32,7 +32,7 @@ const sourceCalls:{endpoint:string;headers:Record<string,string>}[]=[];
 const fakeSource=async(endpoint:string,headers:Record<string,string>)=>{sourceCalls.push({endpoint,headers});if(sourceError)throw sourceError;return sourceReply;};
 const fakeDownload=async(url:string)=>{const dir=await mkdtemp(join(tmpdir(),'nc-wa-src-'));const path=join(dir,'media');await writeFile(path,pngFixture);return {path,mimetype:'image/png',cleanup:async()=>{await rm(dir,{recursive:true,force:true});}};};
 // Tidying is optional decoration, so the fake transport can fail freely: the send must survive it.
-let tidyReply='Pendaftar 1.247 santri.\n\nSisa kuota 53.';
+let tidyReply='Peserta 1.247 orang.\n\nSisa kuota 53.';
 let tidyError:Error|null=null;
 const tidyCalls:string[]=[];
 const fakeTidyTransport=async(_config:any,messages:any[])=>{tidyCalls.push(messages.at(-1).content);if(tidyError)throw tidyError;return tidyReply;};
@@ -195,7 +195,7 @@ integration('legacy migration preserves schedules and is repeatable without resu
 test('template source substitution formats values and refuses gaps',()=>{
  assert.deepEqual(parsePlaceholders('Halo {{jumlah}} dan {{ sisa }} lalu {{jumlah}}'),['jumlah','sisa']);
  // camelCase keys are common in existing APIs, so uppercase is allowed in names.
- assert.deepEqual(parsePlaceholders('Total {{totalSantri}}'),['totalSantri']);
+ assert.deepEqual(parsePlaceholders('Total {{totalPeserta}}'),['totalPeserta']);
  assert.deepEqual(parsePlaceholders('Tanpa variabel'),[]);
  // {{{{ is the escape for a literal {{, so it is not collected as a placeholder.
  assert.deepEqual(parsePlaceholders('Kurung {{{{jumlah}}}}'),[]);
@@ -205,9 +205,9 @@ test('template source substitution formats values and refuses gaps',()=>{
  assert.equal(renderTemplate('Pendaftar {{jumlah}} · {{nama}}',data),'Pendaftar 1.247 · Gelombang 2');
  assert.throws(()=>renderTemplate('Sisa {{tidak_ada}}',data),/tidak tersedia/);
  // An endpoint that answers with its own flat object needs no "data" wrapper.
- const bare=validateSourceData({madrasah:'Madrasah TA 2728: total 102 santri',mahad_aly:"Ma'had 'Aly TA 2627: total 91 santri"});
- assert.equal(bare.madrasah,'Madrasah TA 2728: total 102 santri');
- assert.equal(validateSourceData({totalSantri:102}).totalSantri,'102');
+ const bare=validateSourceData({cabang_utama:'Cabang Utama: total 102 transaksi',cabang_kedua:'Cabang Kedua: total 91 transaksi'});
+ assert.equal(bare.cabang_utama,'Cabang Utama: total 102 transaksi');
+ assert.equal(validateSourceData({totalPeserta:102}).totalPeserta,'102');
  // A wrapper still wins when present, so "data" is never mistaken for a variable.
  assert.deepEqual(Object.keys(validateSourceData({data:{jumlah:1},lain:'abaikan'})),['jumlah']);
  // Sentences assembled server-side are common, so the value cap is generous.
@@ -249,7 +249,7 @@ integration('endpoint-sourced templates substitute live values and never touch t
  sourceError=null;sourceReply={jumlah:1247,sisa_kuota:53,poster:'https://example.com/poster.png'};
  await request(app).post('/contacts').set('account',a).send({nomor:'628111000111'}).expect(201);
  const contacts=(await request(app).get('/contacts').set('account',a)).body;
- const template=(await request(app).post('/templates').set('account',a).send({name:'PPDB',media_type:'image',media_source:'endpoint',media_variable:'poster',message:'Pendaftar {{jumlah}}, sisa {{sisa_kuota}}',source_mode:'endpoint',source_endpoint:'https://ppdb.test/statistik',source_headers:[{name:'X-API-Key',value:'rahasia'}]}).expect(201)).body;
+ const template=(await request(app).post('/templates').set('account',a).send({name:'Promo',media_type:'image',media_source:'endpoint',media_variable:'poster',message:'Peserta {{jumlah}}, sisa {{sisa_kuota}}',source_mode:'endpoint',source_endpoint:'https://data.test/statistik',source_headers:[{name:'X-API-Key',value:'rahasia'}]}).expect(201)).body;
  // Header values never reach the browser; only their names come back so the form can render rows.
  const listed=(await request(app).get('/templates').set('account',a)).body.find((t:any)=>t.id===template.id);
  assert.deepEqual(listed.source_header_names,['X-API-Key']);assert.equal(listed.source_secret,undefined);
@@ -262,7 +262,7 @@ integration('endpoint-sourced templates substitute live values and never touch t
  assert.equal(quotaDuring.used_count,quotaBefore.used_count);assert.equal(quotaDuring.used_bytes,quotaBefore.used_bytes);
  assert.equal(sourceCalls.at(-1)?.headers['X-API-Key'],'rahasia');
  await service.tick();
- assert.equal(payloads.at(-1).caption,'Pendaftar 1.247, sisa 53');
+ assert.equal(payloads.at(-1).caption,'Peserta 1.247, sisa 53');
  assert.equal(payloads.at(-1).type,'image');
  const [rows]=await db.execute<RowDataPacket[]>('SELECT source_data FROM auto_share_runs WHERE id=?',[run.id]);
  assert.equal((typeof rows[0].source_data==='string'?JSON.parse(rows[0].source_data):rows[0].source_data).jumlah,'1.247');
@@ -275,7 +275,7 @@ integration('a failing source cancels the run, records why, and still advances t
  sourceError=null;sourceReply={data:{jumlah:10}};
  await request(app).post('/contacts').set('account',a).send({nomor:'628111000222'}).expect(201);
  const contacts=(await request(app).get('/contacts').set('account',a)).body;
- const template=(await request(app).post('/templates').set('account',a).send({name:'Statistik',message:'Ada {{jumlah}} orang',source_mode:'endpoint',source_endpoint:'https://ppdb.test/statistik'}).expect(201)).body;
+ const template=(await request(app).post('/templates').set('account',a).send({name:'Statistik',message:'Ada {{jumlah}} orang',source_mode:'endpoint',source_endpoint:'https://data.test/statistik'}).expect(201)).body;
  const job=(await request(app).post('/jobs').set('account',a).send({...data(a,[contacts[0].id]),template_ids:[template.id],enabled:true,interval_minutes:1440,next_at:new Date(Date.now()+60000).toISOString()}).expect(201)).body;
  await db.execute('UPDATE auto_share_jobs SET next_at=UTC_TIMESTAMP(3) WHERE id=?',[job.id]);
  sourceError=new ApiError(400,'invalid_request','Sumber data tidak dapat dihubungi');
@@ -313,8 +313,8 @@ test('media comes from a chosen variable holding a link',async()=>{
 });
 
 test('tidy results are accepted only when they still look like the message',()=>{
- const original='Pendaftar 1247 santri. Sisa kuota 53.';
- assert.equal(acceptTidyResult(original,'  Pendaftar 1.247 santri.\n\nSisa kuota 53.  '),'Pendaftar 1.247 santri.\n\nSisa kuota 53.');
+ const original='Peserta 1247 orang. Sisa kuota 53.';
+ assert.equal(acceptTidyResult(original,'  Peserta 1.247 orang.\n\nSisa kuota 53.  '),'Peserta 1.247 orang.\n\nSisa kuota 53.');
  assert.equal(acceptTidyResult(original,'   '),null);
  // A rewrite that drops most of the text means the model summarised instead of reformatting.
  assert.equal(acceptTidyResult(original,'Oke.'),null);
@@ -330,20 +330,20 @@ integration('a failing tidy never blocks the broadcast',async()=>{
  // No AI credit at all: the send must still go out with the substituted text.
  sourceError=null;sourceReply={data:{jumlah:7}};
  const config={...tidyConfig};
- const poor=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
+ const poor=await tidyMessage(a,'Peserta 7 orang berdasarkan data terbaru.',config,fakeTidyTransport);
  assert.equal(poor.tidied,false);assert.equal(poor.reason,'kredit_tidak_cukup');
- assert.equal(poor.message,'Pendaftar 7 santri berdasarkan data terbaru.');
+ assert.equal(poor.message,'Peserta 7 orang berdasarkan data terbaru.');
  await db.execute('INSERT INTO ai_wallets VALUES (?,100000) ON DUPLICATE KEY UPDATE balance=100000',[a]);
  tidyError=Error('provider down');
- const broken=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
- assert.equal(broken.tidied,false);assert.equal(broken.message,'Pendaftar 7 santri berdasarkan data terbaru.');
+ const broken=await tidyMessage(a,'Peserta 7 orang berdasarkan data terbaru.',config,fakeTidyTransport);
+ assert.equal(broken.tidied,false);assert.equal(broken.message,'Peserta 7 orang berdasarkan data terbaru.');
  // Credit reserved for a failed call is returned rather than kept.
  const [wallet]=await db.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[a]);
  assert.equal(Number(wallet[0].balance),100000);
  tidyError=null;
- const good=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
+ const good=await tidyMessage(a,'Peserta 7 orang berdasarkan data terbaru.',config,fakeTidyTransport);
  assert.equal(good.tidied,true);assert.equal(good.message,tidyReply);
- assert.ok(tidyCalls.at(-1)?.includes('Pendaftar 7 santri'));
+ assert.ok(tidyCalls.at(-1)?.includes('Peserta 7 orang'));
 });
 
 test('a per-template note is quoted as style input, never merged into the owner rules',()=>{

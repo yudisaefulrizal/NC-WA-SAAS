@@ -29,7 +29,7 @@ try{
  // three unique recipients, not four.
  const contacts=[['628111000001','Wali'],['628111000002','Wali'],['628111000003','']];
  for(const [nomor,group] of contacts)await db.execute('INSERT INTO daftar_kontak(id,account_id,nomor,kelompkontak) VALUES (?,?,?,?)',[randomUUID(),account,nomor,group]);
- for(const name of ['Promo Pagi','Info PPDB'])await db.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,'text','',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[randomUUID(),account,name,'Isi '+name]);
+ for(const name of ['Promo Pagi','Info Promo'])await db.execute("INSERT INTO auto_share_templates(id,account_id,name,message,media_type,session_id,contacts,groups_json,content_migrated) VALUES (?,?,?,?,'text','',JSON_ARRAY(),JSON_ARRAY(),TRUE)",[randomUUID(),account,name,'Isi '+name]);
 
  browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
  for(const viewport of [{width:1280,height:900},{width:390,height:780}]){
@@ -50,15 +50,15 @@ try{
   assert.match(await blocker.innerText(),/pilih kontak atau kelompok tujuan/,'tujuan kosong tidak diberitahukan');
   assert.match(await page.locator('#share-target-summary').innerText(),/Belum ada tujuan/,'ringkasan tujuan tidak menyebut kondisi kosong');
 
-  await page.locator('#share-job-form [name="name"]').fill('Jadwal PPDB');
+  await page.locator('#share-job-form [name="name"]').fill('Jadwal Promo');
 
   // Adding a second template reveals the rotation order.
   assert.equal(await page.locator('#share-rotation-preview').isHidden(),true,'pratinjau rotasi tampil untuk satu template');
   await page.locator('#share-choose-template').selectOption({label:'Promo Pagi'});
   await page.locator('#share-append-template').click();
-  await page.locator('#share-choose-template').selectOption({label:'Info PPDB'});
+  await page.locator('#share-choose-template').selectOption({label:'Info Promo'});
   await page.locator('#share-append-template').click();
-  assert.match(await page.locator('#share-rotation-preview').innerText(),/Promo Pagi → Info PPDB/,'urutan rotasi tidak ditampilkan');
+  assert.match(await page.locator('#share-rotation-preview').innerText(),/Promo Pagi → Info Promo/,'urutan rotasi tidak ditampilkan');
 
   // Contacts are checkboxes and searchable, so no Ctrl/Cmd and no unbounded list.
   assert.equal(await page.locator('#share-target-contacts .check-row').count(),3,'daftar kontak tidak lengkap');
@@ -92,7 +92,7 @@ try{
   await page.locator('#share-job-save').click();
   await page.locator('#message:popover-open').waitFor();
   assert.match(await page.locator('#message').innerText(),/Pengiriman tersimpan/,'simpan pengiriman gagal');
-  await page.locator('#share-job-list').getByText('Jadwal PPDB',{exact:true}).waitFor();
+  await page.locator('#share-job-list').getByText('Jadwal Promo',{exact:true}).waitFor();
   await page.locator('#share-job-list').getByRole('button',{name:'Ubah',exact:true}).first().click();
   await page.locator('#share-job-dialog[open]').waitFor();
   assert.equal(await page.locator('#share-target-contacts input:checked').count(),1,'kontak terpilih tidak dipulihkan');

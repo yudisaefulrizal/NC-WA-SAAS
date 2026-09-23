@@ -36,7 +36,7 @@ try{
    sentHeaders=JSON.parse(route.request().postData()??'{}').source_headers??[];
    const sent=JSON.parse(route.request().postData()??'{}');
    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,variables:{jumlah:'247',sisa_kuota:'53',poster:'https://example.com/poster.png'},media:null,
-    preview:sent.message?{message:'Pendaftar 247 santri.',tidied:Boolean(sent.tidy),note:null}:null,raw:'{\n "jumlah": 247\n}'})});
+    preview:sent.message?{message:'Peserta 247 orang.',tidied:Boolean(sent.tidy),note:null}:null,raw:'{\n "jumlah": 247\n}'})});
   });
   await page.goto(origin+'/dashboard/auto-share');
   await page.locator('[data-share-tab="templates"]').click();
@@ -64,7 +64,7 @@ try{
   await page.locator('#share-header-rows .header-row [data-header-value]').fill('rahasia');
 
   // Step 4: testing the endpoint lists the variables and shows the raw response.
-  await page.locator('[name="source_endpoint"]').fill('https://ppdb.example.com/statistik');
+  await page.locator('[name="source_endpoint"]').fill('https://data.example.com/statistik');
   await page.locator('#share-source-test').click();
   await page.locator('#share-source-vars button').first().waitFor();
   assert.equal(await page.locator('#share-source-vars button').count(),3,'variabel tidak lengkap');
@@ -94,7 +94,7 @@ try{
   await page.locator('#share-tidy').check();
   await page.locator('#share-preview-run').click();
   await page.locator('#share-preview-text').waitFor();
-  assert.match(await page.locator('#share-preview-text').innerText(),/Pendaftar 247 santri/,'pratinjau tidak menampilkan pesan');
+  assert.match(await page.locator('#share-preview-text').innerText(),/Peserta 247 orang/,'pratinjau tidak menampilkan pesan');
   assert.match(await page.locator('#share-preview-text').innerText(),/sudah dirapikan AI/,'pratinjau tidak menyebut hasil perapihan');
 
   // Step 7: switching back to no source collapses everything again.
@@ -111,7 +111,7 @@ try{
   await page.locator('#share-media-type').selectOption('text');
   // Step 7 switched the source off, so it is turned back on to save a template that uses one.
   await page.locator('#share-source-mode').selectOption('endpoint');
-  await page.locator('[name="source_endpoint"]').fill('https://ppdb.example.com/statistik');
+  await page.locator('[name="source_endpoint"]').fill('https://data.example.com/statistik');
   await page.locator('#share-tidy').check();
   // The note only appears once the rewrite is switched on.
   assert.equal(await page.locator('#share-tidy-note-field').isHidden(),false,'kolom catatan perapihan tidak muncul setelah dicentang');
@@ -132,7 +132,7 @@ try{
   assert.equal(savedBody.tidy,true,'pilihan rapikan tidak ikut tersimpan');
   assert.equal(savedBody.tidy_note,'Pakai poin bernomor','catatan perapihan tidak ikut tersimpan');
   assert.equal(savedBody.source_mode,'endpoint','sumber data tidak ikut tersimpan');
-  assert.equal(savedBody.source_endpoint,'https://ppdb.example.com/statistik','endpoint tidak ikut tersimpan');
+  assert.equal(savedBody.source_endpoint,'https://data.example.com/statistik','endpoint tidak ikut tersimpan');
 
   const covered=await page.locator('#message').evaluate(el=>{
    const box=el.getBoundingClientRect();
@@ -148,7 +148,7 @@ try{
   assert.equal(await page.locator('#share-tidy').isChecked(),true,'pilihan rapikan tidak dipulihkan saat template dibuka ulang');
   assert.equal(await page.locator('[name="tidy_note"]').inputValue(),'Pakai poin bernomor','catatan perapihan tidak dipulihkan');
   assert.equal(await page.locator('#share-source-mode').inputValue(),'endpoint','sumber data tidak dipulihkan');
-  assert.equal(await page.locator('[name="source_endpoint"]').inputValue(),'https://ppdb.example.com/statistik','endpoint tidak dipulihkan');
+  assert.equal(await page.locator('[name="source_endpoint"]').inputValue(),'https://data.example.com/statistik','endpoint tidak dipulihkan');
   await page.locator('#share-template-dialog [data-close="share-template-dialog"]').click();
 
   // Nothing above may rely on a thrown-away page error.
