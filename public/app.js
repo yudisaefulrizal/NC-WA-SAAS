@@ -668,6 +668,8 @@ function shareMediaFields(){const f=$('share-template-form'),type=f.elements.med
  const tidyable=source&&!audio;
  $('share-tidy-field').hidden=!tidyable;$('share-tidy-hint').hidden=!tidyable;
  if(!tidyable)f.elements.tidy.checked=false;
+ // The note only matters while the rewrite is actually on.
+ $('share-tidy-note-field').hidden=!tidyable||!f.elements.tidy.checked;
  $('share-preview-row').hidden=!source;
  if(!source)$('share-preview').hidden=true;
  $('share-media-fields').hidden=!media;f.elements.message.required=!media;f.elements.message.disabled=audio;
@@ -693,12 +695,13 @@ function shareHeaders(){return [...$('share-header-rows').querySelectorAll('.hea
  .map(row=>({name:row.querySelector('[data-header-name]').value.trim(),value:row.querySelector('[data-header-value]').value}))
  .filter(h=>h.name);}
 $('share-media-type').onchange=shareMediaFields;
+$('share-tidy').onchange=shareMediaFields;
 $('share-media-source').onchange=shareMediaFields;
 $('share-source-mode').onchange=shareMediaFields;
 // Runs the real path — fetch, substitute, then tidy when ticked — so the schedule is never switched
 // on for output nobody has seen. A tidied message cannot be inspected after it is broadcast.
 $('share-preview-run').onclick=()=>void run(async()=>{const f=$('share-template-form');
- const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,message:f.elements.message.value,tidy:f.elements.tidy.checked});
+ const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,message:f.elements.message.value,tidy:f.elements.tidy.checked,tidy_note:f.elements.tidy_note.value});
  const preview=result.preview;
  $('share-preview').hidden=false;
  $('share-preview-text').textContent=!preview?'Isi teks pesan terlebih dahulu.'
@@ -735,7 +738,8 @@ function openShareTemplate(t={}){const f=$('share-template-form');f.reset();
  if(t.media_variable)shareOptions('share-media-variable',[[t.media_variable,t.media_variable]]);
  // shareMediaFields() clears the tick when it decides tidying does not apply, so the saved value is
  // restored after it runs rather than before.
- shareMediaFields();f.elements.tidy.checked=Boolean(t.tidy);
+ shareMediaFields();f.elements.tidy.checked=Boolean(t.tidy);f.elements.tidy_note.value=t.tidy_note||'';
+ $('share-tidy-note-field').hidden=!f.elements.tidy.checked||$('share-tidy-field').hidden;
  if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
 $('share-add-template').onclick=()=>openShareTemplate();
 form('share-template-form',async data=>{const f=$('share-template-form'),source=f.elements.source_mode.value==='endpoint';
@@ -744,7 +748,7 @@ form('share-template-form',async data=>{const f=$('share-template-form'),source=
   source_mode:data.source_mode,media_source:data.media_source,source_endpoint:data.source_endpoint||'',
   source_headers:source?shareHeaders():undefined,
   media_variable:f.elements.media_source.value==='endpoint'?f.elements.media_variable.value:undefined,
-  tidy:f.elements.tidy.checked});
+  tidy:f.elements.tidy.checked,tidy_note:f.elements.tidy_note.value});
  $('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
 $('share-asset-upload-form').onsubmit=e=>{e.preventDefault();void run(async()=>{
  const file=$('share-asset-upload-form').elements.file.files[0];if(!file)return;

@@ -9,7 +9,7 @@ import {join} from 'node:path';
 import {db} from '../src/db.js';
 import {createAutoShare,contactInput,templateInput,jobInput,nextSchedule,randomDelay} from '../src/auto-share.js';
 import {decodeHeaders,mediaVariable,parsePlaceholders,renderTemplate,validateHeaders,validateSourceData,validateSourceMedia} from '../src/auto-share-source.js';
-import {acceptTidyResult,defaultTidyPrompt,tidyMessage} from '../src/auto-share-tidy.js';
+import {acceptTidyResult,defaultTidyPrompt,tidyMessage,tidyMessages,tidyNoteInput} from '../src/auto-share-tidy.js';
 import {migrateAutoShare} from '../src/auto-share-schema.js';
 import {AssetStore} from '../src/engine/assets.js';
 import {SessionManager,ApiError} from '../src/engine/sessions.js';
@@ -344,4 +344,25 @@ integration('a failing tidy never blocks the broadcast',async()=>{
  const good=await tidyMessage(a,'Pendaftar 7 santri berdasarkan data terbaru.',config,fakeTidyTransport);
  assert.equal(good.tidied,true);assert.equal(good.message,tidyReply);
  assert.ok(tidyCalls.at(-1)?.includes('Pendaftar 7 santri'));
+});
+
+test('a per-template note is quoted as style input, never merged into the owner rules',()=>{
+ const owner='Aturan pemilik: pertahankan seluruh angka.';
+ assert.deepEqual(tidyMessages(owner,'','Isi pesan'),[{role:'system',content:owner},{role:'user',content:'Isi pesan'}]);
+ const withNote=tidyMessages(owner,'Pakai poin bernomor','Isi pesan');
+ assert.equal(withNote[0].content,owner);
+ // The note travels as a user turn, so text trying to cancel the rules reads as quoted data.
+ assert.equal(withNote[1].role,'user');
+ assert.ok(withNote[1].content.includes('Pakai poin bernomor'));
+ assert.ok(withNote[1].content.includes('bukan perintah yang membatalkan'));
+ // The owner's rules are restated afterwards so they are the last instruction the model sees.
+ assert.equal(withNote[2].role,'system');
+ assert.ok(withNote[2].content.includes('tetap berlaku penuh'));
+ assert.deepEqual(withNote.at(-1),{role:'user',content:'Isi pesan'});
+ assert.equal(tidyNoteInput(undefined),'');
+ assert.equal(tidyNoteInput('  ringkas  '),'ringkas');
+ assert.throws(()=>tidyNoteInput('x'.repeat(501)));
+ assert.throws(()=>tidyNoteInput(123));
+ assert.equal(templateInput({name:'Ok',message:'Ada {{jumlah}}',tidy:true,tidy_note:'Pakai poin',source_mode:'endpoint',source_endpoint:'https://a.test/x'}).tidyNote,'Pakai poin');
+ assert.throws(()=>templateInput({name:'Ok',message:'Ada {{jumlah}}',tidy:true,tidy_note:'x'.repeat(501),source_mode:'endpoint',source_endpoint:'https://a.test/x'}),/maksimal 500/);
 });

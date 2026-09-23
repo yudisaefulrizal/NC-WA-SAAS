@@ -185,3 +185,12 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Area pratinjau direset saat dialog dibuka agar hasil template sebelumnya tidak tertinggal.
 - [x] Pemeriksaan browser memverifikasi perjalanan bolak-balik: simpan lalu buka ulang wajib memulihkan centangan, sumber data, dan endpoint.
 - [x] Tes: 17/17 Auto Share lulus; regresi penuh 147/148 (satu kegagalan batas memori AI pra-eksisting).
+
+## Catatan perapihan per template — 23 September 2026
+
+- [x] Kolom "Catatan perapihan" pada template, muncul setelah rapikan otomatis dicentang; maksimal 500 karakter dan tersimpan pada `auto_share_templates.tidy_note`.
+- [x] Catatan dikirim sebagai giliran pesan tersendiri, bukan disambung ke prompt pemilik layanan, dengan pembatas eksplisit bahwa isinya preferensi gaya semata.
+- [x] Aturan pemilik layanan dinyatakan ulang sesudah catatan sehingga menjadi instruksi terakhir yang dibaca model; catatan yang mencoba membatalkan aturan terbaca sebagai data terkutip.
+- [x] Pratinjau memakai catatan yang sedang diketik, sehingga pengaruhnya terlihat sebelum template disimpan.
+- [x] Pemeriksaan browser memverifikasi catatan tersimpan dan dipulihkan saat template dibuka ulang.
+- [x] Tes: 18/18 Auto Share lulus; regresi penuh 148/149 (satu kegagalan batas memori AI pra-eksisting).

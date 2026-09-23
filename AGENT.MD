@@ -219,3 +219,13 @@ Bukti: 17/17 tes Auto Share lulus, regresi penuh 145/146 dengan satu kegagalan b
 Pendekatan hash isi dipilih karena tidak memerlukan langkah build tambahan dan tidak berubah bila berkasnya tidak berubah, berbeda dengan penanda waktu mulai proses yang akan membatalkan cache pada setiap restart tanpa alasan.
 
 Bukti: `test/assets.test.ts` memastikan hash pada halaman sama dengan hash isi berkas, tidak ada rujukan tanpa versi yang tersisa, dan aset berhash dilayani immutable sementara aset polos tidak. Regresi penuh 147/148 dengan satu kegagalan batas memori AI pra-eksisting.
+
+### Catatan perapihan per template — 23 September 2026
+
+Prompt pemilik layanan berlaku untuk seluruh akun, sedangkan tiap template memerlukan gaya berbeda. `auto_share_templates.tidy_note` menampung preferensi per template, digabung pada `tidyMessages`.
+
+Penggabungan dilakukan sebagai giliran pesan terpisah, bukan penyambungan teks ke system prompt. Catatan ditulis staf akun dan sepenuhnya di luar kendali pemilik layanan, sehingga menyambungkannya ke aturan pemilik akan memungkinkan kalimat semacam "abaikan instruksi sebelumnya" membatalkan aturan seperti mempertahankan angka. Susunannya kini: system berisi aturan pemilik, user berisi catatan yang dibungkus pembatas beserta keterangan bahwa isinya preferensi gaya semata, system yang menyatakan ulang bahwa aturan di atas tetap berlaku penuh, lalu user berisi pesan yang akan dirapikan. Aturan pemilik dengan demikian menjadi instruksi terakhir yang dibaca model. Ini mengurangi, bukan menghilangkan, risiko prompt injection; dampak terburuknya tetap terbatas pada pesan milik akun itu sendiri.
+
+Pratinjau memakai catatan yang sedang diketik pada formulir, bukan yang tersimpan, agar pengaruh perubahan terlihat sebelum template disimpan.
+
+Bukti: 18/18 tes Auto Share lulus termasuk pemeriksaan susunan pesan, regresi penuh 148/149 dengan satu kegagalan batas memori AI pra-eksisting, pemeriksaan browser lulus pada desktop dan ponsel termasuk simpan lalu buka ulang. Migrasi dijalankan pada database pengembangan. Panggilan AI sungguhan belum diuji; pengujian memakai transport tiruan.

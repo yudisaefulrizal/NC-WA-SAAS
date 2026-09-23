@@ -113,6 +113,9 @@ try{
   await page.locator('#share-source-mode').selectOption('endpoint');
   await page.locator('[name="source_endpoint"]').fill('https://ppdb.example.com/statistik');
   await page.locator('#share-tidy').check();
+  // The note only appears once the rewrite is switched on.
+  assert.equal(await page.locator('#share-tidy-note-field').isHidden(),false,'kolom catatan perapihan tidak muncul setelah dicentang');
+  await page.locator('[name="tidy_note"]').fill('Pakai poin bernomor');
   // The saved template must carry every source field the form shows. A preview reads the checkbox
   // directly, so a field missing from this payload still previews correctly while every scheduled
   // send silently ignores it.
@@ -127,6 +130,7 @@ try{
   await page.locator('#message:popover-open').waitFor();
   assert.match(await page.locator('#message').innerText(),/Template tersimpan/,'simpan template gagal');
   assert.equal(savedBody.tidy,true,'pilihan rapikan tidak ikut tersimpan');
+  assert.equal(savedBody.tidy_note,'Pakai poin bernomor','catatan perapihan tidak ikut tersimpan');
   assert.equal(savedBody.source_mode,'endpoint','sumber data tidak ikut tersimpan');
   assert.equal(savedBody.source_endpoint,'https://ppdb.example.com/statistik','endpoint tidak ikut tersimpan');
 
@@ -142,6 +146,7 @@ try{
   await page.locator('#share-template-list').getByRole('button',{name:'Ubah',exact:true}).first().click();
   await page.locator('#share-template-dialog[open]').waitFor();
   assert.equal(await page.locator('#share-tidy').isChecked(),true,'pilihan rapikan tidak dipulihkan saat template dibuka ulang');
+  assert.equal(await page.locator('[name="tidy_note"]').inputValue(),'Pakai poin bernomor','catatan perapihan tidak dipulihkan');
   assert.equal(await page.locator('#share-source-mode').inputValue(),'endpoint','sumber data tidak dipulihkan');
   assert.equal(await page.locator('[name="source_endpoint"]').inputValue(),'https://ppdb.example.com/statistik','endpoint tidak dipulihkan');
   await page.locator('#share-template-dialog [data-close="share-template-dialog"]').click();
