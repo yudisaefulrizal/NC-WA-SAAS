@@ -522,7 +522,7 @@ async function loadAutoShare(){
  $('share-group-options').replaceChildren(...groups.map(g=>new Option(g,g)));
  table('share-contact-list',['Nomor / ID grup','Kelompok','Tindakan'],shareContacts,c=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Ubah',async()=>openShareContact(c)),button('Hapus',async()=>{if(!confirm('Hapus kontak '+c.nomor+'?'))return;await api('/auto-share/contacts/'+c.id,'DELETE');await loadAutoShare();}));return [c.nomor,c.kelompkontak||'—',actions];});
  table('share-job-list',['Nama','Sesi','Tujuan','Rotasi berikutnya','Jadwal','Tindakan'],shareJobs,t=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Kirim',async()=>{$('share-send-form').elements.id.value=t.id;shareOptions('share-send-template',t.template_ids.map(id=>[id,shareTemplates.find(v=>v.id===id)?.name||'Template tidak tersedia']));$('share-send-dialog').showModal();}),button('Ubah',async()=>openShareJob(t)),button(t.enabled?'Nonaktifkan jadwal':'Aktifkan jadwal',async()=>{if(!t.enabled){await openShareJob(t);$('share-job-form').elements.enabled.checked=true;return;}await api('/auto-share/jobs/'+t.id,'PUT',{...t,enabled:false});await loadAutoShare();}),button('Hapus',async()=>{if(!confirm('Hapus pengiriman? Pengiriman yang sudah antre tetap berjalan.'))return;await api('/auto-share/jobs/'+t.id,'DELETE');await loadAutoShare();}));return [t.name,t.session_id,t.contacts.length+' kontak / '+t.groups.length+' kelompok',shareTemplates.find(v=>v.id===t.template_ids[t.rotation_index%t.template_ids.length])?.name||'—',t.enabled?new Date(t.next_at).toLocaleString('id-ID')+' · '+(t.interval_minutes?'setiap '+t.interval_minutes+' menit':'sekali'):'Tidak aktif',actions];});
- table('share-template-list',['Nama','Jenis','Konten','Tindakan'],shareTemplates,t=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Ubah',async()=>openShareTemplate(t)),button('Hapus',async()=>{if(!confirm('Hapus template ini?'))return;await api('/auto-share/templates/'+t.id,'DELETE');await loadAutoShare();}));return [t.name,t.media_type,(t.message||t.filename||'').slice(0,120),actions];});
+ table('share-template-list',['Nama','Jenis','Konten','Tindakan'],shareTemplates,t=>{const actions=document.createElement('div');actions.className='row-actions';actions.append(button('Ubah',async()=>openShareTemplate(t)),button('Hapus',async()=>{if(!confirm('Hapus template ini?'))return;await api('/auto-share/templates/'+t.id,'DELETE');await loadAutoShare();}));return [t.name,t.media_type+(t.source_mode==='endpoint'?' · sumber data':''),(t.message||t.filename||'').slice(0,120),actions];});
  await loadShareRuns();
 }
 const sharePublicUrl=token=>location.origin+'/public/assets/'+token;
@@ -570,11 +570,45 @@ function renderShareOrder(){
  const remove=button('Hapus dari urutan',async()=>{shareOrder.splice(index,1);renderShareOrder();});remove.type='button';li.append(up,down,remove);return li;}));
 }
 $('share-append-template').onclick=()=>{const id=$('share-choose-template').value;if(id&&!shareOrder.includes(id)){shareOrder.push(id);renderShareOrder();}};
-function shareMediaFields(){const f=$('share-template-form'),media=f.elements.media_type.value!=='text';$('share-media-fields').hidden=!media;f.elements.asset_id.required=media;f.elements.message.required=!media;f.elements.message.disabled=f.elements.media_type.value==='audio';shareTemplateAssetOptions();}
+function shareMediaFields(){const f=$('share-template-form'),type=f.elements.media_type.value,media=type!=='text',audio=type==='audio';
+ $('share-media-fields').hidden=!media;f.elements.message.required=!media;f.elements.message.disabled=audio;
+ // Audio has no caption, so a data source would have nowhere to write its values.
+ if(audio)f.elements.source_mode.value='none';
+ if(!media)f.elements.media_source.value='asset';
+ const remote=media&&f.elements.media_source.value==='endpoint';
+ $('share-asset-field').hidden=remote;f.elements.asset_id.required=media&&!remote;
+ $('share-source-mode').closest('label').hidden=audio;shareSourceFields();shareTemplateAssetOptions();}
+function shareSourceFields(){const f=$('share-template-form'),on=f.elements.source_mode.value==='endpoint';
+ $('share-source-fields').hidden=!on;f.elements.source_endpoint.required=on;
+ if(!on&&f.elements.media_source.value==='endpoint'){f.elements.media_source.value='asset';$('share-asset-field').hidden=false;f.elements.asset_id.required=f.elements.media_type.value!=='text';}}
 $('share-media-type').onchange=shareMediaFields;
-function openShareTemplate(t={}){const f=$('share-template-form');f.reset();for(const key of ['id','name','message'])f.elements[key].value=t[key]||'';f.elements.media_type.value=t.media_type||'text';shareMediaFields();if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
+$('share-media-source').onchange=shareMediaFields;
+$('share-source-mode').onchange=shareMediaFields;
+$('share-source-test').onclick=()=>void run(async()=>{const f=$('share-template-form');
+ const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_token:f.elements.source_token.value||undefined,template_id:f.elements.id.value||undefined,media_source:f.elements.media_source.value});
+ const names=Object.keys(result.variables);
+ const box=$('share-source-vars');box.replaceChildren();
+ if(!names.length)box.append('Endpoint tidak mengembalikan variabel apa pun.');
+ for(const name of names){const b=button('{{'+name+'}} = '+result.variables[name],()=>{
+  // Insert at the caret so a variable can be dropped mid-sentence.
+  const area=f.elements.message,at=area.selectionStart??area.value.length;
+  area.value=area.value.slice(0,at)+'{{'+name+'}}'+area.value.slice(area.selectionEnd??at);
+  area.focus();area.selectionStart=area.selectionEnd=at+name.length+4;});
+  b.className='secondary';box.append(b,' ');}
+ if(result.media)box.append(document.createElement('br'),'Media: '+result.media.media_type+' · '+Math.round(result.media.size_bytes/1024)+' KB');});
+function openShareTemplate(t={}){const f=$('share-template-form');f.reset();$('share-source-vars').replaceChildren();
+ for(const key of ['id','name','message'])f.elements[key].value=t[key]||'';
+ f.elements.media_type.value=t.media_type||'text';f.elements.source_mode.value=t.source_mode||'none';
+ f.elements.media_source.value=t.media_source||'asset';f.elements.source_endpoint.value=t.source_endpoint||'';
+ $('share-source-token-status').textContent=t.has_token?'Token tersimpan. Kosongkan untuk mempertahankannya.':'Belum ada token tersimpan.';
+ shareMediaFields();if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
 $('share-add-template').onclick=()=>openShareTemplate();
-form('share-template-form',async data=>{await api('/auto-share/templates'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',{name:data.name,message:data.message,media_type:data.media_type,asset_id:data.asset_id||null});$('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
+form('share-template-form',async data=>{const f=$('share-template-form');
+ await api('/auto-share/templates'+(data.id?'/'+data.id:''),data.id?'PUT':'POST',{name:data.name,message:data.message,media_type:data.media_type,
+  asset_id:f.elements.media_source.value==='endpoint'?null:(data.asset_id||null),
+  source_mode:data.source_mode,media_source:data.media_source,source_endpoint:data.source_endpoint||'',
+  source_token:data.source_token||undefined,source_clear_token:f.elements.source_clear_token.checked});
+ $('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
 $('share-asset-upload-form').onsubmit=e=>{e.preventDefault();void run(async()=>{
  const file=$('share-asset-upload-form').elements.file.files[0];if(!file)return;
  const submit=$('share-asset-upload-form').querySelector('button');submit.disabled=true;

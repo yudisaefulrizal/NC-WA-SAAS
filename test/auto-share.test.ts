@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
 import {randomUUID} from 'node:crypto';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {db} from '../src/db.js';
 import {createAutoShare,contactInput,templateInput,jobInput,nextSchedule,randomDelay} from '../src/auto-share.js';
+import {parsePlaceholders,renderTemplate,validateSourceData} from '../src/auto-share-source.js';
 import {migrateAutoShare} from '../src/auto-share-schema.js';
 import {AssetStore} from '../src/engine/assets.js';
 import {SessionManager,ApiError} from '../src/engine/sessions.js';
@@ -21,13 +22,19 @@ const managers=new Map<string,SessionManager>();
 async function manager(account:string){if(!managers.has(account)){const m=new SessionManager(async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){},async exists(jid){return !jid.startsWith('620000000000');},async typing(jid,state){events.push(state+':'+jid);},async send(jid,payload){payloads.push(payload);events.push('send:'+jid);return randomUUID();}};});await m.create('shop');managers.set(account,m);}return managers.get(account)!;}
 const assetsRoot=await mkdtemp(join(tmpdir(),'nc-wa-share-assets-'));
 const assets=new AssetStore(assetsRoot,db);
-const service=createAutoShare(manager,assets,async(ms:number)=>{delays.push(ms);});
+// Minimal valid PNG (1x1 transparent pixel) so AssetStore's magic-byte sniff accepts it as image/png.
+const pngFixture=Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001ba86fe0e0000000049454e44ae426082','hex');
+// Fake source transport and media download: the substitution rules are exercised without a network.
+let sourceReply:unknown={data:{jumlah:247,sisa_kuota:53,buka:true}};
+let sourceError:Error|null=null;
+const sourceCalls:string[]=[];
+const fakeSource=async(endpoint:string)=>{sourceCalls.push(endpoint);if(sourceError)throw sourceError;return sourceReply;};
+const fakeDownload=async(url:string)=>{const dir=await mkdtemp(join(tmpdir(),'nc-wa-src-'));const path=join(dir,'media');await writeFile(path,pngFixture);return {path,mimetype:'image/png',cleanup:async()=>{await rm(dir,{recursive:true,force:true});}};};
+const service=createAutoShare(manager,assets,async(ms:number)=>{delays.push(ms);},fakeSource,fakeDownload as any);
 const app=express();app.use(express.json());
 app.get('/public/assets/:token',async(req,res)=>{const file=await assets.getByToken(req.params.token);res.set('Content-Type',file.mimetype).sendFile(file.path);});
 app.use((req,res,next)=>{res.locals.accountId=req.get('account');next();});app.use(service.router);app.use((e:Error,_req:express.Request,res:express.Response,_next:express.NextFunction)=>res.status(e instanceof ApiError?e.status:500).json({message:e.message}));
 const content=new Map<string,string>();
-// Minimal valid PNG (1x1 transparent pixel) so AssetStore's magic-byte sniff accepts it as image/png.
-const pngFixture=Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001ba86fe0e0000000049454e44ae426082','hex');
 async function uploadAsset(account:string,filename='promo.png'){
  return (await request(app).post('/assets').set('account',account).set('X-Filename',filename).set('Content-Type','application/octet-stream').send(pngFixture).expect(201)).body;
 }
@@ -177,4 +184,77 @@ integration('legacy migration preserves schedules and is repeatable without resu
  await migrateAutoShare();await migrateAutoShare();const jobs=(await request(app).get('/jobs').set('account',a)).body;assert.equal(jobs.length,1);assert.equal(jobs[0].id,id);assert.deepEqual(jobs[0].template_ids,[id]);assert.equal(jobs[0].enabled,true);
  const templates=(await request(app).get('/templates').set('account',a)).body;assert.equal(templates.find((t:any)=>t.id===id).message,'Isi lama');
  await request(app).delete('/jobs/'+id).set('account',a);await migrateAutoShare();assert.equal((await request(app).get('/jobs').set('account',a)).body.length,0);
+});
+test('template source substitution formats values and refuses gaps',()=>{
+ assert.deepEqual(parsePlaceholders('Halo {{jumlah}} dan {{ sisa }} lalu {{jumlah}}'),['jumlah','sisa']);
+ assert.deepEqual(parsePlaceholders('Tanpa variabel'),[]);
+ // {{{{ is the escape for a literal {{, so it is not collected as a placeholder.
+ assert.deepEqual(parsePlaceholders('Kurung {{{{jumlah}}}}'),[]);
+ assert.equal(renderTemplate('Kurung {{{{ tutup }}}}',{}),'Kurung {{ tutup }}');
+ const data=validateSourceData({data:{jumlah:1247,buka:true,tutup:false,nama:'Gelombang 2'}});
+ assert.equal(data.jumlah,'1.247');assert.equal(data.buka,'Ya');assert.equal(data.tutup,'Tidak');assert.equal(data.nama,'Gelombang 2');
+ assert.equal(renderTemplate('Pendaftar {{jumlah}} · {{nama}}',data),'Pendaftar 1.247 · Gelombang 2');
+ assert.throws(()=>renderTemplate('Sisa {{tidak_ada}}',data),/tidak tersedia/);
+ assert.throws(()=>validateSourceData({data:[1,2]}),/objek "data"/);
+ assert.throws(()=>validateSourceData({}),/objek "data"/);
+ assert.throws(()=>validateSourceData({data:{nested:{a:1}}}),/harus teks/);
+ assert.throws(()=>validateSourceData({data:{kosong:null}}),/harus teks/);
+ assert.throws(()=>validateSourceData({data:{'Huruf-Besar':1}}),/Nama variabel/);
+ assert.throws(()=>validateSourceData({data:{panjang:'x'.repeat(201)}}),/melebihi 200/);
+ assert.throws(()=>validateSourceData({data:Object.fromEntries([...Array(51)].map((_,i)=>['k'+i,1]))}),/maksimal 50/);
+ // A template without a source would send "{{jumlah}}" verbatim, so it is rejected up front.
+ assert.throws(()=>templateInput({name:'Lupa',message:'Ada {{jumlah}}'}),/sumber data endpoint/);
+ assert.throws(()=>templateInput({name:'Audio',media_type:'audio',asset_id:randomUUID(),message:'',source_mode:'endpoint',source_endpoint:'https://a.test/x'}),/audio tidak mendukung/);
+ assert.throws(()=>templateInput({name:'Media',media_type:'image',media_source:'endpoint',message:'x'}),/memerlukan sumber data/);
+ assert.throws(()=>templateInput({name:'Http',message:'x',source_mode:'endpoint',source_endpoint:'http://a.test/x'}),/HTTPS/);
+ assert.equal(templateInput({name:'Ok',message:'Ada {{jumlah}}',source_mode:'endpoint',source_endpoint:'https://a.test/x'}).source.mode,'endpoint');
+});
+integration('endpoint-sourced templates substitute live values and never touch the gallery quota',async()=>{
+ const a=await user();
+ sourceError=null;sourceReply={data:{jumlah:1247,sisa_kuota:53},media:{url:'https://example.com/poster.png',filename:'poster.png'}};
+ await request(app).post('/contacts').set('account',a).send({nomor:'628111000111'}).expect(201);
+ const contacts=(await request(app).get('/contacts').set('account',a)).body;
+ const template=(await request(app).post('/templates').set('account',a).send({name:'PPDB',media_type:'image',media_source:'endpoint',message:'Pendaftar {{jumlah}}, sisa {{sisa_kuota}}',source_mode:'endpoint',source_endpoint:'https://ppdb.test/statistik',source_token:'rahasia'}).expect(201)).body;
+ // The stored token is never echoed back to the browser.
+ const listed=(await request(app).get('/templates').set('account',a)).body.find((t:any)=>t.id===template.id);
+ assert.equal(listed.has_token,true);assert.equal(listed.source_secret,undefined);
+ const quotaBefore=(await request(app).get('/assets').set('account',a)).body;
+ const job=(await request(app).post('/jobs').set('account',a).send({...data(a,[contacts[0].id]),template_ids:[template.id]}).expect(201)).body;
+ const run=(await request(app).post('/jobs/'+job.id+'/send').set('account',a).send({template_id:template.id}).expect(202)).body;
+ // Temporary run media stays out of the gallery listing and its usage totals.
+ const quotaDuring=(await request(app).get('/assets').set('account',a)).body;
+ assert.equal(quotaDuring.used_count,quotaBefore.used_count);assert.equal(quotaDuring.used_bytes,quotaBefore.used_bytes);
+ await service.tick();
+ assert.equal(payloads.at(-1).caption,'Pendaftar 1.247, sisa 53');
+ assert.equal(payloads.at(-1).type,'image');
+ const [rows]=await db.execute<RowDataPacket[]>('SELECT source_data FROM auto_share_runs WHERE id=?',[run.id]);
+ assert.equal((typeof rows[0].source_data==='string'?JSON.parse(rows[0].source_data):rows[0].source_data).jumlah,'1.247');
+ // Settling the run removes its temporary media from both the table and disk.
+ const [left]=await db.execute<RowDataPacket[]>('SELECT id FROM share_assets WHERE run_id=?',[run.id]);
+ assert.equal(left.length,0);
+});
+integration('a failing source cancels the run, records why, and still advances the schedule',async()=>{
+ const a=await user();
+ sourceError=null;sourceReply={data:{jumlah:10}};
+ await request(app).post('/contacts').set('account',a).send({nomor:'628111000222'}).expect(201);
+ const contacts=(await request(app).get('/contacts').set('account',a)).body;
+ const template=(await request(app).post('/templates').set('account',a).send({name:'Statistik',message:'Ada {{jumlah}} orang',source_mode:'endpoint',source_endpoint:'https://ppdb.test/statistik'}).expect(201)).body;
+ const job=(await request(app).post('/jobs').set('account',a).send({...data(a,[contacts[0].id]),template_ids:[template.id],enabled:true,interval_minutes:1440,next_at:new Date(Date.now()+60000).toISOString()}).expect(201)).body;
+ await db.execute('UPDATE auto_share_jobs SET next_at=UTC_TIMESTAMP(3) WHERE id=?',[job.id]);
+ sourceError=new ApiError(400,'invalid_request','Sumber data tidak dapat dihubungi');
+ await service.tick();
+ const runs=(await request(app).get('/runs').set('account',a)).body;
+ assert.equal(runs[0].status,'failed');
+ assert.match((await request(app).get('/runs/'+runs[0].id).set('account',a)).body[0].error,/tidak dapat dihubungi/);
+ // The schedule must keep moving so one dead endpoint does not stall the job forever.
+ const after=(await request(app).get('/jobs').set('account',a)).body[0];
+ assert.ok(new Date(after.next_at).getTime()>Date.now());
+ // A missing variable is treated the same way: nothing is sent at all.
+ sourceError=null;sourceReply={data:{lain:1}};
+ await db.execute('UPDATE auto_share_jobs SET next_at=UTC_TIMESTAMP(3) WHERE id=?',[job.id]);
+ await service.tick();
+ const second=(await request(app).get('/runs').set('account',a)).body[0];
+ assert.equal(second.status,'failed');
+ assert.match((await request(app).get('/runs/'+second.id).set('account',a)).body[0].error,/tidak tersedia/);
+ sourceReply={data:{jumlah:247,sisa_kuota:53,buka:true}};
 });

@@ -58,6 +58,16 @@ export async function migrateAutoShare(){
  await column('auto_share_runs','media_url','VARCHAR(4096) NULL');
  await column('auto_share_runs','filename','VARCHAR(255) NULL');
  await column('auto_share_runs','asset_id','CHAR(36) NULL');
+ await column('auto_share_templates','source_mode',"VARCHAR(16) NOT NULL DEFAULT 'none'");
+ await column('auto_share_templates','source_endpoint',"VARCHAR(512) NOT NULL DEFAULT ''");
+ await column('auto_share_templates','source_secret','TEXT NULL');
+ await column('auto_share_templates','media_source',"VARCHAR(16) NOT NULL DEFAULT 'asset'");
+ await column('auto_share_runs','source_data','JSON NULL');
+ // Assets fetched from a template source belong to one run only: excluded from the account quota
+ // and removed once the run settles. No foreign key, so deleting a run never drops the row before
+ // its file is cleaned from disk.
+ await column('share_assets','run_id','CHAR(36) NULL');
+ await index('share_assets','asset_run','INDEX asset_run(run_id)');
  await db.query(`CREATE TABLE IF NOT EXISTS auto_share_jobs (
  id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,name VARCHAR(100) NOT NULL,session_id VARCHAR(64) NOT NULL,
  contacts JSON NOT NULL,groups_json JSON NOT NULL,template_ids JSON NOT NULL,rotation_index INT UNSIGNED NOT NULL DEFAULT 0,

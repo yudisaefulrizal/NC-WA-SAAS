@@ -91,3 +91,11 @@ Tes awal menemukan `completed_with_errors` lebih panjang daripada kolom status 2
 Suite penuh pertama pada database terisolasi: 117/118 lulus; tes memori AI gagal pada batas global yang juga diubah suite AI lain secara paralel. Runner terisolasi diubah menjalankan file tes secara serial (`--test-concurrency=1`), tanpa mengubah implementasi AI atau ekspektasi tes tersebut.
 
 Eksekusi serial tetap menghasilkan kegagalan tes memori AI yang sama (118/119 lulus); dugaan persaingan antarsuite tidak menjelaskan kegagalan. Tes memakai config tiruan `memory_limit=3`, sementara penulisan balasan membaca ai_settings/default database. Tidak mengubah perilaku AI dalam pekerjaan Auto Share. Tes Auto Share 5/5 lulus. Browser kemudian menemukan tab Auto Share tidak membungkus di viewport 390 px; ditambahkan flex-wrap untuk baris tab.
+
+## Pemeriksaan browser Auto Share gagal sebelum halaman dibuka — 23 September 2026
+
+`scripts/browser-auto-share-check.ts:31` memanggil `ai.saveAssistant(account,'shop',{enabled:true,knowledge:'',behavior:''})`, sedangkan `AIService.saveAssistant` (`src/ai.ts:210`) kini mewajibkan `input.profile` melalui `object(input.profile)`. Body tanpa `profile` ditolak dengan `ApiError: Body harus objek JSON`, sehingga skrip berhenti sebelum membuka halaman dan seluruh pemeriksaan browser tidak berjalan.
+
+Kegagalan ini pra-eksisting dan berasal dari refaktor profil AI, bukan dari pekerjaan sumber data template. Diverifikasi dengan menyimpan sementara seluruh perubahan (`git stash -u`) lalu menjalankan ulang runner: kegagalan muncul identik pada baris yang sama dengan pohon kerja bersih. Tidak diubah dalam pekerjaan ini karena berada di luar cakupan Auto Share; perbaikannya adalah menambahkan `profile` pada pemanggilan di skrip atau membuat `profile` opsional di `saveAssistant`.
+
+Akibatnya alur browser desktop/mobile untuk tab Auto Share belum terverifikasi pada pekerjaan sumber data template. Tes backend Auto Share 13/13 lulus dan regresi penuh 141/142 (satu kegagalan batas memori AI yang juga pra-eksisting).

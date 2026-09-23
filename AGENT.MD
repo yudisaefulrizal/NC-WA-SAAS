@@ -147,3 +147,15 @@ Bukti akhir Auto Share: 5/5 tes backend dan browser desktop/mobile lulus, check/
 ### Refaktor Auto Share — 18 September 2026
 
 Template sekarang hanya konten (teks/link atau URL gambar/video/dokumen/audio). Pengiriman/jadwal pada auto_share_jobs menyimpan tujuan, sesi, urutan template, dan posisi rotasi; satu template untuk semua tujuan per jadwal. Manual memilih template tanpa mengubah rotasi. Migrasi mempertahankan data lama dan tidak menghidupkan lagi pengiriman yang dihapus. Media memakai jalur download publik dan billing existing. Tujuh tes backend serta browser desktop/mobile lulus; build TypeScript selesai. Pengiriman WhatsApp nyata belum diuji.
+
+### Sumber data endpoint pada template Auto Share — 23 September 2026
+
+Template Auto Share dapat menandai `source_mode='endpoint'` dan menarik nilai dari endpoint HTTPS pengguna saat pengiriman dibuat, baik manual maupun terjadwal. Logika murni berada di `src/auto-share-source.ts` (`parsePlaceholders`, `renderTemplate`, `validateSourceData`, `validateSourceMedia`, `sourceInput`) agar dapat diuji tanpa database maupun jaringan; transport `fetchSource` dan pengunduh media disuntikkan melalui `createAutoShare` sehingga tes memakai tiruan.
+
+Pengambilan data berjalan di `prefetchSource` sebelum `beginTransaction`, karena `enqueue` memegang `accountLock` dan `lockJob FOR UPDATE`; menempatkan panggilan HTTP di dalamnya akan menahan kunci akun dan memblokir tick untuk semua akun. `runId` dibuat di prefetch agar media sementara dapat disimpan sebelum baris run ditulis, dan `enqueue` memverifikasi template hasil prefetch masih sama dengan yang terpilih setelah kunci didapat.
+
+Media dari sumber disimpan lewat `AssetStore.saveTemporary` dengan `run_id` terisi: melewati pemeriksaan kuota, memakai batas 8 MB, dan jenisnya tetap disahkan `sniffMediaType` dari byte asli. Seluruh query galeri serta perhitungan kuota kini menyaring `run_id IS NULL`, sehingga media sumber tidak pernah ikut dihitung. Pembersihan dua lapis: `removeRunAssets` saat run selesai atau gagal, dan `sweepTemporary` di `recover()` sebagai jaring pengaman setelah proses terhenti.
+
+Kegagalan sumber dibungkus `ApiError('invalid_request')` agar jatuh ke cabang pencatatan run gagal yang sudah ada di `schedule()`; `next_at` tetap bergeser sehingga satu endpoint mati tidak menghentikan jadwal permanen. Error non-`ApiError` akan menghentikan tick untuk semua akun, jadi `fetchSource` menjamin semua kegagalan jaringan terbungkus.
+
+Bukti: 13/13 tes Auto Share lulus pada MySQL sementara, regresi penuh 141/142 dengan satu kegagalan batas memori AI yang sudah tercatat di DEBUG.MD dan berada di luar Auto Share. TypeScript check, build, dan sintaks JavaScript lulus. Pemeriksaan browser tidak berjalan karena `scripts/browser-auto-share-check.ts` berhenti pada `saveAssistant`; kegagalan ini pra-eksisting dan diverifikasi dengan menjalankan runner pada pohon kerja bersih (lihat DEBUG.MD). Pengiriman WhatsApp nyata belum diuji. Tidak ada commit/push/deploy.

@@ -87,3 +87,18 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Migrasi lama ke tabel auto_share_jobs, mempertahankan jadwal dan konten serta idempoten setelah pengiriman dihapus.
 - [x] Tujuh tes backend terisolasi, alur browser desktop/mobile, TypeScript dan build lulus.
 - [ ] Verifikasi media dan rotasi pada perangkat WhatsApp nyata (pengujian menggunakan transport/unduhan tiruan).
+
+## Sumber data endpoint pada template Auto Share — 23 September 2026
+
+- [x] Template dapat menarik nilai hidup dari endpoint HTTPS milik pengguna dan menyisipkannya ke teks/caption lewat `{{nama_variabel}}`.
+- [x] Kontrak dipegang nc-wa-saas: `GET` menjawab `{"data":{…}}` objek datar, maksimal 50 variabel, nilai teks/angka/boolean maksimal 200 karakter, respons 32 KB, timeout 10 detik.
+- [x] Angka diformat gaya Indonesia dan boolean menjadi Ya/Tidak; `{{{{` melarikan kurung kurawal literal.
+- [x] Variabel yang tidak tersedia membatalkan seluruh pengiriman dan dicatat sebagai run gagal, bukan mengirim pesan setengah jadi.
+- [x] Sumber media opsional lewat `{"media":{"url":…}}`: diunduh sekali per pengiriman, jenisnya disahkan dari byte asli, batas 8 MB.
+- [x] Media sumber disimpan sebagai asset sementara ber-`run_id`, dikecualikan dari daftar galeri dan kuota paket, dihapus saat run selesai serta disapu ulang oleh `recover()` setelah proses terhenti.
+- [x] Pengambilan data dilakukan sebelum transaksi dibuka agar endpoint lambat tidak menahan kunci akun maupun memblokir tick penjadwal.
+- [x] Token disimpan terenkripsi, tidak pernah dikirim ke browser, dan otomatis dilepas saat URL endpoint diganti.
+- [x] Tombol "Tes koneksi" menampilkan variabel beserta nilainya dan menyisipkannya ke posisi kursor.
+- [x] Tes: 13/13 Auto Share lulus; regresi penuh 141/142 (satu kegagalan batas memori AI pra-eksisting, lihat DEBUG.MD). TypeScript check, build, dan sintaks JavaScript lulus.
+- [ ] Alur browser belum terverifikasi: `scripts/browser-auto-share-check.ts` berhenti pada `saveAssistant` karena kegagalan pra-eksisting di luar Auto Share (lihat DEBUG.MD).
+- [ ] Verifikasi endpoint dan media sumber pada perangkat WhatsApp nyata (pengujian menggunakan transport/unduhan tiruan).
