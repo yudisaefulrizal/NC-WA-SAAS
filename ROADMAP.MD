@@ -170,3 +170,10 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Tombol "Lihat pratinjau pesan" dipindah ke bawah kolom teks bersama hasilnya, menggantikan pratinjau yang sebelumnya menumpang tombol Tes koneksi di atas checkbox rapikan sehingga alurnya terbalik.
 - [x] Tombol pratinjau dan pilihan rapikan hanya tampil untuk template bersumber endpoint, dan ikut tersembunyi saat sumber dimatikan.
 - [x] Tes: `test/assets.test.ts` memastikan hash berasal dari isi berkas dan tidak ada rujukan tanpa versi yang tersisa; regresi penuh 147/148 (satu kegagalan batas memori AI pra-eksisting).
+
+## Perbaikan pilihan rapikan tidak tersimpan — 23 September 2026
+
+- [x] `tidy` dikembalikan ke payload penyimpanan template; sebelumnya kotak centang selalu tersimpan `0` sehingga pengiriman terjadwal tidak pernah merapikan meski pratinjau menampilkan hasil yang benar.
+- [x] Pemeriksaan browser mencegat POST `/auto-share/templates` dan memastikan payload memuat `tidy`, `source_mode`, dan `source_endpoint`.
+- [x] Pemeriksaan dikonfirmasi menangkap kesalahan tersebut dengan mengembalikan bug sementara lalu menjalankan ulang.
+- [x] Tes: 17/17 Auto Share lulus; regresi penuh 147/148 (satu kegagalan batas memori AI pra-eksisting).

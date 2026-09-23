@@ -739,7 +739,8 @@ form('share-template-form',async data=>{const f=$('share-template-form'),source=
   asset_id:f.elements.media_source.value==='endpoint'?null:(data.asset_id||null),
   source_mode:data.source_mode,media_source:data.media_source,source_endpoint:data.source_endpoint||'',
   source_headers:source?shareHeaders():undefined,
-  media_variable:f.elements.media_source.value==='endpoint'?f.elements.media_variable.value:undefined});
+  media_variable:f.elements.media_source.value==='endpoint'?f.elements.media_variable.value:undefined,
+  tidy:f.elements.tidy.checked});
  $('share-template-dialog').close();await loadAutoShare();$('message').textContent='Template tersimpan.';});
 $('share-asset-upload-form').onsubmit=e=>{e.preventDefault();void run(async()=>{
  const file=$('share-asset-upload-form').elements.file.files[0];if(!file)return;

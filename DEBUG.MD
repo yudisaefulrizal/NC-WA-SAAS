@@ -125,3 +125,13 @@ Dilaporkan dari pengujian manual: menekan "Lihat pratinjau pesan" dengan kolom t
 Bukan kesalahan kode yang sedang berjalan. Reproduksi langsung terhadap rute `test-source` dengan endpoint nyata mengembalikan HTTP 200 beserta pratinjau berisi data Darul Ilmi, dan reproduksi melalui peramban sungguhan memperlihatkan body permintaan sudah memuat `message`. Yang dijalankan peramban pengguna adalah `public/app.js` versi sebelum perbaikan tombol pratinjau, yang belum mengirim `message`, karena `express.static` melayani berkas dengan ETag sehingga salinan lama tetap dipakai sampai muat ulang paksa.
 
 Karena gejala ini akan berulang pada setiap pembaruan front-end, penyebabnya ditangani di akar: `src/app.ts` menyisipkan hash isi berkas pada rujukan aset di setiap halaman saat startup, dan aset berhash dilayani `Cache-Control: immutable`. Berkas yang berubah otomatis memperoleh URL baru, sedangkan yang tidak berubah tetap dipakai dari cache.
+
+## Pratinjau merapikan tetapi pengiriman terjadwal tidak — 23 September 2026
+
+Dilaporkan dari pengujian manual. Pemeriksaan database memperlihatkan seluruh template bersumber endpoint tersimpan dengan `tidy=0` meskipun kotak centang diisi, sehingga `prefetchSource` melewati `tidyMessage` pada setiap pengiriman.
+
+Penyebabnya `public/app.js`: penanganan submit `share-template-form` tidak menyertakan `tidy` pada payload. Bidang itu hilang saat tombol pratinjau dipindah ke bawah kolom teks; salah satu penggantian menimpa baris submit. Pratinjau tetap benar karena membaca kotak centang langsung dari formulir, bukan dari kolom database, sehingga kesalahan ini tidak terlihat dari pengujian pratinjau.
+
+Perbaikannya mengembalikan `tidy` ke payload. `scripts/browser-template-source-check.ts` kini mencegat permintaan POST `/auto-share/templates` dan memeriksa isi payload memuat `tidy`, `source_mode`, dan `source_endpoint`; dikonfirmasi menangkap kesalahan ini dengan mengembalikan bug sementara lalu menjalankan ulang pemeriksaan.
+
+Pelajarannya: memverifikasi pratinjau saja tidak cukup, karena pratinjau dan pengiriman membaca sumber nilai yang berbeda. Payload penyimpanan perlu diperiksa tersendiri.

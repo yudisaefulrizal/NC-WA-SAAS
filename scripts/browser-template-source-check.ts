@@ -109,11 +109,26 @@ try{
   // showModal() lives in the top layer, so a plain z-index would leave the banner hidden behind it.
   // The gallery is empty in this fixture, so a media template could not be saved here anyway.
   await page.locator('#share-media-type').selectOption('text');
+  // Step 7 switched the source off, so it is turned back on to save a template that uses one.
+  await page.locator('#share-source-mode').selectOption('endpoint');
+  await page.locator('[name="source_endpoint"]').fill('https://ppdb.example.com/statistik');
+  await page.locator('#share-tidy').check();
+  // The saved template must carry every source field the form shows. A preview reads the checkbox
+  // directly, so a field missing from this payload still previews correctly while every scheduled
+  // send silently ignores it.
+  let savedBody:Record<string,unknown>={};
+  await page.route('**/auto-share/templates',async route=>{
+   if(route.request().method()==='POST')savedBody=JSON.parse(route.request().postData()??'{}');
+   await route.fallback();
+  });
   await page.locator('#share-template-form [name="name"]').fill('Template Sumber');
   await page.locator('#share-template-form [name="message"]').fill('Halo tanpa variabel');
   await page.locator('#share-template-form button:not([type=button])').click();
   await page.locator('#message:popover-open').waitFor();
   assert.match(await page.locator('#message').innerText(),/Template tersimpan/,'simpan template gagal');
+  assert.equal(savedBody.tidy,true,'pilihan rapikan tidak ikut tersimpan');
+  assert.equal(savedBody.source_mode,'endpoint','sumber data tidak ikut tersimpan');
+  assert.equal(savedBody.source_endpoint,'https://ppdb.example.com/statistik','endpoint tidak ikut tersimpan');
   const covered=await page.locator('#message').evaluate(el=>{
    const box=el.getBoundingClientRect();
    const hit=document.elementFromPoint(box.left+box.width/2,box.top+box.height/2);
