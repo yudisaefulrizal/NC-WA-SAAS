@@ -32,8 +32,13 @@ try{
   // validatePublicUrl rightly refuses a loopback endpoint, so the real transport is covered by the
   // backend tests and the dialog's own call is answered here.
   let sentHeaders:{name:string;value:string}[]=[];
+  let previewCalls=0,lastPreviewBody:Record<string,unknown>={};
   await page.route('**/auto-share/templates/test-source',async route=>{
-   sentHeaders=JSON.parse(route.request().postData()??'{}').source_headers??[];
+   const parsed=JSON.parse(route.request().postData()??'{}');
+   sentHeaders=parsed.source_headers??[];
+   if(parsed.message!==undefined){previewCalls++;lastPreviewBody=parsed;}
+   // Held briefly so a second click during the request would be observable.
+   await new Promise(r=>setTimeout(r,400));
    const sent=JSON.parse(route.request().postData()??'{}');
    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,variables:{jumlah:'247',sisa_kuota:'53',poster:'https://example.com/poster.png'},media:null,
     preview:sent.message?{message:'Peserta 247 orang.',tidied:Boolean(sent.tidy),note:null}:null,raw:'{\n "jumlah": 247\n}'})});
@@ -92,8 +97,19 @@ try{
 
   // The preview runs the real path and reports whether the text was tidied.
   await page.locator('#share-tidy').check();
+  await page.locator('[name="tidy_note"]').fill('Pakai poin bernomor');
+  previewCalls=0;
+  // Clicking repeatedly during the request must not queue extra model calls, each of which costs
+  // credit for the same preview.
   await page.locator('#share-preview-run').click();
+  assert.equal(await page.locator('#share-preview-run').isDisabled(),true,'tombol pratinjau tidak terkunci saat proses');
+  await page.locator('#share-preview-run').click({force:true,timeout:1000}).catch(()=>{});
+  await page.locator('#share-preview-run').click({force:true,timeout:1000}).catch(()=>{});
   await page.locator('#share-preview-text').waitFor();
+  await page.waitForFunction(()=>!(document.getElementById('share-preview-run') as HTMLButtonElement).disabled);
+  assert.equal(previewCalls,1,'tombol pratinjau memanggil server lebih dari sekali: '+previewCalls);
+  assert.equal(lastPreviewBody.tidy_note,'Pakai poin bernomor','catatan perapihan tidak ikut dikirim ke pratinjau');
+  assert.equal(lastPreviewBody.tidy,true,'pilihan rapikan tidak ikut dikirim ke pratinjau');
   assert.match(await page.locator('#share-preview-text').innerText(),/Peserta 247 orang/,'pratinjau tidak menampilkan pesan');
   assert.match(await page.locator('#share-preview-text').innerText(),/sudah dirapikan AI/,'pratinjau tidak menyebut hasil perapihan');
 
@@ -115,7 +131,6 @@ try{
   await page.locator('#share-tidy').check();
   // The note only appears once the rewrite is switched on.
   assert.equal(await page.locator('#share-tidy-note-field').isHidden(),false,'kolom catatan perapihan tidak muncul setelah dicentang');
-  await page.locator('[name="tidy_note"]').fill('Pakai poin bernomor');
   // The saved template must carry every source field the form shows. A preview reads the checkbox
   // directly, so a field missing from this payload still previews correctly while every scheduled
   // send silently ignores it.

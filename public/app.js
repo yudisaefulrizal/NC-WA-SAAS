@@ -559,6 +559,9 @@ function shareTemplateAssetOptions(){
  // so an explanatory placeholder takes its place when the gallery has nothing of this type.
  shareOptions('share-template-asset',matching.length?matching:[['','Belum ada asset '+type+' di galeri']]);
 }
+// What the open template had when it was loaded, so the preview can say when it is showing
+// unsaved settings.
+let sharePreviewSaved={tidy:false,note:''};
 let shareSelectedContacts=new Set();
 // Rendered as checkboxes rather than <select multiple>: the native control needs Ctrl/Cmd, which
 // phones do not have, and it cannot be searched once the contact list grows.
@@ -700,14 +703,29 @@ $('share-media-source').onchange=shareMediaFields;
 $('share-source-mode').onchange=shareMediaFields;
 // Runs the real path — fetch, substitute, then tidy when ticked — so the schedule is never switched
 // on for output nobody has seen. A tidied message cannot be inspected after it is broadcast.
-$('share-preview-run').onclick=()=>void run(async()=>{const f=$('share-template-form');
- const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,message:f.elements.message.value,tidy:f.elements.tidy.checked,tidy_note:f.elements.tidy_note.value});
- const preview=result.preview;
- $('share-preview').hidden=false;
- $('share-preview-text').textContent=!preview?'Isi teks pesan terlebih dahulu.'
-  :preview.message?preview.message+(preview.tidied?'\n\n— sudah dirapikan AI':preview.note?'\n\n— tidak dirapikan ('+preview.note+'), pesan dikirim apa adanya':'')
-  :'Pratinjau gagal: '+(preview.note||'tidak diketahui');});
-$('share-source-test').onclick=()=>void run(async()=>{const f=$('share-template-form');
+$('share-preview-run').onclick=()=>{
+ const b=$('share-preview-run');
+ // Tidying calls the model, which can take seconds; without this the button queues a second call
+ // and spends credit twice for one preview.
+ if(b.disabled)return;
+ b.disabled=true;const label=b.textContent;b.textContent='Menyiapkan pratinjau…';
+ void run(async()=>{const f=$('share-template-form');
+  const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,message:f.elements.message.value,tidy:f.elements.tidy.checked,tidy_note:f.elements.tidy_note.value});
+  const preview=result.preview;
+  $('share-preview').hidden=false;
+  // The preview uses what is typed, while a send uses what is stored. Saying so prevents trusting a
+  // preview of settings that were never saved.
+  const dirty=f.elements.id.value&&(f.elements.tidy_note.value!==(sharePreviewSaved.note??'')||f.elements.tidy.checked!==Boolean(sharePreviewSaved.tidy));
+  $('share-preview-dirty').hidden=!dirty;
+  $('share-preview-text').textContent=!preview?'Isi teks pesan terlebih dahulu.'
+   :preview.message?preview.message+(preview.tidied?'\n\n— sudah dirapikan AI':preview.note?'\n\n— tidak dirapikan ('+preview.note+'), pesan dikirim apa adanya':'')
+   :'Pratinjau gagal: '+(preview.note||'tidak diketahui');
+ }).finally(()=>{b.disabled=false;b.textContent=label;});};
+$('share-source-test').onclick=()=>{
+ const b=$('share-source-test');
+ if(b.disabled)return;
+ b.disabled=true;const label=b.textContent;b.textContent='Menguji…';
+ void run(async()=>{const f=$('share-template-form');
  const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,media_source:f.elements.media_source.value});
  const names=Object.keys(result.variables),vars=$('share-source-vars');vars.replaceChildren();
  for(const name of names){const chip=button('{{'+name+'}} = '+result.variables[name],()=>{
@@ -727,7 +745,8 @@ $('share-source-test').onclick=()=>void run(async()=>{const f=$('share-template-
  const raw=document.createElement('details'),caption=document.createElement('summary');
  caption.textContent='Lihat respons endpoint';const pre=document.createElement('pre');pre.textContent=result.raw;
  raw.append(caption,pre);box.append(raw);
- shareMediaFields();});
+ shareMediaFields();
+ }).finally(()=>{b.disabled=false;b.textContent=label;});};
 function openShareTemplate(t={}){const f=$('share-template-form');f.reset();
  $('share-source-vars').replaceChildren();$('share-source-result').replaceChildren();$('share-header-rows').replaceChildren();
  $('share-preview').hidden=true;$('share-preview-text').textContent='';
@@ -739,6 +758,7 @@ function openShareTemplate(t={}){const f=$('share-template-form');f.reset();
  // shareMediaFields() clears the tick when it decides tidying does not apply, so the saved value is
  // restored after it runs rather than before.
  shareMediaFields();f.elements.tidy.checked=Boolean(t.tidy);f.elements.tidy_note.value=t.tidy_note||'';
+ sharePreviewSaved={tidy:Boolean(t.tidy),note:t.tidy_note||''};
  $('share-tidy-note-field').hidden=!f.elements.tidy.checked||$('share-tidy-field').hidden;
  if(t.asset_id)f.elements.asset_id.value=t.asset_id;$('share-template-dialog').showModal();}
 $('share-add-template').onclick=()=>openShareTemplate();

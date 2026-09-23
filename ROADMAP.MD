@@ -194,3 +194,11 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Pratinjau memakai catatan yang sedang diketik, sehingga pengaruhnya terlihat sebelum template disimpan.
 - [x] Pemeriksaan browser memverifikasi catatan tersimpan dan dipulihkan saat template dibuka ulang.
 - [x] Tes: 18/18 Auto Share lulus; regresi penuh 148/149 (satu kegagalan batas memori AI pra-eksisting).
+
+## Penguncian tombol pratinjau dan verifikasi catatan perapihan — 23 September 2026
+
+- [x] Tombol "Lihat pratinjau pesan" dan "Tes koneksi" terkunci selama permintaan berjalan dan menampilkan label proses, mencegah klik berulang memanggil model beberapa kali untuk satu pratinjau.
+- [x] Pemeriksaan browser memastikan tombol benar-benar terkunci dan server hanya dipanggil sekali meski diklik berkali-kali.
+- [x] Catatan perapihan diverifikasi sampai ke model pada kedua jalur: pengiriman membaca `tidy_note` dari basis data, pratinjau memakai nilai yang sedang diketik.
+- [x] Pratinjau memberi peringatan bila pengaturan rapikan yang dipakai belum disimpan, karena pengiriman terjadwal memakai nilai tersimpan.
+- [x] Tes: 18/18 Auto Share lulus; regresi penuh 148/149 (satu kegagalan batas memori AI pra-eksisting).
