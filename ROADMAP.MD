@@ -162,3 +162,11 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Tombol Tes koneksi menampilkan pratinjau pesan akhir termasuk hasil perapihan, sehingga jadwal tidak dinyalakan untuk keluaran yang belum pernah dilihat.
 - [x] Perapihan hanya ditawarkan untuk template bersumber endpoint dan bukan audio; teks statis lebih murah dirapikan sekali saat menyimpan.
 - [x] Tes: 17/17 Auto Share lulus; regresi penuh 145/146 (satu kegagalan batas memori AI pra-eksisting). Pemeriksaan browser lulus desktop dan ponsel. TypeScript check, build, dan sintaks JavaScript lulus.
+
+## Cache busting aset front-end dan letak tombol pratinjau — 23 September 2026
+
+- [x] Setiap halaman merujuk `app.js`, `style.css`, `ai-studio.js`, dan `ai-studio.css` dengan hash isi berkas, sehingga peramban tidak lagi memakai berkas lama setelah pembaruan.
+- [x] Aset berhash dilayani `Cache-Control: immutable` selama satu tahun; aset tanpa hash tetap divalidasi ulang agar tautan lama tidak tertahan selamanya.
+- [x] Tombol "Lihat pratinjau pesan" dipindah ke bawah kolom teks bersama hasilnya, menggantikan pratinjau yang sebelumnya menumpang tombol Tes koneksi di atas checkbox rapikan sehingga alurnya terbalik.
+- [x] Tombol pratinjau dan pilihan rapikan hanya tampil untuk template bersumber endpoint, dan ikut tersembunyi saat sumber dimatikan.
+- [x] Tes: `test/assets.test.ts` memastikan hash berasal dari isi berkas dan tidak ada rujukan tanpa versi yang tersisa; regresi penuh 147/148 (satu kegagalan batas memori AI pra-eksisting).

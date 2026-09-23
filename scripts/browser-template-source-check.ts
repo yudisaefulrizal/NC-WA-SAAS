@@ -34,7 +34,9 @@ try{
   let sentHeaders:{name:string;value:string}[]=[];
   await page.route('**/auto-share/templates/test-source',async route=>{
    sentHeaders=JSON.parse(route.request().postData()??'{}').source_headers??[];
-   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,variables:{jumlah:'247',sisa_kuota:'53',poster:'https://example.com/poster.png'},media:null,raw:'{\n "jumlah": 247\n}'})});
+   const sent=JSON.parse(route.request().postData()??'{}');
+   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({ok:true,variables:{jumlah:'247',sisa_kuota:'53',poster:'https://example.com/poster.png'},media:null,
+    preview:sent.message?{message:'Pendaftar 247 santri.',tidied:Boolean(sent.tidy),note:null}:null,raw:'{\n "jumlah": 247\n}'})});
   });
   await page.goto(origin+'/dashboard/auto-share');
   await page.locator('[data-share-tab="templates"]').click();
@@ -80,16 +82,28 @@ try{
   await page.locator('#share-media-source').selectOption('asset');
   assert.equal(await page.locator('#share-media-variable-field').isHidden(),true,'pemilih variabel media tidak tersembunyi kembali');
 
+  // The preview button belongs to the source block and disappears with it.
+  assert.equal(await page.locator('#share-preview-row').isHidden(),false,'tombol pratinjau tidak tampil untuk template bersumber data');
+
   // Step 6: clicking a variable inserts it into the message at the caret.
   await page.locator('[name="message"]').fill('Pendaftar ');
   await page.locator('#share-source-vars button').first().click();
   assert.match(await page.locator('[name="message"]').inputValue(),/\{\{jumlah\}\}/,'variabel tidak tersisip ke pesan');
+
+  // The preview runs the real path and reports whether the text was tidied.
+  await page.locator('#share-tidy').check();
+  await page.locator('#share-preview-run').click();
+  await page.locator('#share-preview-text').waitFor();
+  assert.match(await page.locator('#share-preview-text').innerText(),/Pendaftar 247 santri/,'pratinjau tidak menampilkan pesan');
+  assert.match(await page.locator('#share-preview-text').innerText(),/sudah dirapikan AI/,'pratinjau tidak menyebut hasil perapihan');
 
   // Step 7: switching back to no source collapses everything again.
   await page.locator('#share-source-mode').selectOption('none');
   assert.equal(await page.locator('#share-source-fields').isHidden(),true,'blok sumber tidak tersembunyi kembali');
   assert.equal(await page.locator('#share-variable-bar').isHidden(),true,'baris variabel tidak tersembunyi kembali');
   assert.equal(await page.locator('#share-media-source').inputValue(),'asset','sumber media tidak kembali ke galeri');
+  assert.equal(await page.locator('#share-preview-row').isHidden(),true,'tombol pratinjau tidak ikut tersembunyi');
+  assert.equal(await page.locator('#share-tidy-field').isHidden(),true,'pilihan rapikan tidak ikut tersembunyi');
 
   // Step 8: saving works end to end, and the notification must clear the open dialog. A dialog from
   // showModal() lives in the top layer, so a plain z-index would leave the banner hidden behind it.

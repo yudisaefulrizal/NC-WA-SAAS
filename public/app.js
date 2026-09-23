@@ -668,6 +668,8 @@ function shareMediaFields(){const f=$('share-template-form'),type=f.elements.med
  const tidyable=source&&!audio;
  $('share-tidy-field').hidden=!tidyable;$('share-tidy-hint').hidden=!tidyable;
  if(!tidyable)f.elements.tidy.checked=false;
+ $('share-preview-row').hidden=!source;
+ if(!source)$('share-preview').hidden=true;
  $('share-media-fields').hidden=!media;f.elements.message.required=!media;f.elements.message.disabled=audio;
  // Media from the endpoint is only reachable once a data source exists, so hide the impossible option.
  const remoteOption=$('share-media-source').querySelector('option[value="endpoint"]');
@@ -693,6 +695,15 @@ function shareHeaders(){return [...$('share-header-rows').querySelectorAll('.hea
 $('share-media-type').onchange=shareMediaFields;
 $('share-media-source').onchange=shareMediaFields;
 $('share-source-mode').onchange=shareMediaFields;
+// Runs the real path — fetch, substitute, then tidy when ticked — so the schedule is never switched
+// on for output nobody has seen. A tidied message cannot be inspected after it is broadcast.
+$('share-preview-run').onclick=()=>void run(async()=>{const f=$('share-template-form');
+ const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,message:f.elements.message.value,tidy:f.elements.tidy.checked});
+ const preview=result.preview;
+ $('share-preview').hidden=false;
+ $('share-preview-text').textContent=!preview?'Isi teks pesan terlebih dahulu.'
+  :preview.message?preview.message+(preview.tidied?'\n\n— sudah dirapikan AI':preview.note?'\n\n— tidak dirapikan ('+preview.note+'), pesan dikirim apa adanya':'')
+  :'Pratinjau gagal: '+(preview.note||'tidak diketahui');});
 $('share-source-test').onclick=()=>void run(async()=>{const f=$('share-template-form');
  const result=await api('/auto-share/templates/test-source','POST',{source_endpoint:f.elements.source_endpoint.value,source_headers:shareHeaders(),template_id:f.elements.id.value||undefined,media_source:f.elements.media_source.value});
  const names=Object.keys(result.variables),vars=$('share-source-vars');vars.replaceChildren();

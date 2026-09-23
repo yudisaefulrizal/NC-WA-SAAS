@@ -10,6 +10,8 @@ import {randomBytes,randomUUID} from 'node:crypto';
 import type {RowDataPacket,ResultSetHeader} from 'mysql2';
 import {db} from './db.js';
 import {credentials,digest,hashPassword,verifyPassword} from './security.js';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {basicWallet,ensureBasic,planInput} from './plans.js';
 import {gateway as defaultGateway} from './gateway.js';
 import {ApiError} from './engine/sessions.js';
@@ -126,7 +128,7 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
  await c.commit();res.json({ok:true});}catch(e){await c.rollback();throw e;}finally{c.release();}
 });
 app.get('/api/admin/payments',async(req,res)=>res.json(await paginate(req.query.page??'1','SELECT COUNT(*) AS total FROM payment_orders',(size,offset)=>'SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT '+size+' OFFSET '+offset)));
-app.get('/dashboard/admin/ai-studio',(_req,res)=>res.sendFile('ai-studio.html',{root:'public'}));
+app.get('/dashboard/admin/ai-studio',(_req,res)=>res.type('html').send(page('ai-studio.html')));
 app.get('/api/admin/ai',async(_req,res)=>res.json(await ai.configuration()));
 app.get('/api/admin/ai/studio',async(_req,res)=>res.json({...await workflowState(),models:await ai.configuration()}));
 app.put('/api/admin/ai/studio',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.body)));
@@ -178,8 +180,30 @@ app.get('/api/admin/referral/payouts',async(req,res)=>res.json(await referral.ad
 app.put('/api/admin/referral/payouts/:id',async(req,res)=>res.json(await referral.decidePayout(res.locals.account.id,req.params.id,req.body)));
 app.get('/api/admin/referral/agents',async(_req,res)=>res.json(await referral.agents()));
 app.put('/api/admin/referral/agents/:id',async(req,res)=>res.json(await referral.setAgent(res.locals.account.id,req.params.id,req.body)));
-app.use(express.static('public'));
-app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/referral','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/failures','/dashboard/admin/health','/dashboard/admin/referral','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.sendFile('index.html',{root:'public'}));
+// Browsers happily keep serving a stale app.js after a deploy, which looks exactly like a broken
+// feature. Each page is rewritten at startup so its own assets carry a content hash; a changed file
+// gets a new URL, and an unchanged one keeps being reused from cache.
+const assetVersions=new Map<string,string>();
+function versioned(name:string){
+ const cached=assetVersions.get(name);
+ if(cached)return cached;
+ let stamp='0';
+ try{stamp=createHash('sha256').update(readFileSync('public/'+name)).digest('hex').slice(0,12);}catch{}
+ const url='/'+name+'?v='+stamp;
+ assetVersions.set(name,url);
+ return url;
+}
+const pages=new Map<string,string>();
+function page(name:string){
+ const cached=pages.get(name);
+ if(cached)return cached;
+ const html=readFileSync('public/'+name,'utf8').replace(/\/(app|ai-studio)\.js\b/g,(_m,base)=>versioned(base+'.js')).replace(/\/(style|ai-studio)\.css\b/g,(_m,base)=>versioned(base+'.css'));
+ pages.set(name,html);
+ return html;
+}
+// A hashed URL can never go stale, so it is cached hard; everything else keeps revalidating.
+app.use(express.static('public',{setHeaders:(res,_path)=>{if(res.req?.query?.v)res.setHeader('Cache-Control','public, max-age=31536000, immutable');}}));
+app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/referral','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/failures','/dashboard/admin/health','/dashboard/admin/referral','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.type('html').send(page('index.html')));
 app.use((_req,res)=>res.status(404).json({error:'not_found'}));
 app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{if(res.headersSent){_next(err);return;}if(err instanceof ApiError){res.status(err.status).json({error:err.code,message:err.message});return;}const status=(err as {status?:number}).status;res.status(status===400||status===413?status:500).json({error:status===400||status===413?'invalid_request':'internal_error'});});
 

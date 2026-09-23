@@ -211,3 +211,11 @@ Kredit memakai pola reserve lalu settle seperti asisten: saldo dikunci `FOR UPDA
 Endpoint `test-source` mengembalikan pratinjau pesan akhir termasuk hasil perapihan. Tanpa itu pengguna menyalakan jadwal untuk keluaran yang tidak pernah dilihatnya, karena hasil perapihan tidak dapat diperiksa setelah terkirim.
 
 Bukti: 17/17 tes Auto Share lulus, regresi penuh 145/146 dengan satu kegagalan batas memori AI pra-eksisting, dua pemeriksaan browser lulus pada desktop dan ponsel, TypeScript check dan build lulus. Migrasi dijalankan pada database pengembangan. Pengiriman WhatsApp nyata dan panggilan AI sungguhan belum diuji; pengujian memakai transport tiruan. Tidak ada commit/push/deploy.
+
+### Cache busting aset front-end — 23 September 2026
+
+`src/app.ts` membaca `public/index.html` dan `public/ai-studio.html` sekali saat startup, mengganti rujukan `app.js`, `style.css`, `ai-studio.js`, dan `ai-studio.css` dengan URL bertanda hash SHA-256 dari isi berkas, lalu menyimpan hasilnya di memori. Halaman tidak lagi dilayani `sendFile` melainkan dari salinan yang sudah ditulis ulang. Aset yang dimintai dengan parameter `v` dilayani `Cache-Control: public, max-age=31536000, immutable`; tanpa parameter itu perilakunya tidak berubah sehingga tautan lama tetap divalidasi ulang.
+
+Pendekatan hash isi dipilih karena tidak memerlukan langkah build tambahan dan tidak berubah bila berkasnya tidak berubah, berbeda dengan penanda waktu mulai proses yang akan membatalkan cache pada setiap restart tanpa alasan.
+
+Bukti: `test/assets.test.ts` memastikan hash pada halaman sama dengan hash isi berkas, tidak ada rujukan tanpa versi yang tersisa, dan aset berhash dilayani immutable sementara aset polos tidak. Regresi penuh 147/148 dengan satu kegagalan batas memori AI pra-eksisting.

@@ -117,3 +117,11 @@ Dua keluhan terpisah dari pengujian manual.
 **Notifikasi tertutup dialog.** `#message` memakai `z-index:10`, sedangkan dialog yang dibuka `showModal()` dipromosikan ke top layer browser yang selalu berada di atas seluruh konteks penumpukan. Menaikkan angka z-index karena itu tidak menyelesaikan apa pun. `#message` diubah menjadi `popover="manual"` agar ikut naik ke top layer, dibuka dan ditutup terpusat oleh satu `MutationObserver` sehingga 35 pemanggilan `textContent` yang sudah ada tidak perlu diubah. `showPopover()`/`hidePopover()` melempar bila status sudah sesuai, jadi keduanya dibungkus `try`.
 
 **Temuan sampingan.** Pemeriksaan browser menemukan form template terkunci tanpa pesan yang berguna ketika jenis konten media dipilih sementara galeri tidak memuat asset berjenis itu: `<select name="asset_id">` kosong tetapi `required`, sehingga submit diblokir dengan pesan bawaan peramban "Please select an item in the list." Kini daftar diisi placeholder "Belum ada asset <jenis> di galeri" sehingga penyebabnya terbaca.
+
+## Pratinjau meminta isi teks padahal teks sudah diisi — 23 September 2026
+
+Dilaporkan dari pengujian manual: menekan "Lihat pratinjau pesan" dengan kolom teks berisi `{{darul_ilmi}}` menghasilkan "Isi teks pesan terlebih dahulu."
+
+Bukan kesalahan kode yang sedang berjalan. Reproduksi langsung terhadap rute `test-source` dengan endpoint nyata mengembalikan HTTP 200 beserta pratinjau berisi data Darul Ilmi, dan reproduksi melalui peramban sungguhan memperlihatkan body permintaan sudah memuat `message`. Yang dijalankan peramban pengguna adalah `public/app.js` versi sebelum perbaikan tombol pratinjau, yang belum mengirim `message`, karena `express.static` melayani berkas dengan ETag sehingga salinan lama tetap dipakai sampai muat ulang paksa.
+
+Karena gejala ini akan berulang pada setiap pembaruan front-end, penyebabnya ditangani di akar: `src/app.ts` menyisipkan hash isi berkas pada rujukan aset di setiap halaman saat startup, dan aset berhash dilayani `Cache-Control: immutable`. Berkas yang berubah otomatis memperoleh URL baru, sedangkan yang tidak berubah tetap dipakai dari cache.
