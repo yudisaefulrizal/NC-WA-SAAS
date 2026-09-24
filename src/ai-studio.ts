@@ -3,7 +3,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {ai,callAI,composeKnowledge,profileFields,type AIConfig,type AIMessage,type AITransport,type ProfileField} from './ai.js';
 import {runAgents,updateRouterContext,type AITools} from './ai-agents.js';
 import {workflowState} from './ai-workflow.js';
-import {productInput,productForAI,orderInput,record,type Order} from './ai-data.js';
+import {productInput,productForAI,orderForAI,orderInput,record,type Order} from './ai-data.js';
 import {transientAIError} from './ai-retry.js';
 import {ApiError} from './engine/sessions.js';
 import type {AITraceEvent} from './ai-models.js';
@@ -61,7 +61,7 @@ export class AIStudio {
     let result:unknown;
     if(name==='get_knowledge')result={knowledge};
     else if(name==='get_products')result={products:products.filter(p=>p.active&&(!query||`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase()))).map(productForAI)};
-    else if(name==='check_order')result={order:sandbox.orders.find(o=>o.id===query.trim())??null};
+    else if(name==='check_order')result={order:orderForAI(sandbox.orders.find(o=>o.id===query.trim())??null)};
     else if(name==='send_product_image'){
      // Sandbox never dispatches WhatsApp media; this only reports whether a real send would have found a photo.
      const p=products.find(p=>p.name===query.trim());
@@ -74,8 +74,8 @@ export class AIStudio {
       const p=products.find(p=>p.name===item.product_name&&p.active);if(!p||p.stock<item.quantity)throw bad('Produk tidak tersedia atau stok tidak cukup.');
       return {...item,price:p.price};
      });
-     const created:Order={id:'SIM-'+(sandbox.orders.length+1),customer:'628000000000',items,total:items.reduce((sum,i)=>sum+i.price*i.quantity,0),status:'baru',notes:order.notes};
-     sandbox.orders.push(created);result={order:created};
+     const created:Order={id:'SIM-'+(sandbox.orders.length+1),customer:'628000000000',items,total:items.reduce((sum,i)=>sum+i.price*i.quantity,0),status:'pesanan_masuk',notes:order.notes};
+     sandbox.orders.push(created);result={order:orderForAI(created)};
     }
     emit({node:name,state:'done',output:result,duration_ms:Date.now()-start});return result;
    }catch(error){emit({node:name,state:'error',error:error instanceof ApiError?error.message:safeError(error),duration_ms:Date.now()-start});throw error;}

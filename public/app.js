@@ -458,8 +458,8 @@ function orderActions(o){const actions=document.createElement('div');actions.cla
  actions.append(iconButton('edit','Edit pesanan '+o.id,()=>{const f=$('ai-order-edit-form');f.elements.id.value=o.id;f.elements.status.value=o.status;f.elements.notes.value=o.notes;$('ai-order-detail').textContent=o.customer+' · '+o.items.map(i=>(i.product_name??i.name)+' × '+i.quantity+' @ '+money(i.price)).join(', ');$('ai-order-edit-dialog').showModal();}),
   iconButton('delete','Hapus pesanan '+o.id,async()=>{if(!confirm('Hapus pesanan '+o.id+'? Tindakan ini tidak dapat dibatalkan.'))return;await api('/sessions/'+encodeURIComponent($('ai-session').value)+'/ai/orders/'+encodeURIComponent(o.id),'DELETE');await loadAIData();$('message').textContent='Pesanan dihapus.';}));
  return actions;}
-// Display names only; stored and API status values stay baru/dibayar/diproses/selesai/dibatalkan.
-const orderStatusLabels={baru:'Pesanan masuk',dibayar:'Dibayar',diproses:'Diproses',selesai:'Selesai',dibatalkan:'Dibatalkan'};
+// Display names for the stored/API values pesanan_masuk, dibayar, diproses, selesai, dibatalkan.
+const orderStatusLabels={pesanan_masuk:'Pesanan masuk',dibayar:'Dibayar',diproses:'Diproses',selesai:'Selesai',dibatalkan:'Dibatalkan'};
  table('ai-orders',['ID','Pelanggan','Item','Total','Status','Tindakan'],orders,o=>[o.id,o.customer,o.items.map(i=>(i.product_name??i.name)+' × '+i.quantity).join(', '),money(o.total),orderStatusLabels[o.status]??o.status,orderActions(o)]);
  await loadFallbacks(base);
 }

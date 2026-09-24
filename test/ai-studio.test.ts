@@ -31,7 +31,7 @@ const transport:AITransport=async(c,m)=>{
  if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:latest});
  if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
  if(c.call_role==='pesanan')return JSON.stringify({lengkap:true,items:[{product_name:'Produk uji',quantity:2}],notes:''});
- if(latest==='statusnya?')return m.some(x=>x.content.startsWith('Tool result check_order'))?JSON.stringify({answer:'Pesanan SIM-1 berstatus baru.'}):JSON.stringify({tool:'check_order',query:'SIM-1'});
+ if(latest==='statusnya?')return m.some(x=>x.content.startsWith('Tool result check_order'))?JSON.stringify({answer:'Pesanan SIM-1 berstatus Pesanan masuk.'}):JSON.stringify({tool:'check_order',query:'SIM-1'});
  if(m.some(x=>x.content.startsWith('Tool result create_order')))return JSON.stringify({answer:'Pesanan SIM-1 dibuat.'});
  if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:'2 Produk uji'});
  return JSON.stringify({tool:'get_products',query:'Produk uji'});

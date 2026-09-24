@@ -21,15 +21,21 @@ export async function migrateAI(){
  const dataTables=[
  `CREATE TABLE IF NOT EXISTS ai_data_sources (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,kind ENUM('products','orders') NOT NULL,mode ENUM('builtin','endpoint') NOT NULL DEFAULT 'builtin',endpoint VARCHAR(512) NOT NULL DEFAULT '',secret TEXT NOT NULL,PRIMARY KEY(account_id,session_id,kind),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
  `CREATE TABLE IF NOT EXISTS ai_products (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,name VARCHAR(150) COLLATE utf8mb4_bin NOT NULL,type ENUM('product','service') NOT NULL,description VARCHAR(500) NOT NULL,price BIGINT UNSIGNED NOT NULL,stock INT UNSIGNED NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,PRIMARY KEY(account_id,session_id,name),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
- `CREATE TABLE IF NOT EXISTS ai_orders (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,request_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,input_hash CHAR(64) NOT NULL,customer VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,items JSON NOT NULL,total BIGINT UNSIGNED NOT NULL,status ENUM('baru','dibayar','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'baru',notes VARCHAR(1000) NOT NULL,created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),PRIMARY KEY(account_id,session_id,id),UNIQUE KEY order_request(account_id,session_id,request_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
+ `CREATE TABLE IF NOT EXISTS ai_orders (account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,request_id VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,input_hash CHAR(64) NOT NULL,customer VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,items JSON NOT NULL,total BIGINT UNSIGNED NOT NULL,status ENUM('pesanan_masuk','dibayar','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'pesanan_masuk',notes VARCHAR(1000) NOT NULL,created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),PRIMARY KEY(account_id,session_id,id),UNIQUE KEY order_request(account_id,session_id,request_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
  `CREATE TABLE IF NOT EXISTS ai_product_images (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,size_bytes INT UNSIGNED NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,INDEX product_image_session(account_id,session_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`
  ];
  for(const sql of dataTables)await db.query(sql);
  const [orderColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_orders','input_hash']);
  if(!orderColumns.length)await db.query("ALTER TABLE ai_orders ADD COLUMN input_hash CHAR(64) NOT NULL DEFAULT ''");
- // Existing rows keep their status by name; "dibayar" sits between "baru" and "diproses".
+ // Order statuses are exactly pesanan_masuk, dibayar, diproses, selesai, dibatalkan. Older tables used
+ // "baru" (and lacked "dibayar"): widen first so every row stays valid, rename "baru", then drop it.
+ const finalStatuses="'pesanan_masuk','dibayar','diproses','selesai','dibatalkan'";
  const [statusColumn]=await db.execute<any[]>('SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_orders','status']);
- if(statusColumn[0]&&!String(statusColumn[0].COLUMN_TYPE).includes("'dibayar'"))await db.query("ALTER TABLE ai_orders MODIFY status ENUM('baru','dibayar','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'baru'");
+ if(statusColumn[0]&&String(statusColumn[0].COLUMN_TYPE)!==`enum(${finalStatuses})`){
+  await db.query(`ALTER TABLE ai_orders MODIFY status ENUM('baru',${finalStatuses}) NOT NULL DEFAULT 'pesanan_masuk'`);
+  await db.query("UPDATE ai_orders SET status='pesanan_masuk' WHERE status='baru'");
+  await db.query(`ALTER TABLE ai_orders MODIFY status ENUM(${finalStatuses}) NOT NULL DEFAULT 'pesanan_masuk'`);
+ }
  const [contextColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_conversations','router_context']);
  if(!contextColumns.length)await db.query('ALTER TABLE ai_conversations ADD COLUMN router_context VARCHAR(200) NULL');
  const [usageColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_usage','agent']);

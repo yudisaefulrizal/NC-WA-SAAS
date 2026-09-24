@@ -24,13 +24,13 @@ test('Built-in product and order tables isolate tenant, session and customer; pr
  await data.saveProduct(a.account,a.session,'',product);await data.saveProduct(b.account,b.session,'',{...product,name:'Produk B',price:70000});
  assert.equal((await data.catalog(a,''))[0].name,'Produk A');assert.equal((await data.catalog(b,''))[0].name,'Produk B');assert.deepEqual(await data.catalog({...a,session:'other'},''),[]);
  const result=await data.execute('create_order',JSON.stringify(input),a) as any;
- assert.equal(result.order.total,250000);assert.equal(result.order.customer,a.customer);assert.equal(result.order.status,'baru');
+ assert.equal(result.order.total,250000);assert.equal(result.order.customer,a.customer);assert.equal(result.order.status,'Pesanan masuk');assert.equal((await data.order(a.account,a.session,result.order.id))?.status,'pesanan_masuk');
  await data.saveProduct(a.account,a.session,product.name,{...product,price:200000});
  assert.equal((await new AIData().order(a.account,a.session,result.order.id,a.customer))?.total,250000);
  for(const scope of [b,{...a,session:'other'},{...a,customer:'628999999999'}])assert.deepEqual(await data.execute('check_order',result.order.id,scope),{order:null});
  await assert.rejects(data.updateOrder(b.account,b.session,result.order.id,{status:'selesai'}),{code:'not_found'});
  await data.updateOrder(a.account,a.session,result.order.id,{status:'diproses',notes:'Dikerjakan admin'});
- assert.equal((await data.execute('check_order',result.order.id,a) as any).order.status,'diproses');
+ assert.equal((await data.execute('check_order',result.order.id,a) as any).order.status,'Diproses');
 });
 
 test('Concurrent order creation is idempotent across restart and rejects conflicting payloads',async()=>{
@@ -71,10 +71,11 @@ test('Custom products and built-in orders work together with the same normalized
 
 test('Built-in products and custom orders route independently, validate customer and pass priced items',async()=>{
  const scope=await fixture();await configure(scope,{mode:'builtin'},{mode:'endpoint',endpoint:'https://8.8.8.8/orders'});
- const order={id:'EXT-1',customer:scope.customer,items:[{product_name:product.name,quantity:2,price:product.price}],total:250000,status:'baru',notes:input.notes};
+ const order={id:'EXT-1',customer:scope.customer,items:[{product_name:product.name,quantity:2,price:product.price}],total:250000,status:'pesanan_masuk',notes:input.notes};
  const actions:string[]=[];const data=new AIData(async(config,payload)=>{assert.equal(config.endpoint,'https://8.8.8.8/orders');actions.push(String(payload.action));if(payload.action==='create_order')assert.deepEqual(payload.query,{...input,items:order.items});return {order};});await data.saveProduct(scope.account,scope.session,'',product);
- assert.deepEqual(await data.execute('create_order',JSON.stringify(input),scope),{order});assert.deepEqual(await data.execute('check_order','EXT-1',scope),{order});assert.deepEqual(actions,['create_order','check_order']);assert.deepEqual(await data.orders(scope.account,scope.session),[]);
- for(const bad of [{...order,customer:'628999999999'},{...order,id:'wrong'},{...order,total:1}])await assert.rejects(new AIData(async()=>({order:bad})).execute('check_order','EXT-1',scope));
+ assert.deepEqual(await data.execute('create_order',JSON.stringify(input),scope),{order:{...order,status:'Pesanan masuk'}});assert.deepEqual(await data.execute('check_order','EXT-1',scope),{order:{...order,status:'Pesanan masuk'}});assert.deepEqual(actions,['create_order','check_order']);assert.deepEqual(await data.orders(scope.account,scope.session),[]);
+ // The old "baru" status is no longer a valid order status, including from client endpoints.
+ for(const bad of [{...order,customer:'628999999999'},{...order,id:'wrong'},{...order,total:1},{...order,status:'baru'}])await assert.rejects(new AIData(async()=>({order:bad})).execute('check_order','EXT-1',scope));
  await assert.rejects(new AIData(async()=>{throw Error('endpoint_timeout');}).execute('check_order','EXT-1',scope),/endpoint_timeout/);
 });
 
@@ -138,18 +139,24 @@ test('Deleting an order is scoped to its tenant and session',async()=>{
  // Stock was never reserved by the order, so it is unchanged after deletion.
  assert.equal((await data.catalog(a,''))[0].stock,product.stock);
 });
-test('Orders can be marked paid, and migrating the old status enum keeps existing statuses',async()=>{
+test('Orders can be marked paid, and migrating the old status enum renames baru to pesanan_masuk',async()=>{
  const {migrateAI}=await import('../src/ai-schema.js');
  const a=await fixture(),data=new AIData();
  await data.saveProduct(a.account,a.session,'',product);
- const {order}=await data.execute('create_order',JSON.stringify(input),a) as any;
- await data.updateOrder(a.account,a.session,order.id,{status:'diproses',notes:''});
+ const first=(await data.execute('create_order',JSON.stringify(input),a) as any).order;
+ const second=(await data.execute('create_order',JSON.stringify({...input,notes:'Kedua'}),{...a,requestId:'request-2'}) as any).order;
+ // Recreate the table shape from before this change: "baru" instead of "pesanan_masuk" and no "dibayar".
+ await db.query("ALTER TABLE ai_orders MODIFY status ENUM('baru','pesanan_masuk','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'baru'");
+ // Every row must fit the old enum, including orders left by earlier tests in this database.
+ await db.query("UPDATE ai_orders SET status='baru' WHERE status IN ('pesanan_masuk','dibayar')");
+ await db.execute("UPDATE ai_orders SET status='diproses' WHERE account_id=? AND id=?",[a.account,second.id]);
  await db.query("ALTER TABLE ai_orders MODIFY status ENUM('baru','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'baru'");
  await migrateAI();await migrateAI();
- const [column]=await db.execute<any[]>("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ai_orders' AND COLUMN_NAME='status'");
- assert.equal(column[0].COLUMN_TYPE,"enum('baru','dibayar','diproses','selesai','dibatalkan')");
- assert.equal((await data.order(a.account,a.session,order.id))?.status,'diproses');
- await data.updateOrder(a.account,a.session,order.id,{status:'dibayar',notes:'Transfer diterima'});
- assert.equal((await data.order(a.account,a.session,order.id))?.status,'dibayar');
- await assert.rejects(data.updateOrder(a.account,a.session,order.id,{status:'lunas'}),{code:'invalid_request'});
+ const [column]=await db.execute<any[]>("SELECT COLUMN_TYPE,COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ai_orders' AND COLUMN_NAME='status'");
+ assert.equal(column[0].COLUMN_TYPE,"enum('pesanan_masuk','dibayar','diproses','selesai','dibatalkan')");assert.match(String(column[0].COLUMN_DEFAULT),/pesanan_masuk/);
+ assert.equal((await data.order(a.account,a.session,first.id))?.status,'pesanan_masuk');
+ assert.equal((await data.order(a.account,a.session,second.id))?.status,'diproses');
+ await data.updateOrder(a.account,a.session,first.id,{status:'dibayar',notes:'Transfer diterima'});
+ assert.equal((await data.order(a.account,a.session,first.id))?.status,'dibayar');
+ for(const status of ['baru','lunas'])await assert.rejects(data.updateOrder(a.account,a.session,first.id,{status}),{code:'invalid_request'});
 });

@@ -56,12 +56,12 @@ Di halaman Asisten AI, client dapat:
 - Mengisi Knowledge dan Perilaku AI.
 - Memilih Tabel NC-WA atau Custom endpoint untuk Produk dan Order masing-masing.
 - Menambah/mengubah produk atau layanan: kode, nama, jenis, deskripsi, harga rupiah, stok/kapasitas, dan status aktif. Menonaktifkan produk mengeluarkannya dari katalog agent.
-- Membuat pesanan manual dan melihat pesanan dari agent; memperbarui status (`baru`, `diproses`, `selesai`, `dibatalkan`) dan catatan.
+- Membuat pesanan manual dan melihat pesanan dari agent; memperbarui status (`pesanan_masuk`, `dibayar`, `diproses`, `selesai`, `dibatalkan`) dan catatan.
 - Melihat agent pada riwayat AI serta menjeda/menghapus konteks pelanggan.
 
 Katalog tool menampilkan maksimal 20 hasil dan mendukung pencarian nama/kode. UI menampilkan maksimal 200 produk dan 200 pesanan terbaru. Form manual membuat satu jenis item per pesanan; API/agent mendukung 1–20 jenis item. Harga/nama item disalin dari sumber Produk yang dipilih, bukan dari input harga model/browser. Snapshot tidak berubah ketika produk diedit atau dinonaktifkan.
 
-Order bawaan berstatus awal `baru`: pencatatan permintaan, bukan bukti pembayaran atau komitmen stok. Stok/kapasitas diperiksa saat pencatatan tetapi tidak dikurangi atau direservasi otomatis. Pemilik bisnis meninjau dan memproses pesanan. Produk diarsipkan dengan nonaktif; order dibatalkan melalui status sehingga riwayat dan idempotensi tetap ada.
+Order bawaan berstatus awal `pesanan_masuk`: pencatatan permintaan, bukan bukti pembayaran atau komitmen stok. Stok/kapasitas diperiksa saat pencatatan tetapi tidak dikurangi atau direservasi otomatis. Pemilik bisnis meninjau dan memproses pesanan. Produk diarsipkan dengan nonaktif; order dibatalkan melalui status sehingga riwayat dan idempotensi tetap ada.
 
 Saat sumber custom dipilih, agent menggunakan endpoint; tabel NC-WA sebelumnya tetap tersimpan dan tetap dapat dikelola. Pengelolaan data **remote** dilakukan di sistem client. Tombol tambah/edit pada tabel NC-WA selalu mengelola data lokal. Pergantian sumber tidak menyalin atau menyinkronkan data otomatis.
 
@@ -132,7 +132,7 @@ Hasil create/check sama:
   "order": {
     "id":"ORD-1", "customer":"628123456789",
     "items":[{"product_id":"P-1","quantity":2,"name":"Produk A","price":125000}],
-    "total":250000, "status":"baru", "notes":"Tolong siapkan"
+    "total":250000, "status":"pesanan_masuk", "notes":"Tolong siapkan"
   }
 }
 ```

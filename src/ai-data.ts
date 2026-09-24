@@ -24,7 +24,10 @@ export function productForAI({image_id,...product}:Product){return {...product,a
 function productRow(p:RowDataPacket):Product{return productInput({...p,price:Number(p.price),active:Boolean(p.active)});}
 export interface OrderInput {items:{product_name:string;quantity:number}[];notes:string}
 export function orderInput(value:unknown):OrderInput{const o=record(value);if(Object.keys(o).some(k=>!['items','notes'].includes(k)))throw invalid('Pesanan hanya menerima items dan notes');if(!Array.isArray(o.items)||!o.items.length||o.items.length>20)throw invalid('Isi 1–20 item pesanan');const items=o.items.map(value=>{const item=record(value);if(Object.keys(item).some(k=>!['product_name','quantity'].includes(k)))throw invalid('Item hanya menerima product_name dan quantity');return {product_name:text(item.product_name,150,'Nama produk'),quantity:integer(item.quantity,1000,'Jumlah',1)};});if(new Set(items.map(i=>i.product_name)).size!==items.length)throw invalid('Gabungkan produk yang sama dalam satu item');return {items,notes:text(o.notes??'',1000,'Catatan',true)};}
-export const orderStatuses=['baru','dibayar','diproses','selesai','dibatalkan'] as const;
+export const orderStatuses=['pesanan_masuk','dibayar','diproses','selesai','dibatalkan'] as const;
+// Customer-facing names the AI repeats; stored values and the HTTP API use the raw status.
+export const orderStatusLabels:Record<typeof orderStatuses[number],string>={pesanan_masuk:'Pesanan masuk',dibayar:'Dibayar',diproses:'Diproses',selesai:'Selesai',dibatalkan:'Dibatalkan'};
+export function orderForAI<T extends {status:string}>(order:T|null){return order&&{...order,status:orderStatusLabels[order.status as typeof orderStatuses[number]]??order.status};}
 export interface Order {id:string;customer:string;items:(OrderInput['items'][number]&{price:number})[];total:number;status:string;notes:string}
 function orderRow(row:RowDataPacket):Order{return {id:row.id,customer:row.customer,items:typeof row.items==='string'?JSON.parse(row.items):row.items,total:Number(row.total),status:row.status,notes:row.notes};}
 export interface DataSource {mode:'builtin'|'endpoint';endpoint:string;secret:string}
@@ -74,7 +77,7 @@ export class AIData implements AITools {
   for(const item of input.items){const product=(await this.catalog(scope,item.product_name)).find(p=>p.name===item.product_name);if(!product||product.stock<item.quantity)throw invalid('Produk tidak tersedia atau stok/kapasitas tidak cukup');items.push({...item,price:product.price});}
   const total=items.reduce((sum,item)=>sum+item.price*item.quantity,0);
   return transaction(scope.account,async c=>{const [existing]=await c.execute<RowDataPacket[]>('SELECT * FROM ai_orders WHERE account_id=? AND session_id=? AND request_id=?',[scope.account,scope.session,scope.requestId]);if(existing[0]){if(existing[0].customer!==scope.customer||existing[0].input_hash!==hash)throw new ApiError(409,'idempotency_conflict','ID sudah dipakai');return orderRow(existing[0]);}
-   const order:Order={id:'ORD-'+randomUUID(),customer:scope.customer,items,total,status:'baru',notes:input.notes};
+   const order:Order={id:'ORD-'+randomUUID(),customer:scope.customer,items,total,status:'pesanan_masuk',notes:input.notes};
    await c.execute('INSERT INTO ai_orders(account_id,session_id,id,request_id,input_hash,customer,items,total,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?)',[scope.account,scope.session,order.id,scope.requestId,hash,scope.customer,JSON.stringify(items),total,order.status,order.notes]);return order;
   });
  }
@@ -89,11 +92,11 @@ export class AIData implements AITools {
    return {available:true,product_name:product.name,image_id:product.image_id};
   }
   const config=await source(scope.account,scope.session,'orders');
-  if(name==='check_order'){const id=identifier(query);return {order:config.mode==='builtin'?await this.order(scope.account,scope.session,id,scope.customer):this.validateRemoteOrder((await this.remoteCall(config,name,id,scope)).order,scope,id)};}
+  if(name==='check_order'){const id=identifier(query);return {order:orderForAI(config.mode==='builtin'?await this.order(scope.account,scope.session,id,scope.customer):this.validateRemoteOrder((await this.remoteCall(config,name,id,scope)).order,scope,id))};}
   let input:OrderInput;try{input=orderInput(JSON.parse(query));}catch{throw invalid('create_order memerlukan JSON items [{product_name,quantity}] dan notes');}
-  if(config.mode==='builtin')return {order:await this.createOrder(scope,input)};
+  if(config.mode==='builtin')return {order:orderForAI(await this.createOrder(scope,input))};
   const priced=[];for(const item of input.items){const product=(await this.catalog(scope,item.product_name)).find(p=>p.name===item.product_name);if(!product||product.stock<item.quantity)throw invalid('Produk tidak tersedia atau stok/kapasitas tidak cukup');priced.push({...item,price:product.price});}
-  const result=await this.remoteCall(config,name,{...input,items:priced},scope);const order=this.validateRemoteOrder(result.order,scope);if(!order)throw Error('endpoint_missing_order');if(order.items.length!==input.items.length||input.items.some(i=>!order.items.some(o=>o.product_name===i.product_name&&o.quantity===i.quantity)))throw Error('endpoint_order_items');return {order};
+  const result=await this.remoteCall(config,name,{...input,items:priced},scope);const order=this.validateRemoteOrder(result.order,scope);if(!order)throw Error('endpoint_missing_order');if(order.items.length!==input.items.length||input.items.some(i=>!order.items.some(o=>o.product_name===i.product_name&&o.quantity===i.quantity)))throw Error('endpoint_order_items');return {order:orderForAI(order)};
  }
 }
 export const aiData=new AIData();
