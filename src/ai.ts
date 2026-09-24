@@ -355,8 +355,16 @@ export class AIService {
    await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,knowledge,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
   });if(!prepared)return;
   const jid=message.from+'@s.whatsapp.net';
+  // Customer-facing order: a short pause, blue ticks, then "typing..." for the whole generation.
   // Read/presence are best effort and never add a message or a credit charge.
+  await this.wait(randomInt(200,1001));
   await manager.read(session,jid,message.messageId).catch(()=>{});
+  await manager.typing(session,jid,'composing').catch(()=>{});
+  // WhatsApp drops "composing" after a few seconds, so it is refreshed until the reply goes out.
+  const typingRefresh=setInterval(()=>{manager.typing(session,jid,'composing').catch(()=>{});},8000);typingRefresh.unref();
+  let typingStopped=false;
+  const stopTyping=async()=>{if(typingStopped)return;typingStopped=true;clearInterval(typingRefresh);await manager.typing(session,jid,'paused').catch(()=>{});};
+  try{
   // Assistant config (knowledge/behavior/fallback) can autosave mid-flight; a request already in
   // progress finishes with the config it started with rather than being cancelled by every edit.
   // Disabling the assistant is the one config change that still cancels in-flight work immediately.
@@ -410,11 +418,8 @@ export class AIService {
   const fallbackId=fallback?'FB-'+randomUUID().replaceAll('-','').slice(0,20).toUpperCase():undefined;
   await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[prepared.reserved-charged,account]);await c.execute("UPDATE ai_usage SET status=?,output_words=?,charged=?,agent=?,model_calls=?,model=?,reserved=0 WHERE account_id=? AND request_id=?",[generationFailed?'fallback_generated':'generated',outputWords,charged,agent,JSON.stringify(modelCalls),modelCalls.find(call=>call.role===agent)?.model??config.model,account,id]);
    if(fallbackId&&fallback)await c.execute('INSERT IGNORE INTO ai_fallbacks(id,account_id,session_id,customer,fallback_number,agent,reason,question,router_context,messages,source_message_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[fallbackId,account,session,message.from,prepared.fallbackNumber,agent??'lainnya',fallback.reason,fallback.question,prepared.routerContext,JSON.stringify(prepared.messages),message.messageId]);});
-  let status='sent',typingStarted=false;
+  let status='sent';
   try{
-   await guard();typingStarted=true;
-   await manager.typing(session,jid,'composing').catch(()=>{});
-   await this.wait(randomInt(1000,3001));
    // Sent ahead of the text answer so the customer sees the product before its explanation.
    // Best effort: a failed image never blocks or fails the text reply that follows.
    if(!generationFailed&&!fallback&&pendingImageId){
@@ -424,13 +429,14 @@ export class AIService {
    }
    await guard();const confirmation=await sendBilled(account,manager,session,'text',{to:message.from,text:answer},'ai_'+id,undefined,guard);if(fallbackId)await db.execute('UPDATE ai_fallbacks SET confirmation_message_id=? WHERE id=?',[confirmation.messageId,fallbackId]);
   }catch(error){status=error instanceof ApiError&&error.code==='ai_cancelled'?'cancelled':error instanceof ApiError&&error.code==='send_unknown'?'send_unknown':'send_failed';}
-  finally{if(typingStarted)await manager.typing(session,jid,'paused').catch(()=>{});}
+  finally{await stopTyping();}
   if(status==='sent'&&fallbackId&&fallback&&prepared.fallbackNotify&&prepared.fallbackNumber)try{const notification=await sendBilled(account,manager,session,'text',{to:prepared.fallbackNumber,text:'Konfirmasi diperlukan ['+fallbackId+']\\nPelanggan: '+message.from+'\\nPertanyaan: '+fallback.question+'\\nKonteks: '+(prepared.routerContext??'-')+'\\nBalas pesan ini atau awali balasan dengan '+fallbackId+'.'},'fallback_team_'+id);await db.execute('UPDATE ai_fallbacks SET notification_message_id=? WHERE id=?',[notification.messageId,fallbackId]);}catch{await db.execute("UPDATE ai_fallbacks SET status='failed' WHERE id=?",[fallbackId]);}
   await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_usage SET status=? WHERE account_id=? AND request_id=?',[generationFailed&&status!=='cancelled'?'fallback_'+status:status,account,id]);if(status==='sent'){
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');const [rows]=await c.execute<RowDataPacket[]>('SELECT messages,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);
    if(!rows[0]||rows[0].revision!==prepared.revision)return;
    const memory=[...parseMemory(rows[0].messages),{role:'assistant' as const,content:answer}].slice(-(limits[0]?.memory_limit??defaults.memory_limit));
    await c.execute('UPDATE ai_conversations SET messages=?,router_context=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),routerContext,account,session,message.from]);}});
+  }finally{await stopTyping();}
  }
 }
 export const ai=new AIService();

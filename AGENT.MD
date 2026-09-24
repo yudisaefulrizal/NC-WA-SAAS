@@ -106,7 +106,7 @@ Verifikasi AI: check/build/sintaks JavaScript dan browser desktop/mobile lulus. 
 
 ## Pembaruan balasan AI natural — 16 September 2026
 
-Asisten menandai pesan dibaca sebelum generasi, mengirim composing setelah jawaban siap, menunggu acak 1–3 detik, mengirim jawaban, lalu paused melalui finally. Read/presence best effort tanpa kredit tambahan; pemeriksaan pembatalan dipertahankan selama jeda. Check/build dan 13/13 tes AI lulus. Uji HP nyata belum dilakukan.
+Asisten menunggu acak 0,2–1 detik, menandai pesan dibaca, lalu mengirim composing sejak sebelum generasi dan menyegarkannya setiap 8 detik hingga jawaban terkirim (urutan diubah 24 September 2026; sebelumnya composing baru dikirim setelah jawaban siap diikuti jeda 1–3 detik), mengirim jawaban, lalu paused melalui finally. Read/presence best effort tanpa kredit tambahan; pemeriksaan pembatalan dipertahankan selama jeda. Check/build dan 13/13 tes AI lulus. Uji HP nyata belum dilakukan.
 
 ## Pembaruan ambil alih otomatis — 16 September 2026
 

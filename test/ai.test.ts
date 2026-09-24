@@ -114,10 +114,10 @@ test('Gateway assistant routes verify session ownership and account isolation',a
  }finally{await gateway.stop();await rm(root,{recursive:true,force:true});}
 });
 
-test('Natural reply reads before AI, composes before random 1–3 second wait, then sends and pauses',async()=>{
- const events:string[]=[];const f=await fixture(async()=>{events.push('generate');return 'Jawaban';},false,async ms=>{assert.ok(Number.isInteger(ms)&&ms>=1000&&ms<=3000);events.push('wait');},events);
+test('Natural reply waits briefly, reads, composes through generation, then sends and pauses',async()=>{
+ const events:string[]=[];const f=await fixture(async()=>{events.push('generate');return 'Jawaban';},false,async ms=>{assert.ok(Number.isInteger(ms)&&ms>=200&&ms<=1000);events.push('wait');},events);
  await f.service.incoming(f.id,f.manager,'shop',f.message('natural'));
- assert.deepEqual(events,['read:628123456789@s.whatsapp.net:natural','generate','composing','wait','send','paused']);
+ assert.deepEqual(events,['wait','read:628123456789@s.whatsapp.net:natural','composing','generate','send','paused']);
  await f.service.incoming(f.id,f.manager,'shop',f.message('natural'));assert.equal(events.length,6);assert.equal((await basicWallet(f.id)).balance,99);
 });
 test('Typing ends after send failure or cancellation during the delay',async()=>{

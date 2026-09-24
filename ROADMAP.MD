@@ -40,7 +40,7 @@ Centang = implementasi tersedia; verifikasi akhir dan uji integrasi nyata masih 
 
 Aturan dan batas versi pertama: [plane-fitur-ai.md bagian 10](plane-fitur-ai.md#10-implementasi--16-september-2026).
 
-- [x] Balasan AI natural: read sebelum generasi, composing → jeda acak 1–3 detik → kirim → paused; 13/13 tes AI dan check/build lulus.
+- [x] Balasan AI natural: jeda acak 0,2–1 detik → read → composing selama generasi (disegarkan tiap 8 detik) → kirim → paused; 13/13 tes AI dan check/build lulus.
 - [x] Ambil alih otomatis dari balasan manual HP/Web: ID sistem disimpan sebelum pengiriman, pause per pelanggan, memori admin, deduplikasi persisten, dan pembatalan AI tertunda. Uji perangkat nyata masih tertunda.
 
 ## Multi-agent internal — 17 September 2026
