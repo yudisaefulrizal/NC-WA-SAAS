@@ -44,7 +44,8 @@ export function parseIncoming(message: WAMessage): IncomingMessage | undefined {
   }
 }
 
-// Only live outbound chat content can trigger takeover; protocol updates and groups cannot.
+// Only live outbound chat content can trigger takeover; protocol updates cannot. Group messages
+// are retained so Auto Share can recognize its explicit "tambah" command from the session owner.
 export function parseManualCandidate(message: WAMessage, connectedAtSeconds: number): IncomingMessage | undefined {
   if (!message.key.fromMe || Number(message.messageTimestamp ?? 0) < connectedAtSeconds) return;
   const content = normalizeMessageContent(message.message);
@@ -53,8 +54,10 @@ export function parseManualCandidate(message: WAMessage, connectedAtSeconds: num
     ['lokasi', content.locationMessage ?? content.liveLocationMessage],
     ['polling', content.pollCreationMessage ?? content.pollCreationMessageV2 ?? content.pollCreationMessageV3],
   ].find(([, value]) => value);
-  const parsed = parseIncoming({ ...message, key: { ...message.key, fromMe: false },
+  const key={...message.key,fromMe:false};
+  if(key.remoteJid?.endsWith('@g.us')&&!key.participant&&!key.participantAlt)key.participant=key.remoteJid;
+  const parsed = parseIncoming({ ...message, key,
     message: supported ? { conversation: `[Pesan ${supported[0]} manual]` } : message.message });
-  if (!parsed || parsed.isGroup || !/^[1-9][0-9]{5,14}$/.test(parsed.from)) return;
+  if (!parsed || (!parsed.isGroup && !/^[1-9][0-9]{5,14}$/.test(parsed.from))) return;
   return parsed;
 }

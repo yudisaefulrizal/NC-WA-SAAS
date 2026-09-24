@@ -53,6 +53,8 @@ test('validation canonicalizes numbers and checks schedules',()=>{
  assert.throws(()=>templateInput({name:'Bad',media_type:'image'}));
  assert.throws(()=>templateInput({name:'Empty',message:''}));
  assert.equal(contactInput({nomor:'628123456789@s.whatsapp.net'}).nomor,'628123456789@s.whatsapp.net');
+ assert.equal(contactInput({nomor:'628123456789',nama:null}).nama,null);
+ assert.equal(contactInput({nomor:'628123456789',nama:' Budi '}).nama,'Budi');
  assert.equal(contactInput({nomor:'123456789@g.us'}).nomor,'123456789@g.us');
  assert.throws(()=>contactInput({nomor:'abc'}));assert.throws(()=>jobInput(data('x')));
  assert.throws(()=>jobInput({...data('x',['a']),enabled:true,next_at:'2000-01-01'}));
@@ -60,6 +62,21 @@ test('validation canonicalizes numbers and checks schedules',()=>{
  assert.equal(nextSchedule(new Date('2026-01-01T00:00:00Z'),60,new Date('2026-01-01T03:15:00Z'))?.toISOString(),'2026-01-01T04:00:00.000Z');
  assert.equal(nextSchedule(new Date(),0,new Date()),null);
  for(let i=0;i<100;i++){const ms=randomDelay();assert.ok(ms>=1000&&ms<=3000);}
+});
+integration('listener tambah dengan pemisah hubung menyimpan nama dan kelompok hanya saat aktif',async()=>{
+ const a=await user();await db.execute('INSERT INTO auto_share_settings(account_id,auto_add_enabled) VALUES (?,TRUE)',[a]);
+ const base={messageId:'add',sender:'628123456789',type:'text' as const,timestamp:1};
+ const privateChat={...base,from:'628123456789',isGroup:false,groupId:null,text:' Tambah-Budi-Alyusro '};
+ assert.equal(await service.listen(a,privateChat),undefined);
+ assert.deepEqual(await service.listen(a,privateChat,true),{nomor:'628123456789',nama:'Budi',kelompkontak:'Alyusro',isGroup:false});
+ const group={...base,messageId:'group-add',from:'123456@g.us',isGroup:true,groupId:'123456@g.us',text:'tambah-Mahad-Komunitas'};
+ assert.equal(await service.listen(a,group),undefined);
+ assert.deepEqual(await service.listen(a,group,true),{nomor:'123456@g.us',nama:'Mahad',kelompkontak:'Komunitas',isGroup:true});
+ const unnamed={...base,messageId:'unnamed',from:'628111111111',isGroup:false,groupId:null,text:'tambah'};
+ assert.deepEqual(await service.listen(a,unnamed,true),{nomor:'628111111111',nama:null,kelompkontak:'',isGroup:false});
+ await service.listen(a,{...base,messageId:'ignore',from:'628999999999',isGroup:false,groupId:null,text:'tambahkan'});
+ const [rows]=await db.execute<any[]>('SELECT nomor,nama,kelompkontak FROM daftar_kontak WHERE account_id=? ORDER BY nomor',[a]);
+ assert.deepEqual(rows,[{nomor:'123456@g.us',nama:'Mahad',kelompkontak:'Komunitas'},{nomor:'628111111111',nama:null,kelompkontak:''},{nomor:'628123456789',nama:'Budi',kelompkontak:'Alyusro'}]);
 });
 integration('asset upload enforces quota, magic-byte sniffing, and tenant isolation',async()=>{
  const a=await user(),b=await user();

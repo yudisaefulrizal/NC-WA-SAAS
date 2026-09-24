@@ -51,15 +51,14 @@ try{
   // Step 1: with no source, the form stays exactly as it was before this feature.
   assert.equal(await page.locator('#share-source-fields').isHidden(),true,'blok sumber tampil padahal sumber data kosong');
   assert.equal(await page.locator('#share-variable-bar').isHidden(),true,'baris variabel tampil tanpa sumber data');
-  await page.locator('#share-media-type').selectOption('image');
-  assert.equal(await page.locator('#share-asset-field').isHidden(),false,'pilihan asset hilang untuk template gambar');
-  // The endpoint media option must not even be offered until a data source exists.
-  assert.equal(await page.locator('#share-media-source option[value="endpoint"]').evaluate(o=>(o as HTMLOptionElement).hidden),true,'opsi media endpoint tampil tanpa sumber data');
 
   // Step 2: choosing the endpoint source reveals the extra fields.
-  await page.locator('#share-source-mode').selectOption('endpoint');
+  await page.locator('[name="source_mode"][value="endpoint"]').check();
   assert.equal(await page.locator('#share-source-fields').isHidden(),false,'blok sumber tidak muncul setelah dipilih');
   assert.equal(await page.locator('#share-media-source option[value="endpoint"]').evaluate(o=>(o as HTMLOptionElement).hidden),false,'opsi media endpoint tidak muncul setelah sumber dipilih');
+  await page.locator('#share-template-next').click();
+  assert.equal(await page.locator('[data-template-step="1"]').isHidden(),false,'API dapat melewati langkah dasar tanpa tes koneksi');
+  assert.match(await page.locator('#share-source-result').innerText(),/Uji koneksi/, 'peringatan tes koneksi tidak terlihat');
 
   // Step 3: custom headers are addable and removable.
   await page.locator('#share-header-add').click();
@@ -70,6 +69,7 @@ try{
 
   // Step 4: testing the endpoint lists the variables and shows the raw response.
   await page.locator('[name="source_endpoint"]').fill('https://data.example.com/statistik');
+  await page.locator('#share-template-form [name="name"]').fill('Template Sumber');
   await page.locator('#share-source-test').click();
   await page.locator('#share-source-vars button').first().waitFor();
   assert.equal(await page.locator('#share-source-vars button').count(),3,'variabel tidak lengkap');
@@ -77,6 +77,13 @@ try{
   assert.equal(await page.locator('#share-variable-bar').isHidden(),false,'baris variabel tidak muncul setelah tes');
   assert.deepEqual(sentHeaders,[{name:'X-API-Key',value:'rahasia'}],'header custom tidak dikirim ke server');
   assert.match(await page.locator('#share-source-result').innerText(),/Lihat respons endpoint/,'respons mentah tidak ditawarkan');
+
+  // A successful first step opens the content step; API settings never crowd the editor itself.
+  await page.locator('#share-template-next').click();
+  assert.equal(await page.locator('[data-template-step="1"]').isHidden(),true,'langkah dasar belum tersembunyi');
+  assert.equal(await page.locator('[data-template-step="2"]').isHidden(),false,'langkah konten belum terbuka');
+  await page.locator('#share-media-type').selectOption('image');
+  assert.equal(await page.locator('#share-asset-field').isHidden(),false,'pilihan asset hilang untuk template gambar');
 
   // Step 5: media from the endpoint is picked by variable name, not a dedicated media block.
   await page.locator('#share-media-source').selectOption('endpoint');
@@ -98,6 +105,8 @@ try{
   // The preview runs the real path and reports whether the text was tidied.
   await page.locator('#share-tidy').check();
   await page.locator('[name="tidy_note"]').fill('Pakai poin bernomor');
+  await page.locator('#share-template-next').click();
+  assert.equal(await page.locator('[data-template-step="3"]').isHidden(),false,'langkah tinjau tidak terbuka untuk pratinjau');
   previewCalls=0;
   // Clicking repeatedly during the request must not queue extra model calls, each of which costs
   // credit for the same preview.
@@ -114,7 +123,9 @@ try{
   assert.match(await page.locator('#share-preview-text').innerText(),/sudah dirapikan AI/,'pratinjau tidak menyebut hasil perapihan');
 
   // Step 7: switching back to no source collapses everything again.
-  await page.locator('#share-source-mode').selectOption('none');
+  await page.locator('#share-template-back').click();
+  await page.locator('#share-template-back').click();
+  await page.locator('[name="source_mode"][value="none"]').check();
   assert.equal(await page.locator('#share-source-fields').isHidden(),true,'blok sumber tidak tersembunyi kembali');
   assert.equal(await page.locator('#share-variable-bar').isHidden(),true,'baris variabel tidak tersembunyi kembali');
   assert.equal(await page.locator('#share-media-source').inputValue(),'asset','sumber media tidak kembali ke galeri');
@@ -124,10 +135,13 @@ try{
   // Step 8: saving works end to end, and the notification must clear the open dialog. A dialog from
   // showModal() lives in the top layer, so a plain z-index would leave the banner hidden behind it.
   // The gallery is empty in this fixture, so a media template could not be saved here anyway.
-  await page.locator('#share-media-type').selectOption('text');
   // Step 7 switched the source off, so it is turned back on to save a template that uses one.
-  await page.locator('#share-source-mode').selectOption('endpoint');
+  await page.locator('[name="source_mode"][value="endpoint"]').check();
   await page.locator('[name="source_endpoint"]').fill('https://data.example.com/statistik');
+  await page.locator('#share-source-test').click();
+  await page.locator('#share-source-vars button').first().waitFor();
+  await page.locator('#share-template-next').click();
+  await page.locator('#share-media-type').selectOption('text');
   await page.locator('#share-tidy').check();
   // The note only appears once the rewrite is switched on.
   assert.equal(await page.locator('#share-tidy-note-field').isHidden(),false,'kolom catatan perapihan tidak muncul setelah dicentang');
@@ -139,9 +153,10 @@ try{
    if(route.request().method()==='POST')savedBody=JSON.parse(route.request().postData()??'{}');
    await route.fallback();
   });
-  await page.locator('#share-template-form [name="name"]').fill('Template Sumber');
   await page.locator('#share-template-form [name="message"]').fill('Halo tanpa variabel');
-  await page.locator('#share-template-form button:not([type=button])').click();
+  await page.locator('#share-template-next').click();
+  assert.equal(await page.locator('[data-template-step="3"]').isHidden(),false,'langkah tinjau belum terbuka');
+  await page.locator('#share-template-save').click();
   await page.locator('#message:popover-open').waitFor();
   assert.match(await page.locator('#message').innerText(),/Template tersimpan/,'simpan template gagal');
   assert.equal(savedBody.tidy,true,'pilihan rapikan tidak ikut tersimpan');
@@ -162,7 +177,7 @@ try{
   await page.locator('#share-template-dialog[open]').waitFor();
   assert.equal(await page.locator('#share-tidy').isChecked(),true,'pilihan rapikan tidak dipulihkan saat template dibuka ulang');
   assert.equal(await page.locator('[name="tidy_note"]').inputValue(),'Pakai poin bernomor','catatan perapihan tidak dipulihkan');
-  assert.equal(await page.locator('#share-source-mode').inputValue(),'endpoint','sumber data tidak dipulihkan');
+  assert.equal(await page.locator('[name="source_mode"]:checked').inputValue(),'endpoint','sumber data tidak dipulihkan');
   assert.equal(await page.locator('[name="source_endpoint"]').inputValue(),'https://data.example.com/statistik','endpoint tidak dipulihkan');
   await page.locator('#share-template-dialog [data-close="share-template-dialog"]').click();
 

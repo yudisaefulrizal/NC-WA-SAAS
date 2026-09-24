@@ -6,8 +6,12 @@ export async function migrateAutoShare(){
  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX asset_account(account_id,created_at),
  FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
  ) ENGINE=InnoDB`);
+ await db.query(`CREATE TABLE IF NOT EXISTS auto_share_settings (
+ account_id CHAR(36) PRIMARY KEY, auto_add_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+ FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+ ) ENGINE=InnoDB`);
  await db.query(`CREATE TABLE IF NOT EXISTS daftar_kontak (
- id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, nomor VARCHAR(100) NOT NULL,
+ id CHAR(36) PRIMARY KEY, account_id CHAR(36) NOT NULL, nomor VARCHAR(100) NOT NULL, nama VARCHAR(100) NULL,
  kelompkontak VARCHAR(100) NOT NULL DEFAULT '', UNIQUE KEY contact_unique(account_id,nomor),
  INDEX contact_group(account_id,kelompkontak), FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
  ) ENGINE=InnoDB`);
@@ -45,6 +49,7 @@ export async function migrateAutoShare(){
   if(!rows.length)await db.query(`ALTER TABLE ${table} ADD ${definition}`);
  }
  await column('share_assets','public_token','CHAR(32) NULL');
+ await column('daftar_kontak','nama','VARCHAR(100) NULL');
  await index('share_assets','public_token','UNIQUE INDEX public_token(public_token)');
  await column('auto_share_templates','media_type',"VARCHAR(16) NOT NULL DEFAULT 'text'");
  await column('auto_share_templates','media_url','VARCHAR(4096) NULL');

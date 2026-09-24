@@ -202,3 +202,14 @@ Verifikasi Auto Share: 5/5 tes terarah pada MySQL sementara lulus; browser deskt
 - [x] Catatan perapihan diverifikasi sampai ke model pada kedua jalur: pengiriman membaca `tidy_note` dari basis data, pratinjau memakai nilai yang sedang diketik.
 - [x] Pratinjau memberi peringatan bila pengaturan rapikan yang dipakai belum disimpan, karena pengiriman terjadwal memakai nilai tersimpan.
 - [x] Tes: 18/18 Auto Share lulus; regresi penuh 148/149 (satu kegagalan batas memori AI pra-eksisting).
+
+## Wizard template Auto Share — 24 September 2026
+
+- [x] Dialog Tambah/Ubah Template dibagi menjadi tiga langkah: Dasar (nama dan sumber data), Konten (teks/media/perapihan), dan Tinjau (pratinjau serta simpan).
+- [x] Konfigurasi API, header, dan tes koneksi berada di langkah Dasar; editor tidak lagi bercampur dengan detail koneksi.
+- [x] Indikator progres, tombol Kembali/Lanjut, validasi field per langkah, ringkasan akhir, dan tata letak ponsel ditambahkan.
+- [x] Pemeriksaan browser form diperbarui untuk mengikuti perpindahan antar-langkah.
+- [x] Template berbasis API wajib menjalankan Tes koneksi dan mengambil variabel sebelum dapat melanjutkan ke langkah konten; perubahan URL atau header membatalkan hasil tes tersebut.
+- [x] Kontak Auto Share mendukung nama opsional; nilai `NULL` tetap kompatibel dengan kontak lama dan nama dapat dicari saat memilih tujuan.
+- [x] Tombol Auto tambah mengaktifkan listener pesan keluar dari sesi sendiri. Format `tambah-nama-kelompok` menyimpan nama dan kelompok opsional; chat pribadi memasukkan lawan bicara, sedangkan pesan grup memasukkan ID grup; duplikasi diabaikan.
+- [x] Setelah listener menambahkan kontak, server mengirim event realtime khusus; dashboard Auto Share yang terbuka langsung memuat ulang daftar dan menampilkan notifikasi.

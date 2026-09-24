@@ -4,7 +4,7 @@ import {Readable} from 'node:stream';
 import {createReadStream} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import express from 'express';
-import type {RowDataPacket,PoolConnection} from 'mysql2/promise';
+import type {RowDataPacket,PoolConnection,ResultSetHeader} from 'mysql2/promise';
 import {db} from './db.js';
 import {ApiError,type SessionManager} from './engine/sessions.js';
 import {object,recipient,requiredString} from './engine/messages.js';
@@ -14,6 +14,7 @@ import {encrypt,decrypt} from './payments.js';
 import {downloadPublicMedia} from './engine/download.js';
 import {tidyMessage,tidyNoteInput} from './auto-share-tidy.js';
 import {ai} from './ai.js';
+import type {IncomingMessage} from './engine/incoming.js';
 import {decodeHeaders,fetchSource,maxSourceMediaBytes,mediaVariable,parsePlaceholders,renderTemplate,sourceInput,validateHeaders,validateSourceData,validateSourceMedia,type SourceHeaders,type SourceTransport} from './auto-share-source.js';
 
 const invalid=(message:string)=>new ApiError(400,'invalid_request',message);
@@ -21,9 +22,11 @@ export function contactInput(body:unknown){
  const input=object(body);
  const raw=typeof input.nomor==='string'?input.nomor.trim().replace(/@s\.whatsapp\.net$/,''):input.nomor;
  const nomor=recipient(raw);
+ const nama=input.nama??null;
+ if(nama!==null&&(typeof nama!=='string'||nama.trim().length>100))throw invalid('Nama kontak maksimal 100 karakter');
  const group=input.kelompkontak??'';
  if(typeof group!=='string'||group.trim().length>100)throw invalid('Kelompok kontak maksimal 100 karakter');
- return {nomor,kelompkontak:group.trim()};
+ return {nomor,nama:typeof nama==='string'&&nama.trim()?nama.trim():null,kelompkontak:group.trim()};
 }
 function strings(value:unknown){
  if(!Array.isArray(value)||value.length>500||value.some(v=>typeof v!=='string'||!v.trim()||v.length>100))throw invalid('Daftar tujuan tidak valid (maksimal 500 pilihan)');
@@ -191,18 +194,20 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
   await db.execute('DELETE FROM share_assets WHERE account_id=? AND id=?',[account,req.params.id]);
   res.json({ok:true});
  });
- router.get('/contacts',async(_req,res)=>{const [rows]=await db.execute('SELECT id,nomor,kelompkontak FROM daftar_kontak WHERE account_id=? ORDER BY kelompkontak,nomor',[res.locals.accountId]);res.json(rows);});
+ router.get('/contacts',async(_req,res)=>{const [rows]=await db.execute('SELECT id,nomor,nama,kelompkontak FROM daftar_kontak WHERE account_id=? ORDER BY kelompkontak,nama,nomor',[res.locals.accountId]);res.json(rows);});
  async function saveContact(account:string,id:string,body:unknown,update:boolean){
   const v=contactInput(body);
   try{
-   if(update){const [rows]=await db.execute<RowDataPacket[]>('SELECT id FROM daftar_kontak WHERE account_id=? AND id=?',[account,id]);if(!rows.length)throw new ApiError(404,'not_found','Kontak tidak ditemukan');await db.execute('UPDATE daftar_kontak SET nomor=?,kelompkontak=? WHERE account_id=? AND id=?',[v.nomor,v.kelompkontak,account,id]);}
-   else await db.execute('INSERT INTO daftar_kontak(id,account_id,nomor,kelompkontak) VALUES (?,?,?,?)',[id,account,v.nomor,v.kelompkontak]);
+   if(update){const [rows]=await db.execute<RowDataPacket[]>('SELECT id FROM daftar_kontak WHERE account_id=? AND id=?',[account,id]);if(!rows.length)throw new ApiError(404,'not_found','Kontak tidak ditemukan');await db.execute('UPDATE daftar_kontak SET nomor=?,nama=?,kelompkontak=? WHERE account_id=? AND id=?',[v.nomor,v.nama,v.kelompkontak,account,id]);}
+   else await db.execute('INSERT INTO daftar_kontak(id,account_id,nomor,nama,kelompkontak) VALUES (?,?,?,?,?)',[id,account,v.nomor,v.nama,v.kelompkontak]);
   }catch(e){if((e as {code?:string}).code==='ER_DUP_ENTRY')throw new ApiError(409,'contact_exists','Kontak sudah tersimpan');throw e;}
   return {id,...v};
  }
  router.post('/contacts',async(req,res)=>res.status(201).json(await saveContact(res.locals.accountId,randomUUID(),req.body,false)));
  router.put('/contacts/:id',async(req,res)=>res.json(await saveContact(res.locals.accountId,req.params.id,req.body,true)));
  router.delete('/contacts/:id',async(req,res)=>{await db.execute('DELETE FROM daftar_kontak WHERE account_id=? AND id=?',[res.locals.accountId,req.params.id]);res.json({ok:true});});
+ router.get('/settings',async(_req,res)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT auto_add_enabled FROM auto_share_settings WHERE account_id=?',[res.locals.accountId]);res.json({auto_add_enabled:!!rows[0]?.auto_add_enabled});});
+ router.put('/settings',async(req,res)=>{const input=object(req.body);if(typeof input.auto_add_enabled!=='boolean')throw invalid('Status tambah kontak otomatis tidak valid');await db.execute('INSERT INTO auto_share_settings(account_id,auto_add_enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE auto_add_enabled=VALUES(auto_add_enabled)',[res.locals.accountId,input.auto_add_enabled]);res.json({auto_add_enabled:input.auto_add_enabled});});
  async function accountLock(c:PoolConnection,account:string){await c.execute('SELECT id FROM accounts WHERE id=? FOR UPDATE',[account]);}
  router.get('/templates',async(_req,res)=>{const [rows]=await db.execute<RowDataPacket[]>('SELECT id,name,message,media_type,asset_id,filename,source_mode,source_endpoint,media_source,media_variable,tidy,tidy_note,source_secret FROM auto_share_templates WHERE account_id=? ORDER BY created_at DESC',[res.locals.accountId]);
   // Header values never leave the server; the form only needs their names to render the rows.
@@ -369,5 +374,7 @@ export function createAutoShare(getManager:(account:string)=>Promise<SessionMana
   // Safety net: a crash between saveTemporary and the run settling leaves files nothing will claim.
   await assets.sweepTemporary().catch(()=>{});
  }
- return {router,recover,tick,start(){stopped=false;const work=()=>{if(!stopped&&!pending)pending=tick().catch(async()=>{console.error('Proses Auto Share gagal; periksa database.');await recover().catch(()=>{});}).finally(()=>{pending=undefined;});};timer??=setInterval(work,1000).unref();work();},async stop(){stopped=true;clearInterval(timer);timer=undefined;await pending;}};
+ function autoAddInput(message:IncomingMessage){if(message.type!=='text')return;const matched=/^tambah(?:-([^-]*)(?:-(.*))?)?$/i.exec(message.text.trim());if(!matched)return;const nama=(matched[1]??'').trim()||null,kelompkontak=(matched[2]??'').trim();return (nama===null||nama.length<=100)&&kelompkontak.length<=100?{nama,kelompkontak}:undefined;}
+ async function listen(account:string,message:IncomingMessage,fromSession=false){const input=autoAddInput(message);if(!fromSession||!input)return;const [settings]=await db.execute<RowDataPacket[]>('SELECT auto_add_enabled FROM auto_share_settings WHERE account_id=?',[account]);if(!settings[0]?.auto_add_enabled)return;const nomor=message.isGroup?(message.groupId||message.from):message.from;if(!nomor)return;const [saved]=await db.execute<ResultSetHeader>('INSERT IGNORE INTO daftar_kontak(id,account_id,nomor,nama,kelompkontak) VALUES (?,?,?,?,?)',[randomUUID(),account,nomor,input.nama,input.kelompkontak]);return saved.affectedRows?{nomor,...input,isGroup:message.isGroup}:undefined;}
+ return {router,recover,tick,listen,start(){stopped=false;const work=()=>{if(!stopped&&!pending)pending=tick().catch(async()=>{console.error('Proses Auto Share gagal; periksa database.');await recover().catch(()=>{});}).finally(()=>{pending=undefined;});};timer??=setInterval(work,1000).unref();work();},async stop(){stopped=true;clearInterval(timer);timer=undefined;await pending;}};
 }

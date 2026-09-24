@@ -43,12 +43,13 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
     if(event.event==='session.status'&&event.status==='connected'&&typeof event.phone==='string'&&event.phone)await referral.qualify(id,event.phone).catch(()=>{});
    };
    result.onBeforeSend=async()=>{const [accounts]=await db.execute<RowDataPacket[]>('SELECT suspended FROM accounts WHERE id=?',[id]);if(!accounts[0]||accounts[0].suspended){await result.applyLimit(0);throw new ApiError(403,'account_suspended','Akun dinonaktifkan');}await result.applyLimit((await basicWallet(id)).session_limit);};
-   result.onOutgoing=async(session,message)=>{await ai.manualOutgoing(id,session.id,message);};
+   result.onOutgoing=async(session,message)=>{const {download,...data}=message;events.push({event:'message',direction:'outgoing',sessionId:session.id,...data,media:null});await ai.manualOutgoing(id,session.id,message);const added=await autoShare.listen(id,message,true);if(added)events.push({event:'auto_share.contact_added',sessionId:session.id,...added});};
+   result.onSent=async(session,message)=>{const content=message.content,text='text' in content?content.text:content.caption??`[Pesan ${content.type}]`;events.push({event:'message',direction:'outgoing',sessionId:session.id,messageId:message.messageId,from:message.to,sender:message.to,isGroup:message.to.endsWith('@g.us'),groupId:message.to.endsWith('@g.us')?message.to:null,type:'text' in content?'text':content.type,text,timestamp:Math.floor(Date.now()/1000),media:null});};
    result.onIncoming=async(session,message)=>{
     await result.onBeforeSend!();if(result.detail(session.id).serviceActive===false)return;
     const {download,...data}=message;
     const stored=await files.save(session.id,message);
-    const event={event:'message',sessionId:session.id,...data,media:stored};
+    const event={event:'message',sessionId:session.id,direction:'incoming',...data,media:stored};
     events.push(event);await hooks.enqueue(id,event);
     await ai.incoming(id,result,session.id,message);
    };

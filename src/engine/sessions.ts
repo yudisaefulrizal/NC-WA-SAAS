@@ -47,6 +47,7 @@ export class SessionManager {
   private limiting: Promise<void> = Promise.resolve();
   onEvent?: (event: { event: string; sessionId: string; [key: string]: unknown }) => Promise<void>;
   onOutgoing?: (session: SessionInfo, message: IncomingMessage) => Promise<void>;
+  onSent?: (session: SessionInfo, message: { messageId: string; to: string; content: Outbound }) => Promise<void>;
   onIncoming?: (session: SessionInfo, message: IncomingMessage) => Promise<void>;
   private queues = new WeakMap<Session, SendQueue>();
   constructor(protected connect: Connector, protected store?: SessionStore, private retryBaseMs = 1000, private sendIntervalMs = 1000) {}
@@ -86,7 +87,7 @@ export class SessionManager {
     SessionManager.validateId(id);
     if (this.stopped) throw new ApiError(503, 'unavailable', 'Engine sedang berhenti');
     if (this.sessions.has(id)) throw new ApiError(409, 'session_exists', `Session ${id} sudah ada`);
-    const session: Session = { id, createdAt: Date.now(), serviceActive: true, status: 'connecting', phone: null, filter: 'all', qr: null, generation: 0 };
+    const session: Session = { id, createdAt: Date.now(), serviceActive: true, status: 'connecting', phone: null, filter: 'private', qr: null, generation: 0 };
     this.sessions.set(id, session);
     const initialize = async () => {
       await this.persist(session);
@@ -174,6 +175,7 @@ export class SessionManager {
       finally { clearTimeout(timeout); }
       this.sent++;
       log(id, `Pesan berhasil dikirim: ${messageId}`);
+      this.track(this.onSent?.(this.detail(id), { messageId, to: jid, content }), id);
       return { messageId, to: jid };
     } catch (error) {
       if (error instanceof ApiError) throw error;

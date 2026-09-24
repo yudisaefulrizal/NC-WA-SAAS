@@ -148,6 +148,11 @@ app.get('/api/admin/ai/failures/:id',async(req,res)=>res.json(await ai.agentFail
 app.get('/api/admin/ai/trace',async(req,res)=>res.json(await ai.traceRequests(req.query.page??'1')));
 app.get('/api/admin/ai/trace/:requestId',async(req,res)=>res.json(await ai.traceLog(req.params.requestId)));
 app.put('/api/admin/ai',async(req,res)=>res.json(await ai.configure(res.locals.account.id,req.body)));
+app.get('/api/admin/ai/providers',async(_req,res)=>res.json(await ai.providerProfiles()));
+app.post('/api/admin/ai/providers',async(req,res)=>res.status(201).json(await ai.saveProviderProfile(req.body)));
+app.delete('/api/admin/ai/providers/:id',async(req,res)=>res.json(await ai.deleteProviderProfile(req.params.id)));
+app.put('/api/admin/ai/providers/routes',async(req,res)=>res.json(await ai.setProviderRoutes(req.body)));
+app.post('/api/admin/ai/providers/test',async(req,res)=>res.json(await ai.testProviderProfile(req.body)));
 app.post('/api/admin/ai/test',rateLimit({windowMs:60000,limit:5}),async(req,res)=>res.json(await ai.test(req.body?.tier)));
 app.post('/api/admin/accounts/:id/ai-credits',async(req,res)=>res.json(await ai.adjust(res.locals.account.id,req.params.id,req.body)));
 app.get('/api/admin/midtrans',async(_req,res)=>res.json(await payments.configuration()));
@@ -184,21 +189,22 @@ app.put('/api/admin/referral/agents/:id',async(req,res)=>res.json(await referral
 // feature. Each page is rewritten at startup so its own assets carry a content hash; a changed file
 // gets a new URL, and an unchanged one keeps being reused from cache.
 const assetVersions=new Map<string,string>();
+const cacheRenderedPages=process.env.NODE_ENV==='production';
 function versioned(name:string){
  const cached=assetVersions.get(name);
- if(cached)return cached;
+ if(cacheRenderedPages&&cached)return cached;
  let stamp='0';
  try{stamp=createHash('sha256').update(readFileSync('public/'+name)).digest('hex').slice(0,12);}catch{}
  const url='/'+name+'?v='+stamp;
- assetVersions.set(name,url);
+ if(cacheRenderedPages)assetVersions.set(name,url);
  return url;
 }
 const pages=new Map<string,string>();
 function page(name:string){
  const cached=pages.get(name);
- if(cached)return cached;
+ if(cacheRenderedPages&&cached)return cached;
  const html=readFileSync('public/'+name,'utf8').replace(/\/(app|ai-studio)\.js\b/g,(_m,base)=>versioned(base+'.js')).replace(/\/(style|ai-studio)\.css\b/g,(_m,base)=>versioned(base+'.css'));
- pages.set(name,html);
+ if(cacheRenderedPages)pages.set(name,html);
  return html;
 }
 // A hashed URL can never go stale, so it is cached hard; everything else keeps revalidating.

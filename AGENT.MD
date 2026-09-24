@@ -229,3 +229,11 @@ Penggabungan dilakukan sebagai giliran pesan terpisah, bukan penyambungan teks k
 Pratinjau memakai catatan yang sedang diketik pada formulir, bukan yang tersimpan, agar pengaruh perubahan terlihat sebelum template disimpan.
 
 Bukti: 18/18 tes Auto Share lulus termasuk pemeriksaan susunan pesan, regresi penuh 148/149 dengan satu kegagalan batas memori AI pra-eksisting, pemeriksaan browser lulus pada desktop dan ponsel termasuk simpan lalu buka ulang. Migrasi dijalankan pada database pengembangan. Panggilan AI sungguhan belum diuji; pengujian memakai transport tiruan.
+
+### Wizard template Auto Share — 24 September 2026
+
+Dialog template kini memakai alur tiga tahap: Dasar untuk nama dan pilihan data, Konten untuk pesan/media/perapihan, lalu Tinjau untuk pratinjau dan simpan. Konfigurasi endpoint, header rahasia, dan tes koneksi tetap berada di tahap pertama agar editor pesan tidak penuh ketika memakai API. Navigasi memvalidasi hanya field pada tahap aktif, menampilkan progres dan ringkasan akhir, serta dirapatkan untuk layar ponsel. Pemeriksaan browser sumber data diperbarui untuk bergerak melalui wizard. TypeScript check dan build lulus; pemeriksaan browser perlu dijalankan lewat runner MySQL sementara yang biasa.
+
+### Pembaruan Auto tambah — 24 September 2026
+
+Listener hanya mengenali pesan keluar dari sesi sendiri. Perintah memakai pemisah hubung agar dua metadata dapat dibawa sekaligus: `tambah-nama-kelompok`, misalnya `tambah-budi-alyusro`; `tambah` tanpa nama maupun kelompok tetap valid. Pesan pribadi menyimpan lawan bicara, sedangkan pesan grup menyimpan ID grup. Nama dan kelompok dibatasi 100 karakter dan kontak yang sudah ada tidak ditimpa.

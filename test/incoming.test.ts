@@ -24,13 +24,13 @@ test('filter private mencegah pesan grup diteruskan', async () => {
   assert.deepEqual(received, ['private']);
 });
 
-test('Manual candidates only include fresh fromMe private chat content, using alternate phone for LID',async()=>{
+test('Manual candidates include fresh private or group chat content, using alternate phone for LID',async()=>{
  const {parseManualCandidate}=await import('../src/engine/incoming.js');
  const message={key:{id:'manual',fromMe:true,remoteJid:'123@lid',remoteJidAlt:'628123456789@s.whatsapp.net'},message:{conversation:'Admin menjawab'},messageTimestamp:101};
  assert.equal(parseManualCandidate(message,100)?.from,'628123456789');
  assert.equal(parseManualCandidate({...message,messageTimestamp:99},100),undefined);
  assert.equal(parseManualCandidate({...message,key:{...message.key,fromMe:false}},100),undefined);
- assert.equal(parseManualCandidate({...message,key:{...message.key,remoteJid:'123@g.us'}},100),undefined);
+ const group=parseManualCandidate({...message,key:{...message.key,remoteJid:'123@g.us',remoteJidAlt:undefined}},100);assert.equal(group?.isGroup,true);assert.equal(group?.groupId,'123@g.us');
  assert.equal(parseManualCandidate({...message,message:{protocolMessage:{}}},100),undefined);
 });
 test('Outgoing event reaches takeover even when incoming filter is group-only',async()=>{

@@ -51,6 +51,8 @@ try{
   assert.match(await page.locator('#share-target-summary').innerText(),/Belum ada tujuan/,'ringkasan tujuan tidak menyebut kondisi kosong');
 
   await page.locator('#share-job-form [name="name"]').fill('Jadwal Promo');
+  await page.locator('#share-job-next').click();
+  assert.equal(await page.locator('[data-share-job-step="2"]').isHidden(),false,'langkah template dan tujuan tidak terbuka');
 
   // Adding a second template reveals the rotation order.
   assert.equal(await page.locator('#share-rotation-preview').isHidden(),true,'pratinjau rotasi tampil untuk satu template');
@@ -77,6 +79,8 @@ try{
   assert.equal(await page.locator('#share-job-save').isDisabled(),false,'tombol simpan masih terkunci padahal lengkap');
 
   // Enabling the schedule demands a time, and a past time is refused in the form itself.
+  await page.locator('#share-job-next').click();
+  assert.equal(await page.locator('[data-share-job-step="3"]').isHidden(),false,'langkah jadwal tidak terbuka');
   await page.locator('#share-job-form [name="enabled"]').check();
   assert.match(await blocker.innerText(),/isi waktu pengiriman pertama/,'waktu kosong tidak diberitahukan');
   assert.equal(await page.locator('#share-job-save').isDisabled(),true,'simpan aktif padahal waktu kosong');
@@ -95,6 +99,7 @@ try{
   await page.locator('#share-job-list').getByText('Jadwal Promo',{exact:true}).waitFor();
   await page.locator('#share-job-list').getByRole('button',{name:'Ubah',exact:true}).first().click();
   await page.locator('#share-job-dialog[open]').waitFor();
+  await page.locator('[data-share-job-step-indicator="2"]').click();
   assert.equal(await page.locator('#share-target-contacts input:checked').count(),1,'kontak terpilih tidak dipulihkan');
   assert.deepEqual(await page.locator('#share-target-groups').inputValue(),'Wali','kelompok terpilih tidak dipulihkan');
   assert.equal(await page.locator('#share-order li').count(),2,'urutan template tidak dipulihkan');
