@@ -127,3 +127,29 @@ test('AI sees whether a product has a photo, never the internal image id',()=>{
  const withPhoto=productForAI({...base,image_id:'a'.repeat(32)});
  assert.equal(withPhoto.ada_foto,true);assert.equal('image_id' in withPhoto,false);
 });
+test('Deleting an order is scoped to its tenant and session',async()=>{
+ const a=await fixture(),b=await fixture(),data=new AIData();
+ await data.saveProduct(a.account,a.session,'',product);
+ const {order}=await data.execute('create_order',JSON.stringify(input),a) as any;
+ for(const [account,session] of [[b.account,a.session],[a.account,'other']])await assert.rejects(data.deleteOrder(account,session,order.id),{code:'not_found'});
+ assert.deepEqual(await data.deleteOrder(a.account,a.session,order.id),{ok:true});
+ assert.deepEqual(await data.orders(a.account,a.session),[]);assert.equal(await data.order(a.account,a.session,order.id),null);
+ await assert.rejects(data.deleteOrder(a.account,a.session,order.id),{code:'not_found'});
+ // Stock was never reserved by the order, so it is unchanged after deletion.
+ assert.equal((await data.catalog(a,''))[0].stock,product.stock);
+});
+test('Orders can be marked paid, and migrating the old status enum keeps existing statuses',async()=>{
+ const {migrateAI}=await import('../src/ai-schema.js');
+ const a=await fixture(),data=new AIData();
+ await data.saveProduct(a.account,a.session,'',product);
+ const {order}=await data.execute('create_order',JSON.stringify(input),a) as any;
+ await data.updateOrder(a.account,a.session,order.id,{status:'diproses',notes:''});
+ await db.query("ALTER TABLE ai_orders MODIFY status ENUM('baru','diproses','selesai','dibatalkan') NOT NULL DEFAULT 'baru'");
+ await migrateAI();await migrateAI();
+ const [column]=await db.execute<any[]>("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ai_orders' AND COLUMN_NAME='status'");
+ assert.equal(column[0].COLUMN_TYPE,"enum('baru','dibayar','diproses','selesai','dibatalkan')");
+ assert.equal((await data.order(a.account,a.session,order.id))?.status,'diproses');
+ await data.updateOrder(a.account,a.session,order.id,{status:'dibayar',notes:'Transfer diterima'});
+ assert.equal((await data.order(a.account,a.session,order.id))?.status,'dibayar');
+ await assert.rejects(data.updateOrder(a.account,a.session,order.id,{status:'lunas'}),{code:'invalid_request'});
+});
