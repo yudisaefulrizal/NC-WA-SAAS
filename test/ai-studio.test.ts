@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import request from 'supertest';
 import {db} from '../src/db.js';
-import {AIService,defaults,type AITransport} from '../src/ai.js';
-import {defaultWorkflow,workflowInput,workflowState,changeWorkflow,activeWorkflow} from '../src/ai-workflow.js';
+import {defaults,type AITransport} from '../src/ai.js';
+import {defaultWorkflow,workflowInput} from '../src/ai-workflow.js';
+import {workflowState,changeWorkflow,activeWorkflow} from '../src/ai-profiles.js';
 import {AIStudio} from '../src/ai-studio.js';
 import {runAgents} from '../src/ai-agents.js';
 import {createApp} from '../src/app.js';
@@ -13,14 +14,14 @@ import {digest} from '../src/security.js';
 const owner=randomUUID(),client=randomUUID(),ownerToken=randomUUID(),clientToken=randomUUID();
 let original:any[]=[];
 before(async()=>{
- [original]=await db.query<any[]>('SELECT * FROM ai_workflow WHERE id=1');
+ [original]=await db.query<any[]>('SELECT * FROM ai_workflow WHERE profile_type=\'cs\'');
  for(const [id,role,token] of [[owner,'owner',ownerToken],[client,'user',clientToken]]){
   await db.execute('INSERT INTO accounts(id,email,password_hash,role) VALUES (?,?,?,?)',[id,id+'@test.invalid','unused',role]);
   await db.execute('INSERT INTO login_sessions VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR))',[digest(token),id]);
  }
 });
 after(async()=>{
- await db.query('DELETE FROM ai_workflow WHERE id=1');if(original[0]){const row=original[0];await db.execute('INSERT INTO ai_workflow(id,draft,active,revision,active_version,published_revision) VALUES (1,?,?,?,?,?)',[typeof row.draft==='string'?row.draft:JSON.stringify(row.draft),row.active?(typeof row.active==='string'?row.active:JSON.stringify(row.active)):null,row.revision,row.active_version,row.published_revision]);}
+ if(original[0]){const row=original[0];await db.execute("UPDATE ai_workflow SET draft=?,active=?,revision=?,active_version=?,published_revision=? WHERE profile_type='cs'",[typeof row.draft==='string'?row.draft:JSON.stringify(row.draft),row.active?(typeof row.active==='string'?row.active:JSON.stringify(row.active)):null,row.revision,row.active_version,row.published_revision]);}else await db.query("DELETE FROM ai_workflow WHERE profile_type='cs'");
  for(const id of [owner,client]){await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);await db.execute('DELETE FROM accounts WHERE id=?',[id]);}await db.end();
 });
 const products=[{name:'Produk uji',type:'product',description:'',price:150000,stock:10,active:true}];
@@ -44,14 +45,15 @@ test('Workflow validation keeps topology fixed and cannot grant unauthorized too
 
 test('Draft edits are isolated, optimistic locking protects saves, publication reaches production config',async()=>{
  const previous=await workflowState(),draft=defaultWorkflow();draft.nodes.router.prompt='Router pengujian khusus';draft.nodes.router.tier='smart';draft.nodes.profil_perusahaan.tools=[];
- const saved=await changeWorkflow(owner,{revision:previous.revision,draft});assert.equal(saved.revision,previous.revision+1);assert.deepEqual(saved.active,previous.active);assert.deepEqual(await activeWorkflow(),previous.active);
- await assert.rejects(changeWorkflow(owner,{revision:previous.revision,draft}),{code:'workflow_conflict'});
- await assert.rejects(changeWorkflow(owner,{revision:previous.revision},true),{code:'workflow_conflict'});
- const published=await changeWorkflow(owner,{revision:saved.revision},true);assert.equal(published.active_version,previous.active_version+1);assert.deepEqual(published.active,draft);
- const live=await new AIService().config();assert.equal(live.workflow!.nodes.router.prompt,'Router pengujian khusus');
- let first=true;await runAgents(async(c,m)=>{if(first){first=false;assert.ok(m[0].content.includes('Router pengujian khusus'));assert.equal(c.model,'smart');return JSON.stringify({sub_agent:'profil_perusahaan',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:'halo'});}assert.ok(m.at(-1)!.content.includes('Tools tersedia: .'));return JSON.stringify({answer:'Baik'});},{...await configuration(),workflow:live.workflow},[{role:'user',content:'halo'}],300,{account:owner,session:'test',customer:'628000000000',requestId:'one',knowledge:''});
+ const saved=await changeWorkflow(owner,'cs',{revision:previous.revision,draft});assert.equal(saved.revision,previous.revision+1);assert.deepEqual(saved.active,previous.active);assert.deepEqual(await activeWorkflow(),previous.active);
+ await assert.rejects(changeWorkflow(owner,'cs',{revision:previous.revision,draft}),{code:'workflow_conflict'});
+ await assert.rejects(changeWorkflow(owner,'cs',{revision:previous.revision},true),{code:'workflow_conflict'});
+ const published=await changeWorkflow(owner,'cs',{revision:saved.revision},true);assert.equal(published.active_version,previous.active_version+1);assert.deepEqual(published.active,draft);
+ // Production reads the CS profile's published workflow when it answers a message.
+ const live=await activeWorkflow('cs') as any;assert.equal(live.nodes.router.prompt,'Router pengujian khusus');
+ let first=true;await runAgents(async(c,m)=>{if(first){first=false;assert.ok(m[0].content.includes('Router pengujian khusus'));assert.equal(c.model,'smart');return JSON.stringify({sub_agent:'profil_perusahaan',s_p_o_konteks:'Pelanggan meminta informasi',isi_pesan:'halo'});}assert.ok(m.at(-1)!.content.includes('Tools tersedia: .'));return JSON.stringify({answer:'Baik'});},{...await configuration(),workflow:live},[{role:'user',content:'halo'}],300,{account:owner,profile:'test',session:'test',customer:'628000000000',requestId:'one',knowledge:''});
  // Return draft to standard topology for subsequent playground scenarios.
- await changeWorkflow(owner,{revision:saved.revision,draft:defaultWorkflow()});
+ await changeWorkflow(owner,'cs',{revision:saved.revision,draft:defaultWorkflow()});
 });
 
 test('Sandbox traces real agent/tool flow, keeps context across turns, and never writes production orders or usage',async()=>{

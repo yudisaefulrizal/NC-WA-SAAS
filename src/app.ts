@@ -1,6 +1,6 @@
 import {ai} from './ai.js';
 import {studio as defaultStudio} from './ai-studio.js';
-import {workflowState,changeWorkflow} from './ai-workflow.js';
+import {workflowState,changeWorkflow,adminProfiles,setProfileEnabled} from './ai-profiles.js';
 import {createKey} from './keys.js';
 import {payments as defaultPayments} from './payments.js';
 import express from 'express';
@@ -27,9 +27,9 @@ app.post('/payments/midtrans/notification',rateLimit({windowMs:60000,limit:120})
 app.get('/public/plans',async(_req,res)=>{const [rows]=await db.query('SELECT id,name,price,credits,session_limit FROM plans WHERE active=TRUE');res.json(rows);});
 app.get('/public/assets/:token',rateLimit({windowMs:60000,limit:120}),async(req,res)=>{const file=await gateway.shareAssets.getByToken(String(req.params.token));res.set('Content-Type',file.mimetype).set('Content-Disposition','inline').set('Cache-Control','public, max-age=3600').sendFile(file.path);});
 const origin=process.env.APP_ORIGIN ?? 'http://127.0.0.1:8067';
-app.use(['/auto-share','/sessions','/stats','/webhooks','/media','/events'],rateLimit({windowMs:60000,limit:120}));
-app.use((req,res,next)=>{if(['/stats','/sessions','/webhooks','/events'].includes(req.path)||['/auto-share/','/sessions/','/webhooks/','/media/'].some(prefix=>req.path.startsWith(prefix))){gateway.router(req,res,next);}else next();});
-app.use(['/api','/sessions','/stats','/webhooks','/media','/events'],(_req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
+app.use(['/auto-share','/sessions','/ai','/stats','/webhooks','/media','/events'],rateLimit({windowMs:60000,limit:120}));
+app.use((req,res,next)=>{if(['/stats','/sessions','/webhooks','/events'].includes(req.path)||['/auto-share/','/sessions/','/ai/','/webhooks/','/media/'].some(prefix=>req.path.startsWith(prefix))){gateway.router(req,res,next);}else next();});
+app.use(['/api','/sessions','/ai','/stats','/webhooks','/media','/events'],(_req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
 app.use('/api',rateLimit({windowMs:60000,limit:120}));
 app.use('/api', (req,res,next)=> {if(!['GET','HEAD','OPTIONS'].includes(req.method)&&req.get('origin')!==origin){res.status(403).json({error:'invalid_origin'});return;}next();});
 app.use('/api/auth',rateLimit({windowMs:900000,limit:20}));
@@ -130,9 +130,12 @@ app.post('/api/admin/accounts/:id/credits',async(req,res)=>{
 app.get('/api/admin/payments',async(req,res)=>res.json(await paginate(req.query.page??'1','SELECT COUNT(*) AS total FROM payment_orders',(size,offset)=>'SELECT p.id,p.account_id,a.email AS account_email,p.plan_name,p.total,p.status,p.environment,p.created_at FROM payment_orders p LEFT JOIN accounts a ON a.id=p.account_id ORDER BY p.created_at DESC LIMIT '+size+' OFFSET '+offset)));
 app.get('/dashboard/admin/ai-studio',(_req,res)=>res.type('html').send(page('ai-studio.html')));
 app.get('/api/admin/ai',async(_req,res)=>res.json(await ai.configuration()));
-app.get('/api/admin/ai/studio',async(_req,res)=>res.json({...await workflowState(),models:await ai.configuration()}));
-app.put('/api/admin/ai/studio',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.body)));
-app.post('/api/admin/ai/studio/publish',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.body,true)));
+// Each profile has its own workflow; ?profile= selects it (CS when omitted, as before profiles existed).
+app.get('/api/admin/ai/studio',async(req,res)=>res.json({...await workflowState(req.query.profile??'cs'),models:await ai.configuration()}));
+app.put('/api/admin/ai/studio',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.query.profile??'cs',req.body)));
+app.post('/api/admin/ai/studio/publish',async(req,res)=>res.json(await changeWorkflow(res.locals.account.id,req.query.profile??'cs',req.body,true)));
+app.get('/api/admin/ai/profiles',async(_req,res)=>res.json(await adminProfiles()));
+app.put('/api/admin/ai/profiles/:profile',async(req,res)=>res.json(await setProfileEnabled(res.locals.account.id,req.params.profile,req.body?.enabled)));
 app.post('/api/admin/ai/studio/run',rateLimit({windowMs:60000,limit:10}),async(req,res)=>{
  const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
  await studio.run(res.locals.account.id,req.body,event=>{
@@ -209,7 +212,7 @@ function page(name:string){
 }
 // A hashed URL can never go stale, so it is cached hard; everything else keeps revalidating.
 app.use(express.static('public',{setHeaders:(res,_path)=>{if(res.req?.query?.v)res.setHeader('Cache-Control','public, max-age=31536000, immutable');}}));
-app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/referral','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/failures','/dashboard/admin/health','/dashboard/admin/referral','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.type('html').send(page('index.html')));
+app.get(['/','/login','/register','/dashboard','/dashboard/ai','/dashboard/auto-share','/dashboard/admin/ai','/dashboard/admin/profiles','/dashboard/nomor','/dashboard/integrasi','/dashboard/pemakaian','/dashboard/paket','/dashboard/referral','/dashboard/admin','/dashboard/admin/plans','/dashboard/admin/accounts','/dashboard/admin/settings','/dashboard/admin/payments','/dashboard/admin/failures','/dashboard/admin/health','/dashboard/admin/referral','/dashboard/dokumentasi','/dashboard/uji-pesan'],(_req,res)=>res.type('html').send(page('index.html')));
 app.use((_req,res)=>res.status(404).json({error:'not_found'}));
 app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{if(res.headersSent){_next(err);return;}if(err instanceof ApiError){res.status(err.status).json({error:err.code,message:err.message});return;}const status=(err as {status?:number}).status;res.status(status===400||status===413?status:500).json({error:status===400||status===413?'invalid_request':'internal_error'});});
 

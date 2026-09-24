@@ -17,7 +17,8 @@ export type AgentName = keyof typeof agents;
 export type ToolName = 'get_knowledge'|'get_products'|'check_order'|'create_order'|'send_product_image';
 export interface PendingFallback {id:string;question:string}
 export interface ToolContext {
- readonly account: string; readonly session: string; readonly customer: string;
+ // profile is the data profile (ai_data_profiles.id) whose products, orders and sources the tools read.
+ readonly account: string; readonly profile: string; readonly session: string; readonly customer: string;
  readonly requestId: string; readonly knowledge: string; readonly behavior?: string;
  readonly fallbackEnabled?: boolean;
  readonly pendingFallbacks?: readonly PendingFallback[];

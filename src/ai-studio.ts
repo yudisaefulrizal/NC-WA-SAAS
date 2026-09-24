@@ -2,7 +2,8 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {ai,callAI,composeKnowledge,profileFields,type AIConfig,type AIMessage,type AITransport,type ProfileField} from './ai.js';
 import {runAgents,updateRouterContext,type AITools} from './ai-agents.js';
-import {workflowState} from './ai-workflow.js';
+import {workflowState,profileDefinition} from './ai-profiles.js';
+import type {AgentWorkflow} from './ai-models.js';
 import {productInput,productForAI,orderForAI,orderInput,record,type Order} from './ai-data.js';
 import {transientAIError} from './ai-retry.js';
 import {ApiError} from './engine/sessions.js';
@@ -26,7 +27,9 @@ export class AIStudio {
   if(!message)throw bad('Isi pesan pengujian.');
   if(!Array.isArray(body.products)||body.products.length>20)throw bad('Maksimal 20 produk simulasi.');
   const products=body.products.map(productInput);if(new Set(products.map(p=>p.name)).size!==products.length)throw bad('Nama produk harus unik.');
-  const state=await workflowState();if(body.revision!==state.revision)throw new ApiError(409,'workflow_conflict','Draft berubah. Muat ulang sebelum menguji.');
+  // body.profile is the simulated knowledge; body.profile_type picks the pipeline. The sandbox simulates the CS pipeline, the only profile shipped so far; other profiles bring their own simulation.
+  const pipeline=profileDefinition(body.profile_type??'cs');if(pipeline.id!=='cs')throw bad('Simulasi untuk profil ini belum tersedia.');
+  const state=await workflowState(pipeline.id);if(body.revision!==state.revision)throw new ApiError(409,'workflow_conflict','Draft berubah. Muat ulang sebelum menguji.');
   const base=await this.configuration();if(!base.secret)throw bad('Konfigurasikan koneksi AI di Pengaturan AI terlebih dahulu.');
   if(this.busy.has(owner))throw new ApiError(409,'studio_busy','Pengujian sebelumnya masih berjalan.');
   for(const [id,s] of this.sessions)if(Date.now()-s.touched>1800000&&!this.busy.has(s.owner))this.sessions.delete(id);
@@ -44,7 +47,7 @@ export class AIStudio {
   this.busy.add(owner);sandbox.touched=Date.now();
   const started=Date.now(),guard=()=>{if(signal?.aborted)throw Error('ai_cancelled');if(Date.now()-started>=120000)throw Error('ai_retry_limit');};
   let calls=0;
-  const config:AIConfig={...base,workflow:state.draft,signal,onTrace:event=>emit(event)};
+  const config:AIConfig={...base,workflow:state.draft as AgentWorkflow,signal,onTrace:event=>emit(event)};
   const transport:AITransport=async(selected,messages,maxWords)=>{
    const node=selected.call_role??'model';
    for(let attempt=1;attempt<=3;attempt++){
@@ -87,7 +90,7 @@ export class AIStudio {
    const priorHistory=sandbox.messages.slice(-base.context_memory_limit);
    sandbox.messages=[...sandbox.messages,{role:'user' as const,content:message}].slice(-base.memory_limit);
    const system:AIMessage[]=[{role:'system',content:'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika tidak tahu, arahkan pelanggan ke admin. Balas maksimal 300 kata.'},...(behavior?[{role:'system' as const,content:behavior}]:[])];
-   const result=await runAgents(transport,config,[...system,...sandbox.messages],300,{account:owner,session:'studio',customer:'628000000000',requestId:randomUUID(),knowledge,behavior},tools,sandbox.context);
+   const result=await runAgents(transport,config,[...system,...sandbox.messages],300,{account:owner,profile:'studio',session:'studio',customer:'628000000000',requestId:randomUUID(),knowledge,behavior},tools,sandbox.context);
    let context:string|null=null;
    try{context=await updateRouterContext(transport,config,message,result.answer,base.context_memory_limit>0?priorHistory:[]);}catch(error){if(signal?.aborted)throw error;emit({node:'context',state:'error',error:safeError(error)});}
    if(signal?.aborted)throw Error('ai_cancelled');

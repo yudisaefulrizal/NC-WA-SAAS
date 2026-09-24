@@ -1,6 +1,4 @@
 import {routerOutputSchema} from './ai-router-schema.js';
-import type {RowDataPacket} from 'mysql2/promise';
-import {db} from './db.js';
 import {agents,routerPrompt,contextPrompt,permissions,type AgentName} from './ai-agents.js';
 import {orderPrompt,orderOutputSchema} from './ai-order-schema.js';
 import {roleTier,modelTiers,type AgentWorkflow,type ModelRole} from './ai-models.js';
@@ -24,24 +22,5 @@ export function workflowInput(value:unknown):AgentWorkflow {
  }
  return result;
 }
-const parse=(value:unknown)=>workflowInput(typeof value==='string'?JSON.parse(value):value);
-export async function workflowState(){
- const [rows]=await db.query<RowDataPacket[]>('SELECT * FROM ai_workflow WHERE id=1');const row=rows[0];
- return {draft:row?parse(row.draft):defaultWorkflow(),active:row?.active?parse(row.active):defaultWorkflow(),revision:Number(row?.revision??0),active_version:Number(row?.active_version??0),published_revision:Number(row?.published_revision??0),allowedTools:permissions,routerSchema:routerOutputSchema,orderSchema:orderOutputSchema(['<nama produk dari katalog>'])};
-}
-export async function activeWorkflow(){const [rows]=await db.query<RowDataPacket[]>('SELECT active FROM ai_workflow WHERE id=1');return rows[0]?.active?parse(rows[0].active):defaultWorkflow();}
-export async function changeWorkflow(actor:string,value:unknown,publish=false){
- const body=record(value);if(!Number.isSafeInteger(body.revision)||Number(body.revision)<0)throw new ApiError(400,'invalid_revision','Revision wajib valid.');
- const draft=publish?undefined:workflowInput(body.draft),c=await db.getConnection();
- try{
-  await c.beginTransaction();
-  await c.execute('INSERT IGNORE INTO ai_workflow(id,draft) VALUES (1,?)',[JSON.stringify(defaultWorkflow())]);
-  const [rows]=await c.query<RowDataPacket[]>('SELECT revision FROM ai_workflow WHERE id=1 FOR UPDATE');
-  if(Number(rows[0].revision)!==body.revision)throw new ApiError(409,'workflow_conflict','Draft berubah di tempat lain. Muat ulang sebelum menyimpan.');
-  if(publish)await c.query('UPDATE ai_workflow SET active=draft,active_version=active_version+1,published_revision=revision WHERE id=1');
-  else await c.execute('UPDATE ai_workflow SET draft=?,revision=revision+1 WHERE id=1',[JSON.stringify(draft)]);
-  await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[actor,publish?'ai_workflow_published':'ai_workflow_draft_saved']);
-  await c.commit();
- }catch(error){await c.rollback();throw error;}finally{c.release();}
- return workflowState();
-}
+// What AI Studio shows next to the CS canvas: which tools each node may use and the schemas it enforces.
+export function csStudioMeta(){return {allowedTools:permissions,routerSchema:routerOutputSchema,orderSchema:orderOutputSchema(['<nama produk dari katalog>'])};}

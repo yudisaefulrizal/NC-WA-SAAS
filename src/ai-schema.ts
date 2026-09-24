@@ -1,5 +1,9 @@
 import {db} from './db.js';
 import {defaultWorkflow} from './ai-workflow.js';
+import {chatTable} from './ai-chat.js';
+import {profileDefinitions,enabledByDefault} from './ai-profiles.js';
+import {profileFields} from './ai.js';
+import {randomUUID} from 'node:crypto';
 export async function migrateAI(){
  const tables=[
  `CREATE TABLE IF NOT EXISTS ai_workflow (id INT PRIMARY KEY,draft JSON NOT NULL,active JSON NULL,revision INT UNSIGNED NOT NULL DEFAULT 0,active_version INT UNSIGNED NOT NULL DEFAULT 0,published_revision INT UNSIGNED NOT NULL DEFAULT 0,tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0) ENGINE=InnoDB`,
@@ -25,6 +29,7 @@ export async function migrateAI(){
  `CREATE TABLE IF NOT EXISTS ai_product_images (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,size_bytes INT UNSIGNED NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,INDEX product_image_session(account_id,session_id),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`
  ];
  for(const sql of dataTables)await db.query(sql);
+ await db.query(chatTable);
  const [orderColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_orders','input_hash']);
  if(!orderColumns.length)await db.query("ALTER TABLE ai_orders ADD COLUMN input_hash CHAR(64) NOT NULL DEFAULT ''");
  // Order statuses are exactly pesanan_masuk, dibayar, diproses, selesai, dibatalkan. Older tables used
@@ -42,10 +47,14 @@ export async function migrateAI(){
  if(!usageColumns.length)await db.query('ALTER TABLE ai_usage ADD COLUMN agent VARCHAR(20) NULL');
  const [tidyPrompt]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_settings','tidy_prompt']);
  if(!tidyPrompt.length)await db.query("ALTER TABLE ai_settings ADD COLUMN tidy_prompt TEXT NULL");
+ // Before multi-profile, knowledge/behavior/fallback lived on ai_assistants; these column migrations only apply to that
+ // legacy shape. migrateProfiles() (end of this file) moves them into ai_data_profiles and drops them here.
+ const [legacyAssistantColumn]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','behavior']);
+ const legacyAssistants=legacyAssistantColumn.length>0;
  const [assistantFallback]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','fallback_number']);
- if(!assistantFallback.length)await db.query("ALTER TABLE ai_assistants ADD COLUMN fallback_number VARCHAR(20) NOT NULL DEFAULT ''");
+ if(legacyAssistants&&!assistantFallback.length)await db.query("ALTER TABLE ai_assistants ADD COLUMN fallback_number VARCHAR(20) NOT NULL DEFAULT ''");
  const [assistantFallbackNotify]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','fallback_notify']);
- if(!assistantFallbackNotify.length)await db.query('ALTER TABLE ai_assistants ADD COLUMN fallback_notify BOOLEAN NOT NULL DEFAULT FALSE');
+ if(legacyAssistants&&!assistantFallbackNotify.length)await db.query('ALTER TABLE ai_assistants ADD COLUMN fallback_notify BOOLEAN NOT NULL DEFAULT FALSE');
  await db.query(`CREATE TABLE IF NOT EXISTS ai_fallbacks (id VARCHAR(48) PRIMARY KEY,account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,customer VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,fallback_number VARCHAR(20) NOT NULL,status ENUM('waiting','answered','resolved','failed','expired') NOT NULL DEFAULT 'waiting',agent VARCHAR(20) NOT NULL,reason VARCHAR(500) NOT NULL,question VARCHAR(1000) NOT NULL,router_context VARCHAR(200) NULL,messages JSON NOT NULL,source_message_id VARCHAR(255) NOT NULL,notification_message_id VARCHAR(255) NULL,confirmation_message_id VARCHAR(255) NULL,staff_answer TEXT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,answered_at DATETIME NULL,resolved_at DATETIME NULL,UNIQUE KEY fallback_source(account_id,session_id,source_message_id),UNIQUE KEY fallback_notification(account_id,session_id,notification_message_id),INDEX fallback_customer(account_id,session_id,customer,status),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
  // TEXT is stored off-page (unlike VARCHAR), so 13 profile columns don't hit InnoDB's row-size limit.
  // TEXT can't carry a DEFAULT in this MySQL version; callers always coalesce NULL to '' (see ai.ts).
@@ -56,7 +65,7 @@ export async function migrateAI(){
  const [existingProfilLainnya]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_assistants','profil_lainnya']);
  let addedProfilLainnya=false;
  if(legacyKnowledgeColumn.length&&!existingProfilLainnya.length){await db.query('ALTER TABLE ai_assistants ADD COLUMN profil_lainnya TEXT NULL');addedProfilLainnya=true;}
- for(const [table,column,definition] of [['ai_settings','profile_routing_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_settings','model_structured','VARCHAR(100) NULL'],['ai_provider_profiles','model_cheap',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_provider_profiles','model_medium',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_provider_profiles','model_smart',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_provider_profiles','model_structured',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_settings','context_memory_limit','INT UNSIGNED NOT NULL DEFAULT 6'],['ai_settings','trace_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_agent_failures','model','VARCHAR(100) NULL'],['ai_agent_failures','prompt','JSON NULL'],['ai_agent_failures','raw_output','MEDIUMTEXT NULL'],['ai_agent_failures','router_context','VARCHAR(200) NULL'],['ai_products','image_id','CHAR(36) NULL'],...profileFields.map(field=>['ai_assistants','profil_'+field,'TEXT NULL'] as [string,string,string])]){
+ for(const [table,column,definition] of [['ai_settings','profile_routing_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_settings','model_cheap','VARCHAR(100) NULL'],['ai_settings','model_medium','VARCHAR(100) NULL'],['ai_settings','model_smart','VARCHAR(100) NULL'],['ai_settings','model_structured','VARCHAR(100) NULL'],['ai_provider_profiles','model_cheap',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_provider_profiles','model_medium',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_provider_profiles','model_smart',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_provider_profiles','model_structured',"VARCHAR(100) NOT NULL DEFAULT ''"],['ai_settings','context_memory_limit','INT UNSIGNED NOT NULL DEFAULT 6'],['ai_settings','trace_enabled','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_usage','model_calls','JSON NULL'],['ai_conversations','full_auto','BOOLEAN NOT NULL DEFAULT FALSE'],['ai_agent_failures','model','VARCHAR(100) NULL'],['ai_agent_failures','prompt','JSON NULL'],['ai_agent_failures','raw_output','MEDIUMTEXT NULL'],['ai_agent_failures','router_context','VARCHAR(200) NULL'],['ai_products','image_id','CHAR(36) NULL'],...(legacyAssistants?profileFields.map(field=>['ai_assistants','profil_'+field,'TEXT NULL'] as [string,string,string]):[])]){
  const [columns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,column]);
  if(!columns.length)await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
  }
@@ -104,7 +113,7 @@ export async function migrateAI(){
  }
  const [workflowColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','tool_defaults_version']);
  if(!workflowColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN tool_defaults_version INT UNSIGNED NOT NULL DEFAULT 0');
- await db.query("UPDATE ai_workflow SET draft=IF(JSON_LENGTH(JSON_EXTRACT(draft,'$.nodes.lainnya.tools'))=0,JSON_SET(draft,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),draft),active=IF(active IS NULL,NULL,IF(JSON_LENGTH(JSON_EXTRACT(active,'$.nodes.lainnya.tools'))=0,JSON_SET(active,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),active)),tool_defaults_version=1 WHERE tool_defaults_version<1");
+ await db.query("UPDATE ai_workflow SET draft=IF(JSON_LENGTH(JSON_EXTRACT(draft,'$.nodes.lainnya.tools'))=0,JSON_SET(draft,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),draft),active=IF(active IS NULL,NULL,IF(JSON_LENGTH(JSON_EXTRACT(active,'$.nodes.lainnya.tools'))=0,JSON_SET(active,'$.nodes.lainnya.tools',JSON_ARRAY('get_knowledge','get_products','check_order')),active)),tool_defaults_version=1 WHERE id=1 AND tool_defaults_version<1");
  // Sub-agents transaksi/konsultasi/dukungan/keluhan merged into one "layanan" node; old node keys no longer validate, so reset to the new default topology.
  const [mergedColumns]=await db.execute<any[]>('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',['ai_workflow','layanan_merge_version']);
  if(!mergedColumns.length)await db.query('ALTER TABLE ai_workflow ADD COLUMN layanan_merge_version INT UNSIGNED NOT NULL DEFAULT 0');
@@ -131,5 +140,76 @@ export async function migrateAI(){
  }
  // New send_product_image tool granted to the existing "layanan" node's tool list, without touching any custom prompt/model already saved.
  // Runs after the topology migrations above so the "layanan" node is guaranteed to exist.
- await db.query("UPDATE ai_workflow SET draft=IF(JSON_CONTAINS(JSON_EXTRACT(draft,'$.nodes.layanan.tools'),'\"send_product_image\"'),draft,JSON_ARRAY_APPEND(draft,'$.nodes.layanan.tools','send_product_image')),active=IF(active IS NULL,NULL,IF(JSON_CONTAINS(JSON_EXTRACT(active,'$.nodes.layanan.tools'),'\"send_product_image\"'),active,JSON_ARRAY_APPEND(active,'$.nodes.layanan.tools','send_product_image'))),tool_defaults_version=2 WHERE tool_defaults_version<2");
+ await db.query("UPDATE ai_workflow SET draft=IF(JSON_CONTAINS(JSON_EXTRACT(draft,'$.nodes.layanan.tools'),'\"send_product_image\"'),draft,JSON_ARRAY_APPEND(draft,'$.nodes.layanan.tools','send_product_image')),active=IF(active IS NULL,NULL,IF(JSON_CONTAINS(JSON_EXTRACT(active,'$.nodes.layanan.tools'),'\"send_product_image\"'),active,JSON_ARRAY_APPEND(active,'$.nodes.layanan.tools','send_product_image'))),tool_defaults_version=2 WHERE id=1 AND tool_defaults_version<2");
+ await migrateProfiles();
+}
+
+const hasColumn=async(table:string,column:string)=>{const [rows]=await db.execute<any[]>('SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',[table,column]);return rows.length>0;};
+const hasIndex=async(table:string,name:string)=>{const [rows]=await db.execute<any[]>('SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?',[table,name]);return rows.length>0;};
+const primaryKey=async(table:string)=>{const [rows]=await db.execute<any[]>("SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME='PRIMARY' ORDER BY SEQ_IN_INDEX",[table]);return rows.map(row=>String(row.COLUMN_NAME));};
+// Session-keyed business data moves to the data profile its session now uses. Every such session got a data
+// profile first, so a row left without one means the move is incomplete: stop instead of dropping data.
+async function linkToDataProfile(table:string){
+ await db.query(`UPDATE ${table} t JOIN ai_assistants a ON a.account_id=t.account_id AND a.session_id=t.session_id SET t.data_profile_id=a.data_profile_id WHERE t.data_profile_id IS NULL`);
+ const [left]=await db.query<any[]>(`SELECT COUNT(*) AS n FROM ${table} WHERE data_profile_id IS NULL`);
+ if(Number(left[0].n))throw Error(`Migrasi data profil berhenti: ${left[0].n} baris ${table} belum punya data profil.`);
+}
+// Multi-profile: a profile is a pipeline shipped in code (ai-profiles.ts); a data profile is the client's content
+// for one profile, attachable to any number of sessions. Runs after every legacy migration above, re-runnable.
+async function migrateProfiles(){
+ await db.query('CREATE TABLE IF NOT EXISTS ai_profile_types (id VARCHAR(32) PRIMARY KEY,enabled BOOLEAN NOT NULL DEFAULT FALSE,updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB');
+ for(const id of Object.keys(profileDefinitions))await db.execute('INSERT IGNORE INTO ai_profile_types(id,enabled) VALUES (?,?)',[id,enabledByDefault(id)]);
+ // The single global workflow (id=1) becomes the CS profile's workflow; other profiles get their own rows.
+ if(!await hasColumn('ai_workflow','profile_type')){
+  await db.query('ALTER TABLE ai_workflow ADD COLUMN profile_type VARCHAR(32) NULL, ADD UNIQUE KEY workflow_profile(profile_type)');
+  await db.query("UPDATE ai_workflow SET profile_type='cs' WHERE id=1");
+  await db.query('ALTER TABLE ai_workflow MODIFY id INT NOT NULL AUTO_INCREMENT');
+ }
+ const fields=profileFields.map(field=>'profil_'+field);
+ await db.query(`CREATE TABLE IF NOT EXISTS ai_data_profiles (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,profile_type VARCHAR(32) NOT NULL,name VARCHAR(100) NOT NULL,behavior TEXT NOT NULL,${fields.map(field=>field+' TEXT NOT NULL').join(',')},fallback_number VARCHAR(20) NOT NULL DEFAULT '',fallback_notify BOOLEAN NOT NULL DEFAULT FALSE,revision INT UNSIGNED NOT NULL DEFAULT 0,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,UNIQUE KEY data_profile_name(account_id,name),KEY data_profile_type(account_id,profile_type),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);
+ if(!await hasColumn('ai_assistants','data_profile_id'))await db.query('ALTER TABLE ai_assistants ADD COLUMN data_profile_id CHAR(36) NULL, ADD KEY assistant_data_profile(data_profile_id), ADD CONSTRAINT assistant_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE SET NULL');
+ for(const [table,column,definition] of [['ai_usage','profile_type','VARCHAR(32) NULL'],['ai_usage','data_profile_id','CHAR(36) NULL'],['ai_trace_log','profile_type','VARCHAR(32) NULL']])if(!await hasColumn(table,column))await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+ const legacy=await hasColumn('ai_assistants','behavior');
+ if(legacy){
+  // Every session that has settings or business data gets a CS data profile named after it, attached, with
+  // its AI switch unchanged, so clients see the same behavior right after the upgrade.
+  for(const table of ['ai_products','ai_orders','ai_data_sources','ai_product_images'])if(await hasColumn(table,'session_id')&&!(await primaryKey(table))[0]?.startsWith('data_profile'))await db.query(`INSERT IGNORE INTO ai_assistants(account_id,session_id,enabled,behavior) SELECT DISTINCT account_id,session_id,FALSE,'' FROM ${table} WHERE session_id IS NOT NULL`);
+  const [assistants]=await db.query<any[]>(`SELECT account_id,session_id,behavior,fallback_number,fallback_notify,${fields.join(',')} FROM ai_assistants WHERE data_profile_id IS NULL`);
+  for(const row of assistants){
+   const c=await db.getConnection();
+   try{
+    await c.beginTransaction();
+    const [taken]=await c.execute<any[]>('SELECT name FROM ai_data_profiles WHERE account_id=? FOR UPDATE',[row.account_id]);const names=new Set(taken.map(t=>String(t.name).toLowerCase()));
+    const base='CS – '+row.session_id;let name=base;for(let n=2;names.has(name.toLowerCase());n++)name=base+' ('+n+')';
+    const id=randomUUID();
+    await c.execute(`INSERT INTO ai_data_profiles(id,account_id,profile_type,name,behavior,fallback_number,fallback_notify,${fields.join(',')}) VALUES (?,?,'cs',?,?,?,?,${fields.map(()=>'?').join(',')})`,[id,row.account_id,name,String(row.behavior??''),String(row.fallback_number??''),Boolean(row.fallback_notify),...fields.map(field=>String(row[field]??''))]);
+    await c.execute('UPDATE ai_assistants SET data_profile_id=? WHERE account_id=? AND session_id=? AND data_profile_id IS NULL',[id,row.account_id,row.session_id]);
+    await c.commit();
+   }catch(error){await c.rollback();throw error;}finally{c.release();}
+  }
+ }
+ // Products, sources and photos now belong to the data profile; each table keeps its own index on account_id
+ // for the account foreign key before the old (account_id,session_id,...) primary key is dropped.
+ for(const [table,key] of [['ai_products','name'],['ai_data_sources','kind']]){
+  if(!await hasColumn(table,'session_id'))continue;
+  if(!await hasColumn(table,'data_profile_id'))await db.query(`ALTER TABLE ${table} ADD COLUMN data_profile_id CHAR(36) NULL AFTER account_id`);
+  await linkToDataProfile(table);
+  if(!await hasIndex(table,table+'_account'))await db.query(`ALTER TABLE ${table} ADD KEY ${table}_account(account_id)`);
+  await db.query(`ALTER TABLE ${table} DROP PRIMARY KEY, MODIFY data_profile_id CHAR(36) NOT NULL, ADD PRIMARY KEY(data_profile_id,${key}), DROP COLUMN session_id, ADD CONSTRAINT ${table}_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE`);
+ }
+ if(await hasColumn('ai_product_images','session_id')){
+  if(!await hasColumn('ai_product_images','data_profile_id'))await db.query('ALTER TABLE ai_product_images ADD COLUMN data_profile_id CHAR(36) NULL AFTER account_id');
+  await linkToDataProfile('ai_product_images');
+  if(!await hasIndex('ai_product_images','ai_product_images_account'))await db.query('ALTER TABLE ai_product_images ADD KEY ai_product_images_account(account_id)');
+  await db.query('ALTER TABLE ai_product_images DROP INDEX product_image_session, DROP COLUMN session_id, MODIFY data_profile_id CHAR(36) NOT NULL, ADD KEY product_image_profile(data_profile_id), ADD CONSTRAINT ai_product_images_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE');
+ }
+ // Orders belong to the data profile too; session_id stays as the session the order came from (NULL when
+ // created from the Data Profil page), so several sessions sharing one data profile collect orders in one place.
+ if((await primaryKey('ai_orders'))[0]!=='data_profile_id'){
+  if(!await hasColumn('ai_orders','data_profile_id'))await db.query('ALTER TABLE ai_orders ADD COLUMN data_profile_id CHAR(36) NULL AFTER account_id');
+  await linkToDataProfile('ai_orders');
+  if(!await hasIndex('ai_orders','ai_orders_account'))await db.query('ALTER TABLE ai_orders ADD KEY ai_orders_account(account_id)');
+  await db.query('ALTER TABLE ai_orders DROP PRIMARY KEY, DROP INDEX order_request, MODIFY data_profile_id CHAR(36) NOT NULL, MODIFY session_id VARCHAR(64) COLLATE utf8mb4_bin NULL, ADD PRIMARY KEY(data_profile_id,id), ADD UNIQUE KEY order_request(data_profile_id,request_id), ADD CONSTRAINT ai_orders_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE');
+ }
+ if(legacy){const columns=[];for(const column of ['behavior','fallback_number','fallback_notify',...fields])if(await hasColumn('ai_assistants',column))columns.push(column);if(columns.length)await db.query('ALTER TABLE ai_assistants '+columns.map(column=>'DROP COLUMN '+column).join(', '));}
 }

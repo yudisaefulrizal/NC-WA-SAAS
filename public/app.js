@@ -40,12 +40,12 @@ async function catalog(id,authenticated=false){const data=await api('/public/pla
 async function usage(){list('usage',await api('/api/usage'),(li,r)=>{li.textContent=`${new Date(r.created_at).toLocaleString('id-ID')} · ${r.status} · ${r.request_id}${r.message_id?' · '+r.message_id:''}`;});}
 async function webhooks(){table('webhooks',['URL webhook','Sesi','Tindakan'],await api('/webhooks'),w=>[w.url,w.sessionId||'Semua sesi',button('Cabut',async()=>{await api('/webhooks/'+w.id,'DELETE');await webhooks();})]);}
 let shareRealtime;
-function startShareRealtime(){if(shareRealtime||typeof EventSource==='undefined')return;shareRealtime=new EventSource('/events');shareRealtime.onmessage=event=>{let data;try{data=JSON.parse(event.data);}catch{return;}if(data.event==='message')recordReceivedTest(data);if(data.event!=='auto_share.contact_added'||$('dashboard').hidden||$('auto-share').hidden)return;void run(async()=>{await loadAutoShare();$('message').textContent=(data.isGroup?'Grup ':'Kontak ')+(data.nama?data.nama+' · ':'')+data.nomor+' ditambahkan otomatis.';});};}
+function startShareRealtime(){if(shareRealtime||typeof EventSource==='undefined')return;shareRealtime=new EventSource('/events');shareRealtime.onmessage=event=>{let data;try{data=JSON.parse(event.data);}catch{return;}if(data.event==='message')recordReceivedTest(data);chatRealtime(data);if(data.event!=='auto_share.contact_added'||$('dashboard').hidden||$('auto-share').hidden)return;void run(async()=>{await loadAutoShare();$('message').textContent=(data.isGroup?'Grup ':'Kontak ')+(data.nama?data.nama+' · ':'')+data.nomor+' ditambahkan otomatis.';});};}
 async function show(){
  document.body.classList.remove('workspace','client-workspace');$('siteheader').hidden=false;if(location.pathname==='/'){$('landing').hidden=false;$('autharea').hidden=true;$('dashboard').hidden=true;await Promise.all([landingAuth(),catalog('publicplans')]);return;}
  let me;try{me=await api('/api/me');}catch(e){if(e.status!==401)throw e;$('autharea').hidden=false;$('dashboard').hidden=true;setAuthMode(location.pathname==='/register');return;}
  document.body.classList.add('workspace');$('siteheader').hidden=true;$('landing').hidden=true;$('autharea').hidden=true;$('dashboard').hidden=false;$('welcome').textContent=me.email;$('role').textContent=me.role==='owner'?'Pemilik layanan':'Pengguna';$('admin').hidden=$('adminlink').hidden=me.role!=='owner';$('baseurl').textContent=location.origin;document.querySelectorAll('.api-origin').forEach(el=>el.textContent=location.origin);
- const owner=me.role==='owner';document.body.classList.toggle('client-workspace',!owner);if(!owner){const nav=$('docslink').parentElement;nav.insertBefore($('docslink'),nav.querySelector('a[href="/dashboard/paket"]'));}$('wallet').hidden=owner;document.querySelectorAll('.tabs > a:not(.sidebar-brand):not(#adminlink):not(#docslink)').forEach(a=>a.hidden=owner);navigate();if(owner)await admin();else{startShareRealtime();await catalog('catalog',true);await Promise.all([keys(),sessions(),wallet(),usage(),webhooks(),paymentList(),loadAI(),loadAutoShare(),loadReferral()]);}
+ const owner=me.role==='owner';document.body.classList.toggle('client-workspace',!owner);if(!owner){const nav=$('docslink').parentElement;nav.insertBefore($('docslink'),nav.querySelector('a[href="/dashboard/paket"]'));wrapClientNav(nav);}else addAdminMenuToggle($('docslink').parentElement);$('wallet').hidden=owner;document.querySelectorAll('.tabs > a:not(.sidebar-brand):not(#adminlink):not(#docslink),.tabs .nav-links > a:not(#docslink)').forEach(a=>a.hidden=owner);navigate();if(owner)await admin();else{startShareRealtime();await catalog('catalog',true);await Promise.all([keys(),sessions(),wallet(),usage(),webhooks(),paymentList(),loadAI(),loadAutoShare(),loadReferral()]);}
 }
 async function landingAuth(){
  const login=document.querySelector('#siteheader a[href="/login"]'),signup=document.querySelector('#siteheader .button'),cta=document.querySelector('#landing .hero .button');
@@ -61,7 +61,7 @@ let registering=false;
 function setAuthMode(value){registering=value;$('authtitle').textContent=value?'Buat akun Anda':'Masuk ke akun Anda';$('authintro').textContent=value?'Mulai dengan paket dasar gratis.':'Kelola WhatsApp dan integrasi Anda dalam satu tempat.';$('authsubmit').textContent=value?'Buat akun':'Masuk';$('register').textContent=value?'Sudah punya akun? Masuk':'Belum punya akun? Daftar';$('auth').elements.password.autocomplete=value?'new-password':'current-password';}
 form('auth',async data=>{if(registering){await api('/api/auth/register','POST',data);setAuthMode(false);history.replaceState(null,'','/login');$('message').textContent='Akun berhasil dibuat. Silakan masuk.';return;}await api('/api/auth/login','POST',data);$('auth').reset();history.replaceState(null,'','/dashboard');await show();});
 $('register').onclick=()=>{setAuthMode(!registering);history.replaceState(null,'',registering?'/register':'/login');};
-function navigate(){const owner=!$('adminlink').hidden;const allowed=owner?['admin','dokumentasi']:['nomor','uji-pesan','ai','auto-share','integrasi','dokumentasi','paket','referral'];const requested=location.pathname.split('/')[2]||location.hash.slice(1);const page=allowed.includes(requested)?requested:allowed[0];if(requested!==page)history.replaceState(null,'','/dashboard/'+page);$('pagetitle').textContent=({'auto-share':'Auto Share',ai:'Asisten AI',nomor:'Session WhatsApp',integrasi:'Integrasi',pemakaian:'Riwayat pemakaian',paket:'Pembelian',referral:'Referral','uji-pesan':'Uji Pesan',admin:'Pengelolaan layanan',dokumentasi:'Dokumentasi API'})[page];for(const id of ['nomor','uji-pesan','ai','auto-share','integrasi','paket','referral','admin','dokumentasi'])$(id).hidden=id!==page;const subpages={ai:'Pengaturan AI',plans:'Paket & Harga',accounts:'Akun pelanggan',settings:'Pengaturan pembayaran',payments:'Semua pembayaran',referral:'Referral',failures:'Log Kegagalan Agent',trace:'Log Lengkap',health:'Status layanan & audit'};const requestedSub=location.pathname.split('/')[3];const sub=Object.hasOwn(subpages,requestedSub)?requestedSub:'plans';$('adminsubmenu').hidden=!owner;$('ownerdocs').hidden=!owner;for(const id of Object.keys(subpages))$('admin-'+id).hidden=id!==sub;if(page==='admin')$('pagetitle').textContent=subpages[sub];document.querySelectorAll('#adminsubmenu a').forEach(a=>{if(a.pathname==='/dashboard/admin/'+sub)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});document.querySelectorAll('.tabs > a').forEach(a=>{if(a.pathname==='/dashboard/'+page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('pageintro').textContent=page==='paket'?'':page==='admin'?({ai:'Kelola koneksi, tarif kata, harga kredit, dan memori AI global.',plans:'Kelola pilihan paket, harga, dan kapasitas untuk pelanggan Anda.',accounts:'Kelola akun pelanggan, status akses, dan penyesuaian kredit.',settings:'Siapkan pembayaran paket melalui Midtrans.',payments:'Pantau transaksi pembelian paket pelanggan.',referral:'Kelola program referral, permintaan pencairan, dan Agen Resmi.',failures:'Telusuri kegagalan asisten AI per agent untuk menyesuaikan prompt.',trace:'Rekaman lengkap tiap langkah proses AI untuk debugging mendalam.',health:'Pantau kondisi layanan dan aktivitas pengelolaan.'}[sub]):({nomor:'Hubungkan nomor WhatsApp dan pantau koneksi Anda.',integrasi:'Sambungkan WhatsApp ke aplikasi dan workflow Anda.',dokumentasi:'Panduan untuk membangun integrasi WhatsApp Anda.','uji-pesan':'Coba pengiriman dan lihat riwayat pemakaian kredit.',referral:'Bagikan kode referral dan pantau bonus serta komisi Anda.'}[page]||'');$('userstats').hidden=owner||page!=='nomor';if(page!=='nomor')closeQr();}
+function navigate(){const owner=!$('adminlink').hidden;const allowed=owner?['admin','dokumentasi']:['nomor','uji-pesan','ai','auto-share','integrasi','dokumentasi','paket','referral'];const requested=location.pathname.split('/')[2]||location.hash.slice(1);const page=allowed.includes(requested)?requested:allowed[0];if(requested!==page)history.replaceState(null,'','/dashboard/'+page);$('pagetitle').textContent=({'auto-share':'Auto Share',ai:'Asisten AI',nomor:'Session WhatsApp',integrasi:'Integrasi',pemakaian:'Riwayat pemakaian',paket:'Pembelian',referral:'Referral','uji-pesan':'Uji Pesan',admin:'Pengelolaan layanan',dokumentasi:'Dokumentasi API'})[page];for(const id of ['nomor','uji-pesan','ai','auto-share','integrasi','paket','referral','admin','dokumentasi'])$(id).hidden=id!==page;const subpages={ai:'Pengaturan AI',profiles:'Profil AI',plans:'Paket & Harga',accounts:'Akun pelanggan',settings:'Pengaturan pembayaran',payments:'Semua pembayaran',referral:'Referral',failures:'Log Kegagalan Agent',trace:'Log Lengkap',health:'Status layanan & audit'};const requestedSub=location.pathname.split('/')[3];const sub=Object.hasOwn(subpages,requestedSub)?requestedSub:'plans';$('adminsubmenu').hidden=!owner;$('ownerdocs').hidden=!owner;for(const id of Object.keys(subpages))$('admin-'+id).hidden=id!==sub;if(page==='admin')$('pagetitle').textContent=subpages[sub];document.querySelectorAll('#adminsubmenu a').forEach(a=>{if(a.pathname==='/dashboard/admin/'+sub)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});document.querySelectorAll('.tabs > a,.tabs .nav-links > a').forEach(a=>{if(a.pathname==='/dashboard/'+page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('pageintro').textContent=page==='paket'?'':page==='admin'?({ai:'Kelola koneksi, tarif kata, harga kredit, dan memori AI global.',profiles:'Atur profil AI mana yang tersedia untuk semua klien.',plans:'Kelola pilihan paket, harga, dan kapasitas untuk pelanggan Anda.',accounts:'Kelola akun pelanggan, status akses, dan penyesuaian kredit.',settings:'Siapkan pembayaran paket melalui Midtrans.',payments:'Pantau transaksi pembelian paket pelanggan.',referral:'Kelola program referral, permintaan pencairan, dan Agen Resmi.',failures:'Telusuri kegagalan asisten AI per agent untuk menyesuaikan prompt.',trace:'Rekaman lengkap tiap langkah proses AI untuk debugging mendalam.',health:'Pantau kondisi layanan dan aktivitas pengelolaan.'}[sub]):({nomor:'Hubungkan nomor WhatsApp dan pantau koneksi Anda.',integrasi:'Sambungkan WhatsApp ke aplikasi dan workflow Anda.',dokumentasi:'Panduan untuk membangun integrasi WhatsApp Anda.','uji-pesan':'Coba pengiriman dan lihat riwayat pemakaian kredit.',referral:'Bagikan kode referral dan pantau bonus serta komisi Anda.'}[page]||'');$('userstats').hidden=owner||page!=='nomor';if(page!=='nomor')closeQr();}
 document.querySelectorAll('#admin > details, #nomor > details').forEach(panel=>panel.addEventListener('toggle',()=>{if(panel.open)for(const other of panel.parentElement.querySelectorAll(':scope > details'))if(other!==panel)other.open=false;}));
 document.querySelectorAll('.tabs a:not(.sidebar-brand):not([data-studio])').forEach(a=>a.addEventListener('click',event=>{if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();history.pushState(null,'',a.pathname);navigate();if(a.pathname==='/dashboard/ai')void run(loadAI);if(a.pathname==='/dashboard/auto-share')void run(loadAutoShare);if(a.pathname==='/dashboard/referral')void run(loadReferral);if(a.pathname==='/dashboard/admin/referral')void run(loadAdminReferral);$('message').textContent='';window.scrollTo(0,0);}));
 window.addEventListener('popstate',()=>{if(!$('dashboard').hidden)navigate();});
@@ -129,7 +129,7 @@ async function plans(){table('plans',['Nama paket','Harga / bulan','Kredit','Bat
 });}
 form('planform',async p=>{await api('/api/admin/plans/'+encodeURIComponent(p.id),'PUT',{name:p.name,price:Number(p.price),credits:Number(p.credits),session_limit:Number(p.session_limit),max_share_assets:Number(p.max_share_assets),max_share_storage_bytes:Number(p.max_share_storage_mb)*1048576,active:p.active==='on'});await plans();$('planform-modal').close();$('message').textContent='Paket tersimpan.';});
 const passwordModal=document.createElement('dialog'),passwordForm=document.createElement('form'),passwordTitle=document.createElement('h2'),passwordInput=document.createElement('input'),passwordClose=document.createElement('button');passwordModal.append(passwordTitle,passwordForm);passwordForm.method='dialog';passwordForm.append(document.createElement('label'));passwordForm.firstChild.textContent='Password baru ';passwordInput.type='password';passwordInput.minLength=6;passwordInput.maxLength=128;passwordInput.autocomplete='new-password';passwordInput.required=true;passwordForm.firstChild.append(passwordInput);const passwordSave=document.createElement('button');passwordSave.textContent='Ganti password';passwordClose.type='button';passwordClose.className='secondary';passwordClose.textContent='Tutup';passwordForm.append(passwordSave,passwordClose);document.body.append(passwordModal);passwordClose.onclick=()=>passwordModal.close();let passwordAccount;function changePassword(account){passwordAccount=account;passwordTitle.textContent='Ganti password · '+account.email;passwordInput.value='';passwordModal.showModal();passwordInput.focus();}passwordForm.onsubmit=e=>{e.preventDefault();void run(async()=>{passwordSave.disabled=true;try{await api('/api/admin/accounts/'+encodeURIComponent(passwordAccount.id)+'/password','PUT',{password:passwordInput.value});passwordModal.close();$('message').textContent='Password berhasil diganti; semua sesi login akun tersebut telah dicabut.';}finally{passwordSave.disabled=false;}});};
-async function admin(){await plans();await loadAIConfig();await loadModelUsage();await loadFailures();await loadTraceRequests();const accounts=await api('/api/admin/accounts');$('ai-adjust-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));const selected=$('adjustaccount').value;$('adjustaccount').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));$('adjustaccount').value=selected;$('referral-agent-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));table('accounts',['Email','Peran','Status','Paket aktif','Sisa kredit','Tindakan'],accounts,u=>{if(u.role==='owner')return [u.email,'Pemilik',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),'—'];const actions=document.createElement('div');actions.className='row-actions';actions.append(button(u.suspended?'Aktifkan':'Nonaktifkan',async()=>{await api('/api/admin/accounts/'+u.id+'/status','PUT',{suspended:!u.suspended});await admin();}),button('Ganti password',async()=>changePassword(u)));return [u.email,'Pengguna',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),actions];});const config=await api('/api/admin/midtrans');$('midtransstatus').textContent=`${config.configured?'Terkonfigurasi: '+config.environment+' · '+config.serverKey:'Belum dikonfigurasi'} · URL notifikasi: ${config.notificationUrl}`;await loadAudit();await loadAdminPayments();const health=await api('/api/admin/health');table('health',['Komponen','Status'],Object.entries(health),([key,value])=>[({database:'Database',engine:'WhatsApp',uptime:'Waktu aktif'})[key]||key,typeof value==='object'?JSON.stringify(value):key==='uptime'?Math.floor(value)+' detik':String(value)]);await loadAdminReferral();}
+async function admin(){await plans();await loadAIConfig();await loadAdminProfiles();await loadModelUsage();await loadFailures();await loadTraceRequests();const accounts=await api('/api/admin/accounts');$('ai-adjust-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));const selected=$('adjustaccount').value;$('adjustaccount').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));$('adjustaccount').value=selected;$('referral-agent-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));table('accounts',['Email','Peran','Status','Paket aktif','Sisa kredit','Tindakan'],accounts,u=>{if(u.role==='owner')return [u.email,'Pemilik',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),'—'];const actions=document.createElement('div');actions.className='row-actions';actions.append(button(u.suspended?'Aktifkan':'Nonaktifkan',async()=>{await api('/api/admin/accounts/'+u.id+'/status','PUT',{suspended:!u.suspended});await admin();}),button('Ganti password',async()=>changePassword(u)));return [u.email,'Pengguna',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),actions];});const config=await api('/api/admin/midtrans');$('midtransstatus').textContent=`${config.configured?'Terkonfigurasi: '+config.environment+' · '+config.serverKey:'Belum dikonfigurasi'} · URL notifikasi: ${config.notificationUrl}`;await loadAudit();await loadAdminPayments();const health=await api('/api/admin/health');table('health',['Komponen','Status'],Object.entries(health),([key,value])=>[({database:'Database',engine:'WhatsApp',uptime:'Waktu aktif'})[key]||key,typeof value==='object'?JSON.stringify(value):key==='uptime'?Math.floor(value)+' detik':String(value)]);await loadAdminReferral();}
 let auditPage=1,auditLoading=false;
 async function loadAudit(page=auditPage){
  if(auditLoading)return;auditLoading=true;$('audit-prev').disabled=$('audit-next').disabled=true;
@@ -160,11 +160,12 @@ document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 
 const aiTabNames=['knowledge','orders','conversations','usage','trial','integrasi'];
-function aiTab(tab){for(const name of aiTabNames){const section=$('ai-tab-'+name);if(section)section.hidden=name!==tab;}document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('usaha');}
+function aiTab(tab){for(const name of aiTabNames){const section=$('ai-tab-'+name);if(section)section.hidden=name!==tab;}document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('usaha');if(tab==='conversations'&&$('ai-session').value&&aiView==='sessions')void run(loadConversations);}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
 const knowledgeTabNames=['usaha','products','behavior','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
-function knowledgeTab(tab){for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
+function knowledgeTab(tab){$('ai-knowledge-select').value=tab;for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
 document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
+$('ai-knowledge-select').onchange=e=>knowledgeTab(e.target.value);
 aiTab('knowledge');
 {const icon=document.querySelector('.ai-hero-icon'),plan=document.createElement('div'),label=document.createElement('span');plan.className='ai-hero-plan';label.id='ai-active-plan';label.className='ai-active-plan';label.textContent='—';icon.before(plan);plan.append(icon,label);}
 $('ai-hero-buy').onclick=()=>{$('ai-credit-units').value='1';aiCreditSummary();$('ai-credit-modal').showModal();};
@@ -180,9 +181,11 @@ async function refreshSessionCards(){
  aiSessionIndex=Math.max(0,aiSessions.findIndex(s=>s.id===$('ai-session').value));
  renderSessionCards();
  renderAISessionFilters();
+ renderProfileStrip();renderAITabs();
 }
 async function loadAI(){
- const [w,waWallet]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),loadAIUsage()]);
+ const [w,waWallet,types]=await Promise.all([api('/api/ai/wallet'),api('/api/wallet'),api('/ai/profile-types'),loadAIUsage()]);
+ aiProfileTypes=types;
  aiSessionLimit=waWallet.session_limit;
  await refreshSessionCards();
  $('ai-balance').textContent=`${w.balance} kredit`;
@@ -213,9 +216,137 @@ const sessionStatusMeta={
  logged_out:{cls:'offline',icon:qrIcon,label:'WhatsApp terputus — klik untuk memasang ulang',clickable:true},
 };
 let aiSessions=[],aiSessionIndex=0,aiSessionLimit=1;
+// Multi-profile: a profile is a pipeline shipped by NC-WA (CS Usaha, …); a data profile is this account's
+// content for one profile, attachable to any session. "Sesi" edits the data profile attached to the selected
+// session; "Data Profil" lists every data profile and can manage one directly, attached or not.
+let aiView='sessions',aiManaged=null,aiProfileTypes=[],aiDataProfiles=[];
+const profileType=id=>aiProfileTypes.find(t=>t.id===id);
+const selectedSession=()=>aiSessions.find(s=>s.id===$('ai-session').value);
+// The data profile being edited: the managed one, or the one attached to the selected session.
+const aiTarget=()=>aiView==='profiles'?aiManaged?.id??'':selectedSession()?.aiProfile?.id??'';
+const profileBase=(id=aiTarget())=>'/ai/data-profiles/'+encodeURIComponent(id);
+// Session view keeps using the session routes, so orders remember which number they came from.
+const dataBase=()=>aiView==='profiles'?profileBase():'/sessions/'+encodeURIComponent($('ai-session').value)+'/ai';
+// Percakapan, Uji Pesan and Integrasi belong to every session; the profile adds its own tabs.
+function allowedAITabs(){
+ if(aiView==='profiles')return aiManaged?['knowledge','orders','trial']:[];
+ const session=selectedSession();if(!session)return [];
+ const type=session.aiProfile&&profileType(session.aiProfile.profile_type);
+ return ['conversations','trial','integrasi',...(type?type.tabs:[])];
+}
+function renderAITabs(){
+ const allowed=allowedAITabs();
+ document.querySelectorAll('[data-ai-tab]').forEach(b=>b.hidden=!allowed.includes(b.dataset.aiTab));
+ const current=[...document.querySelectorAll('[data-ai-tab]')].find(b=>b.getAttribute('aria-pressed')==='true')?.dataset.aiTab;
+ if(allowed.length&&!allowed.includes(current))aiTab(aiTabNames.find(t=>allowed.includes(t)));
+ // Uji Pesan sends a real WhatsApp message from the session; Uji AI Asisten needs a data profile.
+ const trials={message:aiView==='sessions',assistant:Boolean(aiTarget())};
+ document.querySelectorAll('[data-ai-trial-tab]').forEach(b=>b.hidden=!trials[b.dataset.aiTrialTab]);
+ const trial=[...document.querySelectorAll('[data-ai-trial-tab]')].find(b=>b.getAttribute('aria-pressed')==='true')?.dataset.aiTrialTab;
+ if(document.querySelector('[data-ai-trial-tab]')&&!trials[trial])aiTrialTab(trials.assistant?'assistant':'message');
+ // Fallback tickets belong to a session's customers; a managed data profile only sets the team number.
+ for(const el of [$('ai-fallbacks'),$('ai-fallbacks').previousElementSibling,$('ai-fallbacks').nextElementSibling])el.hidden=aiView==='profiles';
+}
+function renderAIView(){
+ const sessions=aiView==='sessions',managing=aiView==='profiles'&&Boolean(aiManaged);
+ document.querySelectorAll('[data-ai-view]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.aiView===aiView)));
+ $('ai-session-picker').hidden=!sessions;$('ai-profiles-view').hidden=sessions||managing;$('ai-manage-head').hidden=!managing;
+ $('ai-session-placeholder').hidden=!sessions||Boolean($('ai-session').value);
+ $('ai-session-detail').hidden=sessions?!$('ai-session').value:!managing;
+ $('ai-session-filters').hidden=!sessions||!selectedSession();
+ if(managing){const type=profileType(aiManaged.profile_type);$('ai-manage-name').textContent=aiManaged.name;$('ai-manage-meta').textContent=(type?.name??aiManaged.profile_type)+' · '+(aiManaged.sessions.length?'dipasang di '+aiManaged.sessions.join(', '):'belum dipasang ke sesi mana pun');}
+ renderProfileStrip();renderAITabs();
+}
+function setAIView(view){if(aiView===view&&!aiManaged)return;aiView=view;aiManaged=null;renderAIView();run(async()=>{if(view==='profiles')await loadDataProfiles();await loadAssistant();});}
+document.querySelectorAll('[data-ai-view]').forEach(b=>b.onclick=()=>setAIView(b.dataset.aiView));
+$('ai-manage-back').onclick=()=>{aiManaged=null;renderAIView();run(loadDataProfiles);};
+function manageProfile(profile,tab='knowledge'){aiManaged=profile;renderAIView();aiTab(tab);run(loadAssistant);}
+async function loadProfileCatalog(){[aiProfileTypes,aiDataProfiles]=await Promise.all([api('/ai/profile-types'),api('/ai/data-profiles')]);}
+async function loadDataProfiles(){await loadProfileCatalog();renderDataProfiles();}
+const profileIcon='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M9 20v-6h6v6"/></svg>';
+const chatIcon='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>';
+// Client menu links sit in one wrapper: display:contents on wide screens (layout unchanged), a single row that
+// scrolls sideways under the brand on phones.
+// Phones show the owner menu as a header with a menu button instead of a bottom panel covering the page.
+function addAdminMenuToggle(nav){if($('admin-menu-toggle'))return;const toggle=element('button','secondary admin-menu-toggle');toggle.type='button';toggle.id='admin-menu-toggle';toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','Buka menu admin');toggle.innerHTML='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>';toggle.onclick=()=>{const open=nav.classList.toggle('menu-open');toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',open?'Tutup menu admin':'Buka menu admin');};nav.querySelector(':scope > .sidebar-brand').after(toggle);nav.addEventListener('click',e=>{if(e.target.closest('a:not(.sidebar-brand)')&&nav.classList.contains('menu-open'))toggle.click();});}
+function wrapClientNav(nav){if(nav.querySelector(':scope > .nav-links'))return;const links=element('div','nav-links');links.append(...nav.querySelectorAll(':scope > a:not(.sidebar-brand)'));nav.querySelector(':scope > .sidebar-brand').after(links);}
+function element(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;}
+function sessionChips(sessions){const chips=element('div','ai-session-chips');for(const id of sessions)chips.append(element('span','ai-session-chip',id));return chips;}
+function renderDataProfiles(){
+ const list=$('ai-profiles-list');list.replaceChildren();
+ if(!aiDataProfiles.length)list.append(element('p','empty','Belum ada data profil. Buat data profil, lalu pasang ke sesi di tab Sesi.'));
+ for(const p of aiDataProfiles){
+  const card=element('article','ai-profile-card'),head=element('div','ai-profile-card-head'),icon=element('span','ai-profile-card-icon'),title=element('div','ai-profile-card-title');
+  icon.innerHTML=profileIcon;title.append(element('strong','',p.name),element('span','ai-profile-type'+(p.profile_enabled?'':' disabled'),p.profile_name+(p.profile_enabled?'':' · nonaktif')));
+  const menu=element('details','ai-card-menu'),summary=element('summary','','⋮'),items=element('div','ai-card-menu-items');summary.setAttribute('aria-label','Menu '+p.name);
+  items.append(button('Ganti nama',async()=>{menu.open=false;const name=prompt('Nama baru untuk data profil ini:',p.name);if(!name?.trim()||name.trim()===p.name)return;await api(profileBase(p.id),'PATCH',{name:name.trim()});await loadDataProfiles();$('message').textContent='Nama data profil diperbarui.';}),
+   button('Duplikat',async()=>{menu.open=false;const name=prompt('Nama untuk salinan data profil ini:','Salinan '+p.name);if(!name?.trim())return;await api('/ai/data-profiles','POST',{name:name.trim(),copy_from:p.id});await loadDataProfiles();$('message').textContent='Data profil diduplikat beserta produk dan fotonya.';}),
+   button('Hapus',async()=>{menu.open=false;if(p.sessions.length){$('message').textContent='Cabut data profil ini dari sesi '+p.sessions.join(', ')+' sebelum menghapusnya.';return;}if(!confirm('Hapus data profil '+p.name+'? Knowledge, produk, foto, dan pesanannya ikut terhapus.'))return;await api(profileBase(p.id),'DELETE');await loadDataProfiles();$('message').textContent='Data profil dihapus.';}));
+  items.lastElementChild.classList.add('danger');menu.append(summary,items);
+  head.append(icon,title,menu);
+  const stats=element('div','ai-profile-stats');stats.append(element('span','',p.products+' produk'),element('span','',p.orders+' pesanan'),element('span','','Diubah '+new Date(p.updated_at).toLocaleDateString('id-ID',{day:'numeric',month:'short'})));
+  const used=element('div','ai-profile-used');used.append(element('small','','DIPASANG DI'),p.sessions.length?sessionChips(p.sessions):element('span','ai-profile-idle','Belum dipasang ke sesi mana pun'));
+  const actions=element('div','ai-profile-actions');actions.append(button('Kelola isi',()=>manageProfile(p)),button('Uji Coba',()=>manageProfile(p,'trial')));actions.lastElementChild.classList.add('secondary');
+  card.append(head,stats,used,actions);list.append(card);
+ }
+ const enabled=aiProfileTypes.filter(t=>t.enabled);
+ $('ai-profile-types-info').textContent=enabled.length?'Profil tersedia: '+enabled.map(t=>t.name).join(', ')+'. Profil adalah alur AI siap pakai dari NC-WA; setiap data profil dibuat untuk satu profil. Profil lain muncul di sini setelah diaktifkan admin.':'Belum ada profil AI yang diaktifkan admin.';
+ $('ai-profile-new').disabled=!enabled.length;
+}
+$('ai-profile-new').onclick=()=>{const f=$('ai-profile-create-form');f.reset();$('ai-profile-create-error').textContent='';$('ai-profile-create-type').replaceChildren(...aiProfileTypes.filter(t=>t.enabled).map(t=>new Option(t.name,t.id)));$('ai-profile-create-dialog').showModal();};
+form('ai-profile-create-form',async data=>{$('ai-profile-create-error').textContent='';try{const created=await api('/ai/data-profiles','POST',{profile_type:data.profile_type,name:data.name.trim()});$('ai-profile-create-dialog').close();await loadDataProfiles();manageProfile(aiDataProfiles.find(p=>p.id===created.id)??{...created,products:0,orders:0});$('message').textContent='Data profil dibuat. Isi knowledge dan produknya, lalu pasang ke sesi.';}catch(e){$('ai-profile-create-error').textContent=e.message;throw e;}});
+// The selected session's profile: what it runs, who shares that content, and how to switch or detach it.
+function renderProfileStrip(){
+ const strip=$('ai-profile-strip'),session=selectedSession();strip.hidden=aiView!=='sessions'||!session;strip.replaceChildren();strip.classList.toggle('is-empty',!session?.aiProfile);if(strip.hidden)return;
+ const profile=session.aiProfile,type=profile&&profileType(profile.profile_type),icon=element('span','ai-profile-strip-icon'),body=element('div','ai-profile-strip-body'),actions=element('div','ai-profile-strip-actions');
+ icon.innerHTML=profile?chatIcon:addIcon;
+ if(!profile){body.append(element('strong','','Sesi ini belum memakai profil AI'),element('small','','AI tidak membalas pesan di sesi ini. Riwayat chat tetap tercatat di tab Percakapan.'));actions.append(button('Pasang profil',()=>openAttach(session)));}
+ else{
+  const line=element('span','ai-profile-strip-line');line.append(element('strong','',session.id),document.createTextNode(' memakai profil '),element('strong','',type?.name??profile.profile_type),document.createTextNode(' dengan data profil '),element('strong','',profile.name));body.append(line);
+  if(type&&!type.enabled)body.append(element('small','ai-warning','Profil ini sedang dinonaktifkan admin; AI tidak membalas sampai diaktifkan kembali.'));
+  const shared=aiSessions.filter(s=>s.id!==session.id&&s.aiProfile?.id===profile.id).map(s=>s.id);
+  if(shared.length)body.append(element('small','ai-warning','Data profil ini dipakai juga oleh '+shared.join(', ')+'. Perubahan knowledge dan produk berlaku untuk semua sesi tersebut.'));
+  actions.append(button('Ganti data profil',()=>openAttach(session,true)),button('Cabut',async()=>{if(!confirm('Cabut profil dari sesi '+session.id+'? AI berhenti membalas di sesi ini dan memori AI-nya dikosongkan. Data profil '+profile.name+' tetap tersimpan.'))return;await api('/sessions/'+encodeURIComponent(session.id)+'/ai/profile','PUT',{data_profile_id:null});await refreshSessionCards();await loadAssistant();$('message').textContent='Profil dicabut dari sesi '+session.id+'.';}));
+  actions.firstElementChild.classList.add('secondary');actions.lastElementChild.classList.add('danger');
+ }
+ strip.append(icon,body,actions);
+}
+let attachSession=null;
+async function openAttach(session,switching=false){
+ attachSession=session;await loadProfileCatalog();
+ $('ai-attach-title').textContent=(switching?'Ganti data profil ':'Pasang profil ke ')+session.id;
+ $('ai-attach-error').textContent='';$('ai-attach-form').reset();
+ const types=aiProfileTypes.filter(t=>t.enabled),current=session.aiProfile;
+ $('ai-attach-types').replaceChildren(...types.map(t=>{const label=element('label','ai-choice'),input=document.createElement('input'),text=element('span');input.type='radio';input.name='profile_type';input.value=t.id;input.checked=t.id===(current?.profile_type??types[0].id);input.onchange=renderAttachProfiles;text.append(element('strong','',t.name),element('small','',t.description));label.append(input,text);return label;}));
+ if(!types.length)$('ai-attach-types').append(element('p','empty','Belum ada profil AI yang diaktifkan admin.'));
+ $('ai-attach-submit').disabled=!types.length;$('ai-attach-submit').textContent=switching?'Ganti data profil':'Pasang profil';
+ renderAttachProfiles();$('ai-attach-dialog').showModal();
+}
+function renderAttachProfiles(){
+ const f=$('ai-attach-form'),type=f.elements.profile_type?.value??f.querySelector('[name=profile_type]:checked')?.value,current=attachSession?.aiProfile;
+ const options=aiDataProfiles.filter(p=>p.profile_type===type),chosen=current&&options.some(p=>p.id===current.id)?current.id:options[0]?.id??'new';
+ $('ai-attach-profiles').replaceChildren(...options.map(p=>{const label=element('label','ai-choice'),input=document.createElement('input'),text=element('span');input.type='radio';input.name='data_profile';input.value=p.id;input.checked=p.id===chosen;input.onchange=attachWarning;const where=p.sessions.length?'Dipasang di '+p.sessions.length+' sesi':'Belum dipasang';text.append(element('strong','',p.name),element('small','',where+' · '+p.products+' produk'));label.append(input,text);return label;}));
+ f.querySelector('[name=data_profile][value=new]').checked=chosen==='new';f.querySelector('[name=data_profile][value=new]').onchange=attachWarning;
+ attachWarning();
+}
+function attachWarning(){
+ const f=$('ai-attach-form'),value=f.querySelector('[name=data_profile]:checked')?.value,current=attachSession?.aiProfile,profile=aiDataProfiles.find(p=>p.id===value);
+ $('ai-attach-new-name').hidden=value!=='new';f.elements.name.required=value==='new';
+ const notes=[];const others=profile?.sessions.filter(s=>s!==attachSession?.id)??[];
+ if(others.length)notes.push(profile.name+' dipakai juga oleh '+others.join(', ')+'. Produk, knowledge, dan pesanannya dibagi bersama; memori AI dan percakapan tetap terpisah per sesi.');
+ if(current&&value!==current.id)notes.push('Memori AI sesi '+attachSession.id+' akan dikosongkan karena berasal dari data profil lain. Riwayat chat tetap tersimpan.');
+ $('ai-attach-warning').textContent=notes.join(' ');$('ai-attach-warning').hidden=!notes.length;
+}
+form('ai-attach-form',async data=>{$('ai-attach-error').textContent='';const session=attachSession;try{
+ let id=data.data_profile;
+ if(id==='new')id=(await api('/ai/data-profiles','POST',{profile_type:data.profile_type,name:(data.name||'').trim()})).id;
+ await api('/sessions/'+encodeURIComponent(session.id)+'/ai/profile','PUT',{data_profile_id:id});
+ $('ai-attach-dialog').close();await refreshSessionCards();aiTab('knowledge');await loadAssistant();
+ $('message').textContent=session.aiEnabled?'Data profil sesi '+session.id+' diganti.':'Profil terpasang di '+session.id+'. Aktifkan AI Asisten di kartu sesi saat knowledge sudah siap.';
+}catch(e){$('ai-attach-error').textContent=e.message;throw e;}});
 function renderAISessionFilters(){
  const filters=$('ai-session-filters'),session=aiSessions.find(s=>s.id===$('ai-session').value);
- filters.hidden=!session;filters.replaceChildren();if(!session)return;
+ filters.hidden=!session||aiView!=='sessions';filters.replaceChildren();if(!session)return;
  filters.setAttribute('aria-label','Filter pesan '+session.id);
  for(const [value,label] of Object.entries({private:'pribadi',group:'grup',all:'semua'})){
   const choice=document.createElement('label'),input=document.createElement('input');
@@ -292,7 +423,9 @@ function buildSessionCard(s,offset){
   renderSessionCards();
  });
  toggle.append(robot,input,document.createElement('span'));
- foot.append(toggle);
+ // The card shows which data profile the session runs; without one there is no AI switch, only "Pasang profil".
+ if(s.aiProfile){const chip=element('span','ai-session-profile');chip.append(element('small','',(profileType(s.aiProfile.profile_type)?.name??s.aiProfile.profile_type).toUpperCase()),element('strong','',s.aiProfile.name));foot.append(chip,toggle);}
+ else{const attach=button('Pasang profil',async()=>{selectSession(s.id);await openAttach(s);});attach.classList.add('ai-session-attach');attach.addEventListener('click',e=>e.stopPropagation());attach.disabled=!active;foot.append(element('span','ai-session-noprofile','Belum ada profil AI'),attach);}
  card.append(head,foot);
  card.onclick=()=>selectSession(s.id);
  card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectSession(s.id);}};
@@ -396,10 +529,10 @@ let autosaveStatusToken=0;
 // never pushes the header layout around. The wording is kept as visually-hidden text inside it so
 // aria-live still announces it to assistive tech, and as a title attribute for a mouse tooltip.
 function autosaveStatus(state,text){const el=$('ai-save-status');const token=++autosaveStatusToken;el.className='ai-save-status '+state;el.title=text;el.innerHTML='';const label=document.createElement('span');label.className='sr-only';label.textContent=text;el.append(label);if(state==='saved')setTimeout(()=>{if(token===autosaveStatusToken){el.className='ai-save-status';el.title='';el.innerHTML='';}},2500);}
-async function autosaveField(field,value){const id=$('ai-session').value;if(!id)return;
+async function autosaveField(field,value){const target=aiTarget(),base=dataBase();if(!target)return;
  autosaveStatus('saving','Menyimpan…');
- try{const config=await api('/sessions/'+encodeURIComponent(id)+'/ai/field','PATCH',{field,value});
-  if(id!==$('ai-session').value)return; // user switched sessions while this was in flight
+ try{const config=await api(base+'/field','PATCH',{field,value});
+  if(target!==aiTarget())return; // user switched sessions or data profiles while this was in flight
   applyAssistantConfig(config,{keepFocus:true});
   autosaveStatus('saved','Tersimpan');
  }catch(e){autosaveStatus('error',e.message);throw e;}
@@ -425,7 +558,8 @@ function applyAssistantConfig(config,{keepFocus=false}={}){
  setValue($('ai-form').elements.behavior,config.behavior??'');
  setValue($('ai-form').elements.fallback_number,config.fallback_number??'');
  if($('ai-form').elements.fallback_notify!==active)$('ai-form').elements.fallback_notify.checked=Boolean(config.fallback_notify);
- $('ai-session-enabled-field').value=config.enabled?'on':'';
+ // A data profile has no AI switch of its own; only a session's settings carry it.
+ if('enabled' in config)$('ai-session-enabled-field').value=config.enabled?'on':'';
  for(const kind of sourceKinds){const src=config[kind+'_source']||{mode:'builtin',endpoint:'',has_token:false};
   if($('ai-form').elements[kind+'_mode']!==active)$('ai-form').elements[kind+'_mode'].value=src.mode;
   setValue($('ai-form').elements[kind+'_endpoint'],src.endpoint);
@@ -442,29 +576,34 @@ async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session
  // catches the nameless per-card toggles inside the session carousel, which must keep their own
  // disabled state (only the centered card's toggle is editable) instead of following this form.
  const controls=[...$('ai-form').elements].filter(x=>x.name&&x.name!=='session');for(const control of controls)control.disabled=true;
- $('ai-session-detail').hidden=!id;$('ai-session-placeholder').hidden=Boolean(id);$('ai-trial-session').value=id;
+ renderAIView();$('ai-trial-session').value=aiView==='sessions'?id:'';
+ // Knowledge, products and orders are the target data profile's; without one there is nothing to edit.
+ const target=aiTarget(),sessions=aiView==='sessions';
  $('ai-product-add').disabled=$('ai-order-add').disabled=true;
- try{const config=id?await api('/sessions/'+encodeURIComponent(id)+'/ai'):{enabled:false,profile:{},behavior:''};if(generation!==assistantLoad)return;
+ try{const config=sessions&&id?await api('/sessions/'+encodeURIComponent(id)+'/ai'):!sessions&&target?await api(profileBase(target)):{enabled:false,profile:{},behavior:''};if(generation!==assistantLoad)return;
  applyAssistantConfig(config);
- if(id){await Promise.all([loadConversations(),loadAIData(id,generation)]);}else{for(const name of ['ai-conversations','ai-products','ai-orders','ai-fallbacks'])$(name).replaceChildren();}
- }finally{if(generation===assistantLoad){for(const control of controls)control.disabled=!id;$('ai-product-add').disabled=$('ai-order-add').disabled=!id;}}}
-async function loadAIData(id=$('ai-session').value,generation=assistantLoad){if(!id)return;const base='/sessions/'+encodeURIComponent(id)+'/ai';const [products,orders]=await Promise.all([api(base+'/products'),api(base+'/orders')]);if(generation!==assistantLoad||id!==$('ai-session').value)return;
- table('ai-products',['Foto','Nama','Jenis','Deskripsi','Harga','Stok/kapasitas','Status','Tindakan'],products,p=>{let photo='—';if(p.image_id){photo=document.createElement('img');photo.src='/sessions/'+encodeURIComponent(id)+'/ai/products-image/'+encodeURIComponent(p.image_id);photo.alt='Foto '+p.name;photo.width=48;photo.height=48;photo.className='ai-product-thumb';}return [photo,p.name,p.type==='service'?'Layanan':'Produk',p.description,money(p.price),p.stock,p.active?'Aktif':'Nonaktif',button('Edit',()=>openProduct(p))];});
+ if(!sessions||!id){chat.id='';chat.active='';chat.list=[];renderChatList();renderChatView();}
+ await Promise.all([sessions&&id?loadConversations():null,target?loadAIData(generation):null]);
+ if(!target)for(const name of ['ai-products','ai-orders','ai-fallbacks'])$(name).replaceChildren();
+ }finally{if(generation===assistantLoad){for(const control of controls)control.disabled=!target;$('ai-product-add').disabled=$('ai-order-add').disabled=!target;}}}
+async function loadAIData(generation=assistantLoad){const target=aiTarget();if(!target)return;const base=dataBase();const [products,orders]=await Promise.all([api(base+'/products'),api(base+'/orders')]);if(generation!==assistantLoad||target!==aiTarget())return;
+ table('ai-products',['Foto','Nama','Jenis','Deskripsi','Harga','Stok/kapasitas','Status','Tindakan'],products,p=>{let photo='—';if(p.image_id){photo=document.createElement('img');photo.src=productImageUrl(p.image_id);photo.alt='Foto '+p.name;photo.width=48;photo.height=48;photo.className='ai-product-thumb';}return [photo,p.name,p.type==='service'?'Layanan':'Produk',p.description,money(p.price),p.stock,p.active?'Aktif':'Nonaktif',button('Edit',()=>openProduct(p))];});
  $('ai-product-codes').replaceChildren(...products.filter(p=>p.active).map(p=>new Option(p.name)));
 // Icon-only actions keep the orders table narrow; aria-label/title carry the name for screen readers and hover.
 const actionIcons={edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',delete:'<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>'};
 function iconButton(kind,label,action){const b=button('',action);b.classList.add('table-icon-button',kind==='delete'?'danger':'secondary');b.setAttribute('aria-label',label);b.title=label;b.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+actionIcons[kind]+'</svg>';return b;}
 function orderActions(o){const actions=document.createElement('div');actions.className='row-actions table-actions';
  actions.append(iconButton('edit','Edit pesanan '+o.id,()=>{const f=$('ai-order-edit-form');f.elements.id.value=o.id;f.elements.status.value=o.status;f.elements.notes.value=o.notes;$('ai-order-detail').textContent=o.customer+' · '+o.items.map(i=>(i.product_name??i.name)+' × '+i.quantity+' @ '+money(i.price)).join(', ');$('ai-order-edit-dialog').showModal();}),
-  iconButton('delete','Hapus pesanan '+o.id,async()=>{if(!confirm('Hapus pesanan '+o.id+'? Tindakan ini tidak dapat dibatalkan.'))return;await api('/sessions/'+encodeURIComponent($('ai-session').value)+'/ai/orders/'+encodeURIComponent(o.id),'DELETE');await loadAIData();$('message').textContent='Pesanan dihapus.';}));
+  iconButton('delete','Hapus pesanan '+o.id,async()=>{if(!confirm('Hapus pesanan '+o.id+'? Tindakan ini tidak dapat dibatalkan.'))return;await api(dataBase()+'/orders/'+encodeURIComponent(o.id),'DELETE');await loadAIData();$('message').textContent='Pesanan dihapus.';}));
  return actions;}
 // Display names for the stored/API values pesanan_masuk, dibayar, diproses, selesai, dibatalkan.
 const orderStatusLabels={pesanan_masuk:'Pesanan masuk',dibayar:'Dibayar',diproses:'Diproses',selesai:'Selesai',dibatalkan:'Dibatalkan'};
- table('ai-orders',['ID','Pelanggan','Item','Total','Status','Tindakan'],orders,o=>[o.id,o.customer,o.items.map(i=>(i.product_name??i.name)+' × '+i.quantity).join(', '),money(o.total),orderStatusLabels[o.status]??o.status,orderActions(o)]);
- await loadFallbacks(base);
+ // Sessions sharing a data profile collect their orders together; Sesi shows where each came from.
+ table('ai-orders',['ID','Pelanggan','Sesi','Item','Total','Status','Tindakan'],orders,o=>[o.id,o.customer,o.session_id||'Data Profil',o.items.map(i=>(i.product_name??i.name)+' × '+i.quantity).join(', '),money(o.total),orderStatusLabels[o.status]??o.status,orderActions(o)]);
+ if(aiView==='sessions')await loadFallbacks('/sessions/'+encodeURIComponent($('ai-session').value)+'/ai');else $('ai-fallbacks').replaceChildren();
 }
 let aiFallbacksPage=1,aiFallbacksLoading=false;
-async function loadFallbacks(base=(()=>{const id=$('ai-session').value;return id?'/sessions/'+encodeURIComponent(id)+'/ai':null;})(),page=aiFallbacksPage){
+async function loadFallbacks(base=(()=>{const id=$('ai-session').value;return id&&aiView==='sessions'?'/sessions/'+encodeURIComponent(id)+'/ai':null;})(),page=aiFallbacksPage){
  if(!base||aiFallbacksLoading)return;aiFallbacksLoading=true;$('ai-fallbacks-prev').disabled=$('ai-fallbacks-next').disabled=true;
  try{const result=await api(base+'/fallbacks?page='+page);aiFallbacksPage=result.page;
  table('ai-fallbacks',['ID','Pelanggan','Status','Pertanyaan','Dibuat','Tindakan'],result.items,row=>{const actions=document.createElement('div');actions.className='row-actions';if(row.status==='waiting')actions.append(button('Jawab',async()=>{const answer=prompt('Jawaban untuk pelanggan:');if(!answer?.trim())return;await api(base+'/fallbacks/'+encodeURIComponent(row.id)+'/answer','POST',{answer});await loadFallbacks(base);}));if(row.status==='resolved'){actions.append(button('Ke Knowledge',()=>fallbackKnowledge(base,row)),button('Tambah produk',()=>fallbackProduct(row)));}actions.append(button('Hapus',async()=>{if(!confirm('Hapus tiket fallback ini?'))return;await api(base+'/fallbacks/'+encodeURIComponent(row.id),'DELETE');await loadFallbacks(base);}));return [row.id,row.customer,row.status,row.question,new Date(row.created_at).toLocaleString('id-ID'),actions.childElementCount?actions:'—'];});
@@ -478,36 +617,120 @@ async function fallbackKnowledge(base,row){const draft='Pertanyaan: '+row.questi
 function fallbackProduct(row){const f=$('ai-product-form');f.reset();f.elements.description.value=('Referensi pertanyaan pelanggan: '+row.question+'\nKonfirmasi tim: '+(row.staff_answer||'')).slice(0,500);f.elements.active.checked=true;$('ai-product-dialog').showModal();}
 function aiDataForm(id,action){form(id,async data=>{let error=$(id).querySelector('.form-error');if(!error){error=document.createElement('p');error.className='form-error';error.setAttribute('role','alert');$(id).prepend(error);}error.textContent='';try{await action(data);}catch(e){error.textContent=e.message;throw e;}});}
 let editingProductName,currentImageId=null;
-function productImageUrl(sessionId,imageId){return '/sessions/'+encodeURIComponent(sessionId)+'/ai/products-image/'+encodeURIComponent(imageId);}
-function showProductImage(imageId){const sessionId=$('ai-session').value;currentImageId=imageId;const preview=$('ai-product-image-preview'),remove=$('ai-product-image-remove');if(imageId){preview.src=productImageUrl(sessionId,imageId);preview.hidden=false;remove.hidden=false;}else{preview.hidden=true;remove.hidden=true;}}
+function productImageUrl(imageId){return dataBase()+'/products-image/'+encodeURIComponent(imageId);}
+function showProductImage(imageId){currentImageId=imageId;const preview=$('ai-product-image-preview'),remove=$('ai-product-image-remove');if(imageId){preview.src=productImageUrl(imageId);preview.hidden=false;remove.hidden=false;}else{preview.hidden=true;remove.hidden=true;}}
 function openProduct(product){const f=$('ai-product-form');f.reset();editingProductName=product?product.name:'';if(product)for(const key of ['name','type','description','price','stock'])f.elements[key].value=product[key];f.elements.active.checked=product?product.active:true;$('ai-product-image-input').value='';$('ai-product-image-status').textContent='';showProductImage(product?.image_id??null);$('ai-product-dialog').showModal();}
 $('ai-product-add').onclick=()=>openProduct();
-$('ai-product-image-input').onchange=()=>run(async()=>{const file=$('ai-product-image-input').files[0];if(!file)return;const id=$('ai-session').value,status=$('ai-product-image-status');status.textContent='Mengunggah…';
- const response=await fetch('/sessions/'+encodeURIComponent(id)+'/ai/products-image',{method:'POST',headers:{'X-Filename':file.name},body:file});
+$('ai-product-image-input').onchange=()=>run(async()=>{const file=$('ai-product-image-input').files[0];if(!file)return;const status=$('ai-product-image-status');status.textContent='Mengunggah…';
+ const response=await fetch(dataBase()+'/products-image',{method:'POST',headers:{'X-Filename':file.name},body:file});
  const data=await response.json().catch(()=>({}));
  if(!response.ok){status.textContent=data.message||'Gagal mengunggah foto.';return;}
  status.textContent='Foto tersimpan.';showProductImage(data.id);});
 $('ai-product-image-remove').onclick=()=>{showProductImage(null);$('ai-product-image-input').value='';$('ai-product-image-status').textContent='Foto akan dihapus saat produk disimpan.';};
-aiDataForm('ai-product-form',async data=>{const id=$('ai-session').value,payload={...data,price:Number(data.price),stock:Number(data.stock),active:data.active==='on',image_id:currentImageId};if(editingProductName)await api('/sessions/'+encodeURIComponent(id)+'/ai/products/'+encodeURIComponent(editingProductName),'PUT',payload);else await api('/sessions/'+encodeURIComponent(id)+'/ai/products','POST',payload);$('ai-product-dialog').close();await loadAIData();$('message').textContent='Produk tersimpan.';});
+aiDataForm('ai-product-form',async data=>{const base=dataBase(),payload={...data,price:Number(data.price),stock:Number(data.stock),active:data.active==='on',image_id:currentImageId};if(editingProductName)await api(base+'/products/'+encodeURIComponent(editingProductName),'PUT',payload);else await api(base+'/products','POST',payload);$('ai-product-dialog').close();await loadAIData();$('message').textContent='Produk tersimpan.';});
 let orderRequest;
 $('ai-order-add').onclick=()=>{$('ai-order-form').reset();orderRequest=undefined;$('ai-order-dialog').showModal();};
-aiDataForm('ai-order-form',async data=>{const id=$('ai-session').value,payload={customer:data.customer,items:[{product_name:data.product_name,quantity:Number(data.quantity)}],notes:data.notes};const signature=JSON.stringify([id,payload]);if(!orderRequest||orderRequest.signature!==signature)orderRequest={signature,key:crypto.randomUUID()};await api('/sessions/'+encodeURIComponent(id)+'/ai/orders','POST',payload,{'Idempotency-Key':orderRequest.key});$('ai-order-dialog').close();orderRequest=undefined;await loadAIData();$('message').textContent='Pesanan tercatat untuk diproses.';});
-aiDataForm('ai-order-edit-form',async data=>{await api('/sessions/'+encodeURIComponent($('ai-session').value)+'/ai/orders/'+encodeURIComponent(data.id),'PUT',{status:data.status,notes:data.notes});$('ai-order-edit-dialog').close();await loadAIData();$('message').textContent='Pesanan diperbarui.';});
+aiDataForm('ai-order-form',async data=>{const base=dataBase(),payload={customer:data.customer,items:[{product_name:data.product_name,quantity:Number(data.quantity)}],notes:data.notes};const signature=JSON.stringify([base,payload]);if(!orderRequest||orderRequest.signature!==signature)orderRequest={signature,key:crypto.randomUUID()};await api(base+'/orders','POST',payload,{'Idempotency-Key':orderRequest.key});$('ai-order-dialog').close();orderRequest=undefined;await loadAIData();$('message').textContent='Pesanan tercatat untuk diproses.';});
+aiDataForm('ai-order-edit-form',async data=>{await api(dataBase()+'/orders/'+encodeURIComponent(data.id),'PUT',{status:data.status,notes:data.notes});$('ai-order-edit-dialog').close();await loadAIData();$('message').textContent='Pesanan diperbarui.';});
+// Chat view of the AI page: conversation list on the left, WhatsApp-style history on the right.
+const chat={id:'',list:[],contacts:new Map(),saved:new Set(),filter:'all',search:'',active:'',messages:[],before:null,loading:false,sending:false,refresh:undefined};
+const chatTick={sent:'<path d="M3 12.5 7.5 17 17 7"/>',delivered:'<path d="M1.5 12.5 6 17 15.5 7"/><path d="M9 16.5 9.5 17 19 7"/>'};
+const chatOrigins={ai:'AI',manual:'Manual',api:'API',system:'Sistem'};
+// Indonesian numbers read as +62 812-3456-7890; others stay as sent.
+function chatNumber(customer){if(!customer.startsWith('62'))return customer;const rest=customer.slice(2);return '+62 '+[rest.slice(0,3),rest.slice(3,7),rest.slice(7)].filter(Boolean).join('-');}
+function chatName(customer){return chat.contacts.get(customer)||chatNumber(customer);}
+function chatInitials(customer){const name=chat.contacts.get(customer);return name?name.split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase():'#';}
+function chatState(entry){if($('ai-session-enabled-field').value!=='on')return ['off','AI nonaktif'];return entry.paused?['paused','Dijeda']:entry.full_auto?['full','Full auto']:['ai','AI aktif'];}
+function chatDay(value){const date=new Date(value),today=new Date();const start=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();const days=Math.round((start(today)-start(date))/86400000);return days===0?'Hari ini':days===1?'Kemarin':date.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'});}
+function chatClock(value){return new Date(value).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});}
+function chatListTime(value){if(!value)return '';const days=chatDay(value);return days==='Hari ini'?chatClock(value):days==='Kemarin'?'Kemarin':new Date(value).toLocaleDateString('id-ID',{day:'2-digit',month:'2-digit'});}
 async function loadConversations(){
- const id=$('ai-session').value,generation=assistantLoad;if(!id)return;
- const [rows,savedContacts]=await Promise.all([api('/sessions/'+encodeURIComponent(id)+'/ai/conversations'),api('/auto-share/contacts')]);if(id!==$('ai-session').value||generation!==assistantLoad)return;
- table('ai-conversations',['Pelanggan','Memori','Konteks','Status','Tindakan'],rows,r=>{
-  const actions=document.createElement('div');actions.className='row-actions';
-  const update=async body=>{await api('/sessions/'+encodeURIComponent(id)+'/ai/conversations/'+encodeURIComponent(r.customer),'PUT',body);await loadConversations();};
-  actions.append(button(r.paused?'Lanjutkan AI':'Jeda AI',()=>update({paused:!r.paused,full_auto:false})),
-   button(r.full_auto?'Nonaktifkan full auto':'Full auto',()=>update({paused:false,full_auto:!r.full_auto})),
-   button('Hapus konteks',async()=>{if(!confirm('Hapus memori AI pelanggan ini? Chat WhatsApp tetap tersimpan.'))return;await update({paused:Boolean(r.paused),clear:true});}));
-  const saved=savedContacts.some(c=>c.nomor===(r.customer.includes('@')?r.customer:r.customer+'@s.whatsapp.net'));
-  const save=button(saved?'Sudah di kontak':'Simpan ke kontak',async()=>{await loadAutoShare();openShareContact({nomor:r.customer});});save.disabled=saved;actions.append(save);
-  return [r.customer,r.message_count,r.router_context||'—',r.paused?'Dijeda':r.full_auto?'Full auto':'Aktif',actions];
- });
+ const id=$('ai-session').value,generation=assistantLoad;if(!id||aiView!=='sessions')return;
+ const [rows,savedContacts]=await Promise.all([api('/sessions/'+encodeURIComponent(id)+'/ai/chats'),api('/auto-share/contacts')]);if(id!==$('ai-session').value||generation!==assistantLoad)return;
+ if(chat.id!==id){chat.active='';chat.messages=[];chat.before=null;}
+ chat.id=id;chat.list=rows;const number=c=>String(c.nomor).replace(/@s\.whatsapp\.net$/,'');chat.saved=new Set(savedContacts.map(number));chat.contacts=new Map(savedContacts.filter(c=>c.nama).map(c=>[number(c),c.nama]));
+ renderChatList();
+ if(chat.active)await loadChatMessages();else renderChatView();
 }
-form('ai-trial-form',async data=>{$('ai-trial-error').textContent='';$('ai-trial-answer').hidden=true;try{const result=await api('/api/ai/trial','POST',{session:data.session,question:data.question});$('ai-trial-answer-text').textContent=result.answer;$('ai-trial-answer').hidden=false;await loadAI();}catch(e){$('ai-trial-error').textContent=e.message;}});
+function renderChatList(){
+ const counts={all:chat.list.length,ai:0,paused:0,full:0};for(const entry of chat.list)counts[chatState(entry)[0]]=(counts[chatState(entry)[0]]||0)+1;
+ for(const b of document.querySelectorAll('[data-chat-filter]')){const key=b.dataset.chatFilter;b.textContent=({all:'Semua',ai:'AI aktif',paused:'Dijeda',full:'Full auto'})[key]+' '+(counts[key]||0);b.setAttribute('aria-pressed',String(chat.filter===key));}
+ const query=chat.search.trim().toLowerCase();
+ const shown=chat.list.filter(entry=>(chat.filter==='all'||chatState(entry)[0]===chat.filter)&&(!query||entry.customer.includes(query.replace(/\D/g,'')||'\u0000')||chatName(entry.customer).toLowerCase().includes(query)));
+ const list=$('chat-list');
+ if(!shown.length){const empty=document.createElement('p');empty.className='chat-list-empty';empty.textContent=chat.list.length?'Tidak ada percakapan yang cocok.':'Belum ada percakapan. Pesan pribadi yang masuk ke sesi ini akan tampil di sini.';list.replaceChildren(empty);return;}
+ list.replaceChildren(...shown.map(entry=>{
+  const item=document.createElement('button'),avatar=document.createElement('span'),body=document.createElement('span'),top=document.createElement('span'),name=document.createElement('strong'),time=document.createElement('span'),bottom=document.createElement('span'),preview=document.createElement('span'),badge=document.createElement('span');
+  const [state,label]=chatState(entry),last=entry.last;
+  item.type='button';item.className='chat-item'+(entry.customer===chat.active?' active':'');item.setAttribute('aria-current',String(entry.customer===chat.active));
+  avatar.className='chat-avatar';avatar.textContent=chatInitials(entry.customer);avatar.setAttribute('aria-hidden','true');
+  name.textContent=chatName(entry.customer);time.className='chat-item-time';time.textContent=chatListTime(last?.at);
+  preview.className='chat-item-preview';preview.textContent=last?(last.direction==='out'?(last.origin==='ai'?'AI: ':'Anda: '):'')+last.text:'Belum ada riwayat chat';
+  badge.className='chat-badge '+state;badge.textContent=label;
+  top.append(name,time);bottom.append(preview,badge);body.className='chat-item-body';body.append(top,bottom);item.append(avatar,body);
+  item.onclick=()=>run(async()=>{chat.active=entry.customer;chat.messages=[];chat.before=null;renderChatList();$('chat-shell').classList.add('chat-open');await loadChatMessages();
+   // On a phone the chat sits below the session picker; bring the whole chat, composer included, into view.
+   if(matchMedia('(max-width:760px)').matches)$('chat-shell').scrollIntoView({block:'start'});else $('chat-text').focus({preventScroll:true});});
+  return item;
+ }));
+}
+async function loadChatMessages(older=false){
+ const id=chat.id,customer=chat.active;if(!id||!customer)return;
+ const query=older&&chat.before?'?before='+encodeURIComponent(chat.before):'';
+ const page=await api('/sessions/'+encodeURIComponent(id)+'/ai/chats/'+encodeURIComponent(customer)+'/messages'+query);
+ if(id!==chat.id||customer!==chat.active)return;
+ const box=$('chat-messages'),nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<80,previousHeight=box.scrollHeight;
+ if(older){chat.messages=[...page.messages,...chat.messages];}else{chat.messages=page.messages;}
+ chat.before=page.before;
+ renderChatView();
+ if(older)box.scrollTop=box.scrollHeight-previousHeight;else if(nearBottom||!box.dataset.opened||box.dataset.opened!==customer){box.scrollTop=box.scrollHeight;box.dataset.opened=customer;}
+}
+function renderChatView(){
+ const entry=chat.list.find(e=>e.customer===chat.active);
+ $('chat-empty').hidden=Boolean(chat.active);$('chat-view').hidden=!chat.active;if(!chat.active){$('chat-shell').classList.remove('chat-open');return;}
+ const current=entry??{customer:chat.active,paused:false,full_auto:false,message_count:0,router_context:null};
+ const [state,label]=chatState(current);
+ $('chat-avatar').textContent=chatInitials(current.customer);$('chat-name').textContent=chatName(current.customer);
+ $('chat-meta').textContent=(chat.contacts.has(current.customer)?chatNumber(current.customer)+' · ':'')+current.message_count+' pesan di memori AI';
+ $('chat-status').className='chat-status '+state;$('chat-status').textContent=label;
+ $('chat-pause').textContent=current.paused?'Lanjutkan AI':'Jeda AI';$('chat-full-auto').checked=Boolean(current.full_auto);
+ $('chat-save-contact').hidden=chat.saved.has(current.customer);
+ $('chat-context').hidden=!current.router_context;$('chat-context-value').textContent=current.router_context||'';
+ const nodes=[];
+ if(chat.before){const more=button('Muat pesan sebelumnya',()=>loadChatMessages(true));more.className='secondary chat-more';nodes.push(more);}
+ if(!chat.messages.length){const empty=document.createElement('p');empty.className='chat-note';empty.textContent='Belum ada riwayat chat yang tersimpan untuk pelanggan ini.';nodes.push(empty);}
+ let day='';
+ for(const m of chat.messages){
+  const label=chatDay(m.at);if(label!==day){day=label;const divider=document.createElement('div');divider.className='chat-day';divider.textContent=label;nodes.push(divider);}
+  if(m.direction==='note'){const note=document.createElement('div');note.className='chat-note';note.textContent=m.text+' · '+chatClock(m.at);nodes.push(note);continue;}
+  const bubble=document.createElement('div'),text=document.createElement('span'),meta=document.createElement('span');
+  bubble.className='chat-bubble '+(m.direction==='in'?'in':'out '+m.origin);text.className='chat-text';text.textContent=m.text;meta.className='chat-bubble-meta';
+  if(m.direction==='out'){const tag=document.createElement('span');tag.className='chat-tag '+m.origin;tag.textContent=chatOrigins[m.origin]||m.origin;meta.append(tag);}
+  meta.append(document.createTextNode(chatClock(m.at)));
+  if(m.direction==='out'&&m.status){const tick=document.createElementNS('http://www.w3.org/2000/svg','svg');tick.setAttribute('viewBox','0 0 20 20');tick.setAttribute('width','16');tick.setAttribute('height','16');tick.setAttribute('class','chat-tick '+m.status);tick.setAttribute('role','img');tick.setAttribute('aria-label',({sent:'Terkirim',delivered:'Diterima',read:'Dibaca'})[m.status]);tick.innerHTML=m.status==='sent'?chatTick.sent:chatTick.delivered;meta.append(tick);}
+  bubble.append(text,meta);nodes.push(bubble);
+ }
+ $('chat-messages').replaceChildren(...nodes);
+}
+async function updateChatConversation(body){await api('/sessions/'+encodeURIComponent(chat.id)+'/ai/conversations/'+encodeURIComponent(chat.active),'PUT',body);await loadConversations();}
+$('chat-pause').onclick=()=>run(async()=>{const entry=chat.list.find(e=>e.customer===chat.active);await updateChatConversation({paused:!entry?.paused,full_auto:false});});
+$('chat-full-auto').onchange=e=>run(async()=>{try{await updateChatConversation({paused:false,full_auto:e.target.checked});}catch(error){e.target.checked=!e.target.checked;throw error;}});
+$('chat-clear').onclick=()=>run(async()=>{if(!confirm('Hapus memori AI pelanggan ini? Riwayat chat tetap tersimpan.'))return;const entry=chat.list.find(e=>e.customer===chat.active);await updateChatConversation({paused:Boolean(entry?.paused),clear:true});});
+$('chat-save-contact').onclick=()=>run(async()=>{await loadAutoShare();openShareContact({nomor:chat.active});});
+$('chat-back').onclick=()=>{$('chat-shell').classList.remove('chat-open');};
+$('chat-refresh').onclick=()=>run(loadConversations);
+$('chat-search').oninput=e=>{chat.search=e.target.value;renderChatList();};
+for(const b of document.querySelectorAll('[data-chat-filter]'))b.onclick=()=>{chat.filter=b.dataset.chatFilter;renderChatList();};
+// One Idempotency-Key per typed message, so a double submit or a retry never sends it twice.
+let chatPending={text:'',key:''};
+$('chat-text').oninput=e=>{e.target.style.height='46px';e.target.style.height=Math.min(Math.max(e.target.scrollHeight,46),140)+'px';};
+$('chat-text').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('chat-composer').requestSubmit();}};
+$('chat-composer').onsubmit=e=>{e.preventDefault();const input=$('chat-text'),text=input.value.trim();if(!text||chat.sending||!chat.active)return;
+ if(chatPending.text!==text)chatPending={text,key:crypto.randomUUID()};
+ void run(async()=>{chat.sending=true;e.currentTarget.querySelector('.chat-send').disabled=true;try{await api('/sessions/'+encodeURIComponent(chat.id)+'/ai/chats/'+encodeURIComponent(chat.active)+'/messages','POST',{text},{'Idempotency-Key':chatPending.key});input.value='';input.style.height='46px';chatPending={text:'',key:''};await loadConversations();await wallet();}finally{chat.sending=false;$('chat-composer').querySelector('.chat-send').disabled=false;}});};
+// Realtime: any change to the open session's chats refreshes the list and, when it is open, the conversation.
+function chatRealtime(data){if(data.event!=='chat.updated'||data.sessionId!==chat.id||$('ai-tab-conversations').hidden)return;clearTimeout(chat.refresh);chat.refresh=setTimeout(()=>{void run(loadConversations);},400);}
+form('ai-trial-form',async data=>{$('ai-trial-error').textContent='';$('ai-trial-answer').hidden=true;try{const result=await api('/api/ai/trial','POST',aiView==='profiles'?{data_profile:aiTarget(),question:data.question}:{session:data.session,question:data.question});$('ai-trial-answer-text').textContent=result.answer;$('ai-trial-answer').hidden=false;await loadAI();}catch(e){$('ai-trial-error').textContent=e.message;}});
 function aiCreditSummary(){const units=Number($('ai-credit-units').value),valid=Number.isSafeInteger(units)&&units>=1&&units<=100;$('ai-credit-summary').textContent=valid&&aiCreditPrice?`${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(aiCreditPrice*units)}`:'Jumlah unit harus bilangan 1–100.';$('ai-credit-confirm').disabled=!valid||!aiCreditPrice;return valid?units:null;}
 $('ai-credit-units').oninput=aiCreditSummary;
 $('ai-credit-confirm').onclick=()=>run(async()=>{const units=aiCreditSummary();if(!units)return;const control=$('ai-credit-confirm');control.disabled=true;try{const order=await api('/api/ai/payments','POST',{units});$('ai-credit-modal').close();await checkout(order.id);await paymentList();}finally{control.disabled=false;await loadAI();}});
@@ -531,6 +754,20 @@ document.querySelectorAll('[data-ai-test]').forEach(b=>{b.onclick=()=>run(async(
 async function loadModelUsage(){table('ai-model-usage',['Waktu','Akun','Sesi','Status','Panggilan model'],await api('/api/admin/ai/usage'),r=>[new Date(r.created_at).toLocaleString('id-ID'),r.account_id,r.session_id,r.status,(typeof r.model_calls==='string'?JSON.parse(r.model_calls):r.model_calls||[]).map(c=>`${c.role}: ${c.model} (${c.status})`).join(' · ')||'—']);}
 $('ai-model-refresh').onclick=()=>run(loadModelUsage);
 let failuresPage=1,failuresLoading=false;
+// Profiles are pipelines shipped in code; the owner switches each on or off for every client and tunes it in AI Studio.
+async function loadAdminProfiles(){
+ const rows=await api('/api/admin/ai/profiles');
+ table('admin-profiles-list',['Profil','Alur aktif','Pemakaian','Untuk klien',''],rows,p=>{
+  const name=element('div','admin-profile-name'),icon=element('span','admin-profile-icon');icon.innerHTML=chatIcon;const text=element('div');text.append(element('strong','',p.name),element('small','',p.nodes+' node · '+p.node_summary));name.append(icon,text);
+  const flow=element('div','admin-profile-cell');flow.append(element('strong','',p.active_version?'Versi '+p.active_version:'Bawaan'),element('small','',p.revision>p.published_revision?'draft berubah':'draft sama dengan aktif'));
+  const usage=element('div','admin-profile-cell');usage.append(element('strong','',p.sessions+' sesi'),element('small','',p.data_profiles+' data profil'));
+  const toggle=element('label','ai-toggle admin-profile-toggle'),input=document.createElement('input'),state=element('strong','',p.enabled?'Aktif':'Nonaktif');input.type='checkbox';input.checked=p.enabled;input.setAttribute('aria-label',p.name+' aktif untuk klien');
+  input.onchange=()=>run(async()=>{const enabled=input.checked;if(!enabled&&!confirm('Nonaktifkan '+p.name+'? AI berhenti membalas di '+p.sessions+' sesi yang memakainya. Data profil klien tidak dihapus.')){input.checked=true;return;}input.disabled=true;try{await api('/api/admin/ai/profiles/'+encodeURIComponent(p.id),'PUT',{enabled});$('message').textContent=p.name+(enabled?' diaktifkan untuk klien.':' dinonaktifkan.');}finally{await loadAdminProfiles();}});
+  toggle.append(input,element('span'),state);
+  const studio=element('a','button secondary','Buka di AI Studio');studio.href='/dashboard/admin/ai-studio?profile='+encodeURIComponent(p.id);studio.dataset.studio='';
+  return [name,flow,usage,toggle,studio];
+ });
+}
 async function loadFailures(page=failuresPage){
  if(failuresLoading)return;failuresLoading=true;$('ai-failures-prev').disabled=$('ai-failures-next').disabled=true;
  try{const result=await api('/api/admin/ai/failures?page='+page);failuresPage=result.page;
@@ -939,8 +1176,9 @@ Idempotency-Key: pesan-001
 {"to":"628123456789","type":"document","url":"https://contoh.com/katalog.pdf","filename":"Katalog-September.pdf","caption":"Berikut katalog terbaru kami."}</code></pre><p>Gunakan URL file yang dapat diakses publik oleh server. Properti <code>caption</code> bersifat opsional; <code>filename</code> digunakan untuk dokumen. Sertakan header <code>Idempotency-Key</code> yang berbeda pada setiap pengiriman media.</p><p>Fitur chat lainnya: <code>POST /sessions/:id/typing</code> dengan <code>{"to":"628...","state":"composing"}</code>, serta <code>POST /sessions/:id/read</code> dengan <code>{"from":"628...","messageId":"ID_PESAN"}</code>. Keduanya merespons <code>{"ok":true}</code>.</p>`),
   section('4. Webhook, media masuk & realtime',`<p><code>GET /webhooks</code> melihat daftar, <code>POST /webhooks</code> menambah, dan <code>DELETE /webhooks/:id</code> menghapus webhook.</p><p><strong>Request — tambah webhook</strong></p><pre><code>POST <span class="api-origin"></span>/webhooks
 {"url":"https://aplikasi-anda.com/webhook","sessionId":"toko-utama"}</code></pre><p><strong>Respons</strong></p><pre><code>{"id":"webhook-123","url":"https://aplikasi-anda.com/webhook","sessionId":"toko-utama"}</code></pre><p>Payload pesan masuk memiliki bentuk berikut. Bila ada media, ambil file dengan <code>GET /media/:id</code>. Untuk stream langsung gunakan SSE <code>GET /events</code> dengan header API key yang sama.</p><pre><code>{"event":"message","sessionId":"toko-utama","direction":"incoming","from":"628123456789","text":"Halo","timestamp":1720000000}</code></pre>`),
-  section('5. Asisten AI',`<p>Kelola asisten: <code>GET</code>/<code>PUT /sessions/:id/ai</code>, aktifkan dengan <code>PATCH /sessions/:id/ai/enabled</code>, dan ubah satu bidang dengan <code>PATCH /sessions/:id/ai/field</code>.</p><pre><code>PATCH <span class="api-origin"></span>/sessions/toko-utama/ai/enabled
-{"enabled":true}</code></pre><p><strong>Respons</strong></p><pre><code>{"enabled":true}</code></pre><p>Produk: <code>GET</code>/<code>POST /sessions/:id/ai/products</code>, <code>PUT /sessions/:id/ai/products/:product</code>, serta upload gambar <code>POST /sessions/:id/ai/products-image</code> (body file dan header <code>X-Filename</code>). Pesanan: <code>GET</code>/<code>POST /sessions/:id/ai/orders</code> dan <code>PUT</code>/<code>DELETE /sessions/:id/ai/orders/:order</code>. Percakapan: <code>GET /sessions/:id/ai/conversations</code> dan <code>PUT /sessions/:id/ai/conversations/:customer</code>. Fallback: <code>GET /sessions/:id/ai/fallbacks</code>, <code>POST /sessions/:id/ai/fallbacks/:fallback/answer</code>, <code>POST /sessions/:id/ai/fallbacks/:fallback/knowledge</code>, atau <code>DELETE /sessions/:id/ai/fallbacks/:fallback</code>.</p>`),
+  section('5. Asisten AI',`<p><strong>Profil dan data profil.</strong> Profil adalah alur AI siap pakai dari NC-WA (mis. CS Usaha); data profil adalah isi bisnis Anda untuk satu profil dan bisa dipasang ke beberapa sesi. <code>GET /ai/profile-types</code> menampilkan profil yang tersedia. Data profil: <code>GET</code>/<code>POST /ai/data-profiles</code> (body <code>{"profile_type":"cs","name":"Toko Kopi"}</code>, atau <code>{"name":"Salinan","copy_from":"ID"}</code> untuk menduplikat), <code>GET</code>/<code>PATCH</code>/<code>DELETE /ai/data-profiles/:id</code> (hapus hanya bila tidak terpasang), <code>PATCH /ai/data-profiles/:id/field</code>, serta produk, foto, dan pesanan di bawah <code>/ai/data-profiles/:id/products</code>, <code>/products-image</code>, dan <code>/orders</code>.</p><pre><code>PUT <span class="api-origin"></span>/sessions/toko-utama/ai/profile
+{"data_profile_id":"ID_DATA_PROFIL","enabled":true}</code></pre><p>Pasang, ganti, atau cabut (<code>{"data_profile_id":null}</code>) data profil sebuah sesi. Mengganti atau mencabut mengosongkan memori AI sesi itu; riwayat chat tetap tersimpan.</p><p>Endpoint per sesi di bawah ini tetap berlaku dan bekerja pada data profil yang terpasang. Bila sesi belum berprofil, penulisan pertama membuat data profil CS bernama <code>CS – &lt;sesi&gt;</code> dan memasangnya.</p><p>Kelola asisten: <code>GET</code>/<code>PUT /sessions/:id/ai</code>, aktifkan dengan <code>PATCH /sessions/:id/ai/enabled</code>, dan ubah satu bidang dengan <code>PATCH /sessions/:id/ai/field</code>.</p><pre><code>PATCH <span class="api-origin"></span>/sessions/toko-utama/ai/enabled
+{"enabled":true}</code></pre><p><strong>Respons</strong></p><pre><code>{"enabled":true}</code></pre><p>Produk: <code>GET</code>/<code>POST /sessions/:id/ai/products</code>, <code>PUT /sessions/:id/ai/products/:product</code>, serta upload gambar <code>POST /sessions/:id/ai/products-image</code> (body file dan header <code>X-Filename</code>). Pesanan: <code>GET</code>/<code>POST /sessions/:id/ai/orders</code> dan <code>PUT</code>/<code>DELETE /sessions/:id/ai/orders/:order</code>. Percakapan: <code>GET /sessions/:id/ai/conversations</code> dan <code>PUT /sessions/:id/ai/conversations/:customer</code>. Riwayat chat pribadi: <code>GET /sessions/:id/ai/chats</code> (daftar percakapan dengan pesan terakhir), <code>GET /sessions/:id/ai/chats/:customer/messages</code> (100 pesan terbaru; lanjutkan dengan <code>?before=</code> dari respons), dan <code>POST /sessions/:id/ai/chats/:customer/messages</code> dengan <code>{"text":"..."}</code> serta header <code>Idempotency-Key</code> untuk balasan manual (memakai 1 kredit dan menjeda AI kecuali full auto). Stream <code>/events</code> mengirim <code>chat.updated</code> saat riwayat berubah. Fallback: <code>GET /sessions/:id/ai/fallbacks</code>, <code>POST /sessions/:id/ai/fallbacks/:fallback/answer</code>, <code>POST /sessions/:id/ai/fallbacks/:fallback/knowledge</code>, atau <code>DELETE /sessions/:id/ai/fallbacks/:fallback</code>.</p>`),
   section('6. Auto Share',`<p>Semua endpoint memakai awalan <code>/auto-share</code>: asset (<code>GET/POST/DELETE /assets</code>), kontak (<code>GET/POST/PUT/DELETE /contacts</code>), template (<code>GET/POST/PUT/DELETE /templates</code>), jadwal (<code>GET/POST/PUT/DELETE /jobs</code>), jalankan sekarang (<code>POST /jobs/:id/send</code>), dan riwayat (<code>GET /runs</code>, <code>GET /runs/:id</code>).</p><pre><code>POST <span class="api-origin"></span>/auto-share/contacts
 {"nomor":"628123456789","nama":"Pelanggan","kelompkontak":"Prospek"}</code></pre><p><strong>Respons</strong></p><pre><code>{"id":"CONTACT_ID","nomor":"628123456789","nama":"Pelanggan","kelompkontak":"Prospek"}</code></pre>`),
   section('7. Integrasi n8n',`<p>Gunakan community node <code>n8n-nodes-nc-wa</code> agar workflow n8n dapat memakai NC-WA tanpa menulis HTTP Request manual.</p><p><strong>Pasang node</strong>: n8n → <em>Settings</em> → <em>Community nodes</em> → <em>Install</em>, lalu masukkan <code>n8n-nodes-nc-wa</code>. Buat kredensial <strong>NC-WA Gateway API</strong> dengan Base URL <code><span class="api-origin"></span></code> dan API key dari tab Integrasi. Gunakan HTTPS jika n8n terpisah dari server NC-WA.</p><p><strong>Node NC-WA</strong> menyediakan Send Text, Send Media (gambar, video, audio, dokumen dari URL publik), Send Typing, Mark as Read, serta Create/Get/Get Many/Get QR Code/Reconnect/Log Out/Delete Session. Masukkan nomor tanpa awalan <code>+</code>, misalnya <code>628123456789</code>; ID grup berakhiran <code>@g.us</code>.</p><p><strong>Node NC-WA Trigger</strong> memulai workflow untuk event <code>message</code>, <code>session.status</code>, atau <code>session.qr</code>. Saat workflow diaktifkan, trigger otomatis mendaftarkan URL webhook-nya ke NC-WA dan mencabutnya saat dinonaktifkan. Opsi Session ID membatasi sesi, sedangkan Ignore Groups melewati pesan grup.</p><p><strong>Contoh alur balas otomatis</strong>: tambahkan <em>NC-WA Trigger</em> (Message Received) → <em>NC-WA</em> (Send Text). Isi <em>To</em> dengan <code>{{ $json.from }}</code>, Session ID dengan <code>{{ $json.sessionId }}</code>, dan Text dengan <code>Terima kasih, pesan Anda sudah kami terima.</code></p><p><strong>Data yang diterima trigger</strong></p><pre><code>{"event":"message","sessionId":"toko-utama","messageId":"3EB0...","from":"628123456789","isGroup":false,"sender":"628123456789","type":"text","text":"Halo","timestamp":1757900000,"media":null}</code></pre><p><strong>Penting — hindari balasan ganda:</strong> bila n8n dipakai sebagai engine untuk menjawab pesan, matikan <strong>Asisten AI</strong> pada sesi yang sama di Dashboard AI. Aktifkan hanya salah satu engine balasan: n8n atau Asisten AI NC-WA.</p><p>Untuk mencoba dari editor, tekan <em>Listen for test event</em> sebelum mengirim pesan ke nomor WhatsApp. Paket ini memerlukan n8n self-hosted atau paket n8n yang mengizinkan community nodes.</p>`),

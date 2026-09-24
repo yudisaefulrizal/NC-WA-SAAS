@@ -20,6 +20,8 @@ import {SessionManager,ApiError,type Connector} from './engine/sessions.js';
 import {SessionStore} from './engine/store.js';
 import {baileysConnector} from './engine/baileys.js';
 import {referral as defaultReferral} from './referral.js';
+import {chatMessages,customerOf,listChats,onChatChange,recordIncoming,recordOutgoing,updateStatus} from './ai-chat.js';
+import {clientProfiles} from './ai-profiles.js';
 
 export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth'),ai=defaultAI,referral=defaultReferral) {
  const hooks=new TenantWebhooks();
@@ -32,6 +34,9 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  const streams=new Map<string,EventStream>();
  const pending=new Map<string,number>();
  const managers=new Map<string,Promise<SessionManager>>();
+ onChatChange((account,sessionId,customer)=>streams.get(account)?.push({event:'chat.updated',sessionId,customer}));
+ // Chat history is a view; failing to record never blocks delivery, AI replies or webhooks.
+ const history=(work:Promise<unknown>)=>work.catch(error=>console.error('Riwayat chat gagal dicatat.',error instanceof Error?error.message:error));
  async function manager(id:string){
   if(!managers.has(id))managers.set(id,(async()=>{
    const store=new SessionStore(resolve(root,id));
@@ -43,10 +48,16 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
     if(event.event==='session.status'&&event.status==='connected'&&typeof event.phone==='string'&&event.phone)await referral.qualify(id,event.phone).catch(()=>{});
    };
    result.onBeforeSend=async()=>{const [accounts]=await db.execute<RowDataPacket[]>('SELECT suspended FROM accounts WHERE id=?',[id]);if(!accounts[0]||accounts[0].suspended){await result.applyLimit(0);throw new ApiError(403,'account_suspended','Akun dinonaktifkan');}await result.applyLimit((await basicWallet(id)).session_limit);};
-   result.onOutgoing=async(session,message)=>{const {download,...data}=message;events.push({event:'message',direction:'outgoing',sessionId:session.id,...data,media:null});await ai.manualOutgoing(id,session.id,message);const added=await autoShare.listen(id,message,true);if(added)events.push({event:'auto_share.contact_added',sessionId:session.id,...added});};
-   result.onSent=async(session,message)=>{const content=message.content,text='text' in content?content.text:content.caption??`[Pesan ${content.type}]`;events.push({event:'message',direction:'outgoing',sessionId:session.id,messageId:message.messageId,from:message.to,sender:message.to,isGroup:message.to.endsWith('@g.us'),groupId:message.to.endsWith('@g.us')?message.to:null,type:'text' in content?'text':content.type,text,timestamp:Math.floor(Date.now()/1000),media:null});};
+   result.onOutgoing=async(session,message)=>{const {download,...data}=message;events.push({event:'message',direction:'outgoing',sessionId:session.id,...data,media:null});
+    // Echoes of API/AI/Auto Share sends are registered as 'system' before dispatch and recorded by onSent instead.
+    if(!message.isGroup)await history((async()=>{if(await ai.knownOrigin(id,session.id,message.messageId)!=='system')await recordOutgoing(id,session.id,{customer:message.from,messageId:message.messageId,origin:'manual',type:message.type,text:message.text});})());
+    await ai.manualOutgoing(id,session.id,message);const added=await autoShare.listen(id,message,true);if(added)events.push({event:'auto_share.contact_added',sessionId:session.id,...added});};
+   result.onSent=async(session,message)=>{const content=message.content,text='text' in content?content.text:content.caption??`[Pesan ${content.type}]`;
+    const customer=customerOf(message.to);if(customer)await history(recordOutgoing(id,session.id,{customer,messageId:message.messageId,origin:'api',type:'text' in content?'text':content.type,text:'text' in content?content.text:content.caption??''}));events.push({event:'message',direction:'outgoing',sessionId:session.id,messageId:message.messageId,from:message.to,sender:message.to,isGroup:message.to.endsWith('@g.us'),groupId:message.to.endsWith('@g.us')?message.to:null,type:'text' in content?'text':content.type,text,timestamp:Math.floor(Date.now()/1000),media:null});};
+   result.onReceipt=async(session,receipt)=>{await history(updateStatus(id,session.id,receipt.messageId,receipt.status));};
    result.onIncoming=async(session,message)=>{
     await result.onBeforeSend!();if(result.detail(session.id).serviceActive===false)return;
+    await history(recordIncoming(id,session.id,message));
     const {download,...data}=message;
     const stored=await files.save(session.id,message);
     const event={event:'message',sessionId:session.id,direction:'incoming',...data,media:stored};
@@ -100,7 +111,7 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
   });
  });
  router.get('/stats',(_req,res)=>res.json((res.locals.manager as SessionManager).stats()));
- router.get('/sessions',async(_req,res)=>{const list=(res.locals.manager as SessionManager).list(),assistants=await ai.enabledMap(res.locals.accountId);res.json(list.map(s=>({...s,aiEnabled:assistants[s.id]??false})));});
+ router.get('/sessions',async(_req,res)=>{const list=(res.locals.manager as SessionManager).list(),assistants=await ai.sessionProfiles(res.locals.accountId);res.json(list.map(s=>({...s,aiEnabled:assistants[s.id]?.enabled??false,aiProfile:assistants[s.id]?.profile??null})));});
  router.post('/sessions',async(req,res)=>{
   SessionManager.validateId(req.body?.id);
   const connection=await db.getConnection();
@@ -116,20 +127,40 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  router.put('/sessions/:id/ai',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.saveAssistant(res.locals.accountId,req.params.id,req.body));});
  router.patch('/sessions/:id/ai/enabled',async(req,res)=>{res.locals.manager.detail(req.params.id);if(typeof req.body?.enabled!=='boolean')throw new ApiError(400,'invalid_request','Status asisten wajib valid');res.json(await ai.setEnabled(res.locals.accountId,req.params.id,req.body.enabled));});
  router.patch('/sessions/:id/ai/field',async(req,res)=>{res.locals.manager.detail(req.params.id);if(typeof req.body?.field!=='string')throw new ApiError(400,'invalid_request','Bidang wajib diisi');res.json(await ai.saveField(res.locals.accountId,req.params.id,req.body.field,req.body.value));});
- router.get('/sessions/:id/ai/products',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.products(res.locals.accountId,req.params.id));});
- router.put('/sessions/:id/ai/products/:product',async(req,res)=>{res.locals.manager.detail(req.params.id);const {product,replacedImageId}=await aiData.saveProduct(res.locals.accountId,req.params.id,req.params.product,record(req.body));if(replacedImageId)await productImages.remove(res.locals.accountId,replacedImageId).catch(()=>{});res.json(product);});
- router.post('/sessions/:id/ai/products',async(req,res)=>{res.locals.manager.detail(req.params.id);const {product}=await aiData.saveProduct(res.locals.accountId,req.params.id,'',record(req.body));res.json(product);});
- router.post('/sessions/:id/ai/products-image',express.raw({type:'*/*',limit:'12mb'}),async(req,res)=>{res.locals.manager.detail(req.params.id);const filename=(req.get('X-Filename')??'photo').slice(0,255);res.json(await productImages.save(res.locals.accountId,req.params.id,filename,Readable.from(req.body)));});
- router.get('/sessions/:id/ai/products-image/:image',async(req,res)=>{res.locals.manager.detail(req.params.id);const file=await productImages.get(res.locals.accountId,req.params.image);res.set('Content-Type',file.mimetype).set('Cache-Control','private, max-age=3600').sendFile(file.path);});
- router.get('/sessions/:id/ai/orders',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.orders(res.locals.accountId,req.params.id));});
- router.post('/sessions/:id/ai/orders',async(req,res)=>{res.locals.manager.detail(req.params.id);const input=record(req.body),key=req.get('Idempotency-Key');if(!key||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw new ApiError(400,'invalid_request','Idempotency-Key wajib diisi');res.json(await aiData.createOrder({account:res.locals.accountId,session:req.params.id,customer:customerNumber(input.customer),requestId:'manual_'+key,knowledge:''},orderInput({items:input.items,notes:input.notes})));});
- router.put('/sessions/:id/ai/orders/:order',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.updateOrder(res.locals.accountId,req.params.id,req.params.order,req.body));});
- router.delete('/sessions/:id/ai/orders/:order',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await aiData.deleteOrder(res.locals.accountId,req.params.id,req.params.order));});
+ // Products, photos and orders belong to a data profile. They are served under the data profile and, for
+ // integrations written before profiles, under a session (resolving to the data profile it runs; writes on a
+ // session without one create and attach "CS – <sesi>").
+ type Scope={profile:string|null;session:string};
+ function dataRoutes(base:string,scope:(req:express.Request,res:express.Response,write:boolean)=>Promise<Scope>){
+  const required=(profile:string|null)=>{if(!profile)throw new ApiError(404,'not_found','Data tidak ditemukan');return profile;};
+  router.get(base+'/products',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(profile?await aiData.products(res.locals.accountId,profile):[]);});
+  router.put(base+'/products/:product',async(req,res)=>{const {profile}=await scope(req,res,true);const {product,replacedImageId}=await aiData.saveProduct(res.locals.accountId,required(profile),String(req.params.product),record(req.body));if(replacedImageId)await productImages.remove(res.locals.accountId,replacedImageId).catch(()=>{});res.json(product);});
+  router.post(base+'/products',async(req,res)=>{const {profile}=await scope(req,res,true);const {product}=await aiData.saveProduct(res.locals.accountId,required(profile),'',record(req.body));res.json(product);});
+  router.post(base+'/products-image',express.raw({type:'*/*',limit:'12mb'}),async(req,res)=>{const {profile}=await scope(req,res,true);const filename=(req.get('X-Filename')??'photo').slice(0,255);res.json(await productImages.save(res.locals.accountId,required(profile),filename,Readable.from(req.body)));});
+  router.get(base+'/products-image/:image',async(req,res)=>{await scope(req,res,false);const file=await productImages.get(res.locals.accountId,String(req.params.image));res.set('Content-Type',file.mimetype).set('Cache-Control','private, max-age=3600').sendFile(file.path);});
+  router.get(base+'/orders',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(profile?await aiData.orders(res.locals.accountId,profile):[]);});
+  router.post(base+'/orders',async(req,res)=>{const input=record(req.body),key=req.get('Idempotency-Key');if(!key||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw new ApiError(400,'invalid_request','Idempotency-Key wajib diisi');const {profile,session}=await scope(req,res,true);res.json(await aiData.createOrder({account:res.locals.accountId,profile:required(profile),session,customer:customerNumber(input.customer),requestId:'manual_'+key,knowledge:''},orderInput({items:input.items,notes:input.notes})));});
+  router.put(base+'/orders/:order',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(await aiData.updateOrder(res.locals.accountId,required(profile),String(req.params.order),req.body));});
+  router.delete(base+'/orders/:order',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(await aiData.deleteOrder(res.locals.accountId,required(profile),String(req.params.order)));});
+ }
+ dataRoutes('/sessions/:id/ai',async(req,res,write)=>{const session=String(req.params.id);(res.locals.manager as SessionManager).detail(session);return {session,profile:write?await ai.ensureSessionProfile(res.locals.accountId,session):await ai.sessionProfile(res.locals.accountId,session)};});
+ dataRoutes('/ai/data-profiles/:profile',async(req,res)=>({session:'',profile:await ai.ownedDataProfile(res.locals.accountId,req.params.profile)}));
+ router.get('/ai/profile-types',async(_req,res)=>res.json(await clientProfiles(res.locals.accountId)));
+ router.get('/ai/data-profiles',async(_req,res)=>res.json(await ai.dataProfiles(res.locals.accountId)));
+ router.post('/ai/data-profiles',async(req,res)=>res.status(201).json(await ai.createDataProfile(res.locals.accountId,req.body)));
+ router.get('/ai/data-profiles/:profile',async(req,res)=>res.json(await ai.dataProfile(res.locals.accountId,req.params.profile)));
+ router.patch('/ai/data-profiles/:profile',async(req,res)=>res.json(await ai.renameDataProfile(res.locals.accountId,req.params.profile,req.body)));
+ router.patch('/ai/data-profiles/:profile/field',async(req,res)=>{if(typeof req.body?.field!=='string')throw new ApiError(400,'invalid_request','Bidang wajib diisi');res.json(await ai.saveDataProfileField(res.locals.accountId,req.params.profile,req.body.field,req.body.value));});
+ router.delete('/ai/data-profiles/:profile',async(req,res)=>res.json(await ai.deleteDataProfile(res.locals.accountId,req.params.profile)));
+ router.put('/sessions/:id/ai/profile',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.attachProfile(res.locals.accountId,req.params.id,req.body));});
  router.get('/sessions/:id/ai/conversations',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversations(res.locals.accountId,req.params.id));});
  router.get('/sessions/:id/ai/fallbacks',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.fallbacks(res.locals.accountId,req.params.id,req.query.page??'1'));});
  router.post('/sessions/:id/ai/fallbacks/:fallback/answer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.answerFallback(res.locals.accountId,res.locals.manager,req.params.id,req.params.fallback,req.body));});
  router.post('/sessions/:id/ai/fallbacks/:fallback/knowledge',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.applyFallbackKnowledge(res.locals.accountId,req.params.id,req.params.fallback,req.body));});
  router.delete('/sessions/:id/ai/fallbacks/:fallback',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.removeFallback(res.locals.accountId,req.params.id,req.params.fallback));});
+ router.get('/sessions/:id/ai/chats',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await listChats(res.locals.accountId,req.params.id));});
+ router.get('/sessions/:id/ai/chats/:customer/messages',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await chatMessages(res.locals.accountId,req.params.id,req.params.customer,req.query.before));});
+ router.post('/sessions/:id/ai/chats/:customer/messages',async(req,res)=>{res.json(await ai.dashboardReply(res.locals.accountId,res.locals.manager,req.params.id,req.params.customer,req.body,req.get('Idempotency-Key')));});
  router.put('/sessions/:id/ai/conversations/:customer',async(req,res)=>{res.locals.manager.detail(req.params.id);res.json(await ai.conversation(res.locals.accountId,req.params.id,req.params.customer,req.body));});
  router.get('/sessions/:id',(req,res)=>res.json((res.locals.manager as SessionManager).detail(req.params.id)));
  router.get('/sessions/:id/qr',(req,res)=>res.json((res.locals.manager as SessionManager).qr(req.params.id)));

@@ -23,7 +23,8 @@ export interface Connection {
   send?(jid: string, content: Outbound): Promise<string>;
   exists?(jid: string): Promise<boolean>;
 }
-export interface Update { outgoing?: IncomingMessage; incoming?: IncomingMessage; status?: Status; phone?: string; qr?: string; disconnected?: number }
+export type Receipt = { messageId: string; to: string; status: 'sent' | 'delivered' | 'read' };
+export interface Update { outgoing?: IncomingMessage; incoming?: IncomingMessage; receipt?: Receipt; status?: Status; phone?: string; qr?: string; disconnected?: number }
 export type Connector = (id: string, update: (event: Update) => void) => Promise<Connection>;
 interface Session extends SessionInfo {
   qr: string | null;
@@ -48,6 +49,7 @@ export class SessionManager {
   onEvent?: (event: { event: string; sessionId: string; [key: string]: unknown }) => Promise<void>;
   onOutgoing?: (session: SessionInfo, message: IncomingMessage) => Promise<void>;
   onSent?: (session: SessionInfo, message: { messageId: string; to: string; content: Outbound }) => Promise<void>;
+  onReceipt?: (session: SessionInfo, receipt: Receipt) => Promise<void>;
   onIncoming?: (session: SessionInfo, message: IncomingMessage) => Promise<void>;
   private queues = new WeakMap<Session, SendQueue>();
   constructor(protected connect: Connector, protected store?: SessionStore, private retryBaseMs = 1000, private sendIntervalMs = 1000) {}
@@ -273,6 +275,10 @@ export class SessionManager {
       }
       if (update.outgoing) {
         this.track(this.onOutgoing?.(this.detail(session.id), update.outgoing),session.id);
+        return;
+      }
+      if (update.receipt) {
+        this.track(this.onReceipt?.(this.detail(session.id), update.receipt),session.id);
         return;
       }
       if (update.incoming) {

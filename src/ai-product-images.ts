@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {createWriteStream} from 'node:fs';
-import {mkdir, rename, rm, stat} from 'node:fs/promises';
+import {copyFile, mkdir, rename, rm, stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
@@ -15,7 +15,8 @@ const MAX_WIDTH = 1920;
 export class ProductImageStore {
  constructor(private root: string) {}
  private dir(accountId: string) { return join(this.root, accountId); }
- async save(accountId: string, session: string, filename: string, body: Readable) {
+ // Photos belong to a data profile; only that data profile's products may use them.
+ async save(accountId: string, profile: string, filename: string, body: Readable) {
   const id = randomUUID();
   const dir = this.dir(accountId);
   await mkdir(dir, {recursive: true, mode: 0o700});
@@ -40,7 +41,7 @@ export class ProductImageStore {
    const compressed = await sharp(original).rotate().resize({width: MAX_WIDTH, withoutEnlargement: true}).jpeg({quality: 82}).toBuffer();
    await pipeline(Readable.from(compressed), createWriteStream(temporary, {mode: 0o600, flags: 'wx'}));
    await rename(temporary, join(dir, id));
-   await db.execute('INSERT INTO ai_product_images(id,account_id,session_id,size_bytes) VALUES (?,?,?,?)', [id, accountId, session, compressed.length]);
+   await db.execute('INSERT INTO ai_product_images(id,account_id,data_profile_id,size_bytes) VALUES (?,?,?,?)', [id, accountId, profile, compressed.length]);
    return {id, mimetype: 'image/jpeg', sizeBytes: compressed.length};
   } catch (error) {
    if (error instanceof ApiError) throw error;
@@ -60,6 +61,13 @@ export class ProductImageStore {
   try { await stat(path); } catch { throw new ApiError(404, 'image_not_found', 'Foto tidak ditemukan'); }
   return {path, mimetype: 'image/jpeg'};
  }
+ // File-level copy for a duplicated data profile; the caller records the new id in its own transaction.
+ async copy(accountId: string, id: string) {
+  const source = this.path(accountId, id), copy = randomUUID();
+  await copyFile(source, join(this.dir(accountId), copy));
+  return {id: copy, sizeBytes: (await stat(source)).size};
+ }
+ async removeFile(accountId: string, id: string) { await rm(this.path(accountId, id), {force: true}); }
  async remove(accountId: string, id: string) {
   await rm(this.path(accountId, id), {force: true});
   await db.execute('DELETE FROM ai_product_images WHERE account_id=? AND id=?', [accountId, id]);

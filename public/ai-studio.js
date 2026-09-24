@@ -6,6 +6,9 @@ const edges=[['input','router'],...specialists.flatMap(id=>[['router',id],[id,'c
 let state,selected='router',dirty=false,running=false,session=null,zoom=.7,controller,trace=[],nodeEvents={},selectedAgent=null,models={};
 const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
 const path='/api/admin/ai/studio';
+// Each profile has its own workflow; ?profile= picks the one being edited (CS Usaha by default).
+let profile=new URLSearchParams(location.search).get('profile')||'cs';
+const studioUrl=(suffix='')=>path+suffix+'?profile='+encodeURIComponent(profile);
 const tierLabels={cheap:'Model murah',medium:'Model sedang',smart:'Model cerdas',structured:'Model terstruktur'};
 // On the Terstruktur tier the schema is always sent, so the box shows checked and locked; the stored flag is
 // left untouched so moving the node back to another tier restores the admin's own choice.
@@ -29,6 +32,8 @@ function draw(){
   const text=document.createElement('span'),title=document.createElement('strong'),subtitle=document.createElement('small');title.textContent=names[id];subtitle.textContent=state.draft.nodes[id]?tierLabels[state.draft.nodes[id].tier]:['memory','router_memory'].includes(id)?'Memori bersama':id==='models'?'Konfigurasi pemilik':id==='input'||id==='output'?'Percakapan uji':'Tool simulasi';text.append(title,subtitle);b.append(icon,text);b.onclick=()=>selectNode(id);$('nodes').append(b);
  }
  for(const [text,x,y] of [['01 / MASUK & ROUTING',35,26],['02 / SATU SPECIALIST',570,26],['03 / KONTEKS & JAWABAN',1060,26],['MODEL & MEMORI',55,825],['TOOLS BISNIS / SIMULASI',360,977]]){const label=document.createElement('span');label.className='canvas-label';label.textContent=text;label.style.left=x+'px';label.style.top=y+'px';$('nodes').append(label);}
+ // Phones get the workflow nodes as a tappable list instead of the scaled-down canvas.
+ $('node-list').replaceChildren(...Object.keys(positions).filter(id=>state.draft.nodes[id]).map(id=>{const b=document.createElement('button');b.type='button';b.dataset.node=id;const title=document.createElement('strong'),tier=document.createElement('small');title.textContent=names[id];tier.textContent=tierLabels[state.draft.nodes[id].tier];b.append(title,tier);b.onclick=()=>selectNode(id);return b;}));
  selectNode(selected);setZoom(zoom);
 }
 function setZoom(value){zoom=Math.max(.25,Math.min(1.25,value));$('canvas').style.transform=`scale(${zoom})`;$('canvas-size').style.width=1500*zoom+'px';$('canvas-size').style.height=1080*zoom+'px';$('zoom-value').textContent=Math.round(zoom*100)+'%';}
@@ -54,14 +59,16 @@ function onEvent(event){trace.push(event);nodeEvents[event.node]=event;if(event.
  }
 }
 function busy(value){running=value;$('stop').hidden=!value;$('reload').disabled=value;$('reset').disabled=value;for(const id of ['node-prompt','node-tier','node-model','node-structured-output',...profileFields.map(f=>'test-profile-'+f),'test-behavior','test-products','chat-input'])$(id).disabled=value;$('node-tools').querySelectorAll('input').forEach(i=>i.disabled=value);syncStructuredToggle();versions();}
-async function load(){const result=await api(path);state=result;models=result.models;dirty=false;clearConversation();trace=[];nodeEvents={};$('trace-list').replaceChildren();$('trace-detail').textContent='Belum ada proses.';draw();versions();notice('Draft siap. Konfigurasi aktif tetap dipakai layanan sampai Anda mengaktifkan draft.');}
+async function loadProfiles(){const profiles=await api('/api/admin/ai/profiles');$('profile-select').replaceChildren(...profiles.map(p=>new Option(p.name.toUpperCase(),p.id,false,p.id===profile)));}
+$('profile-select').onchange=async e=>{if((dirty||running)&&!confirm('Perubahan draft yang belum disimpan akan hilang. Pindah profil?')){e.target.value=profile;return;}profile=e.target.value;history.replaceState(null,'','?profile='+encodeURIComponent(profile));busy(true);try{await load();}catch(error){notice(error.message,true);}finally{busy(false);}};
+async function load(){const result=await api(studioUrl());state=result;$('profile-name').textContent=$('canvas-profile').textContent=result.profile_name;$('profile-status').textContent=result.enabled?'Aktif untuk klien':'Nonaktif untuk klien';$('profile-status').classList.toggle('off',!result.enabled);models=result.models;dirty=false;clearConversation();trace=[];nodeEvents={};$('trace-list').replaceChildren();$('trace-detail').textContent='Belum ada proses.';draw();versions();notice('Draft siap. Konfigurasi aktif tetap dipakai layanan sampai Anda mengaktifkan draft.');}
 $('node-form').onsubmit=e=>e.preventDefault();for(const id of ['node-prompt','node-tier','node-model','node-structured-output'])$(id).addEventListener('input',updateNode);
 $('zoom-in').onclick=()=>setZoom(zoom+.1);$('zoom-out').onclick=()=>setZoom(zoom-.1);$('fit').onclick=()=>setZoom(($('canvas-viewport').clientWidth-20)/1500);
 $('reload').onclick=async()=>{if(dirty&&!confirm('Buang perubahan lokal dan muat draft tersimpan?'))return;try{await load();}catch(e){notice(e.message,true);}};
-$('save').onclick=async()=>{busy(true);try{state=await api(path,'PUT',{revision:state.revision,draft:state.draft});dirty=false;clearConversation();notice('Draft tersimpan. Jalankan pengujian sebelum mengaktifkan.');}catch(e){notice(e.message,true);}finally{busy(false);}};
+$('save').onclick=async()=>{busy(true);try{state=await api(studioUrl(),'PUT',{revision:state.revision,draft:state.draft});dirty=false;clearConversation();notice('Draft tersimpan. Jalankan pengujian sebelum mengaktifkan.');}catch(e){notice(e.message,true);}finally{busy(false);}};
 $('publish').onclick=()=>{$('publish-summary').textContent=`Draft r${state.revision} akan menjadi versi aktif v${state.active_version+1} untuk seluruh layanan.`;$('publish-dialog').showModal();};
 $('cancel-publish').onclick=()=>$('publish-dialog').close();
-$('confirm-publish').onclick=async()=>{const button=$('confirm-publish');button.disabled=true;try{state=await api(path+'/publish','POST',{revision:state.revision});$('publish-dialog').close();versions();notice('Versi aktif diperbarui. Pesan baru menggunakan konfigurasi ini.');}catch(e){notice(e.message,true);$('publish-dialog').close();}finally{button.disabled=false;}};
+$('confirm-publish').onclick=async()=>{const button=$('confirm-publish');button.disabled=true;try{state=await api(studioUrl('/publish'),'POST',{revision:state.revision});$('publish-dialog').close();versions();notice('Versi aktif diperbarui. Pesan baru menggunakan konfigurasi ini.');}catch(e){notice(e.message,true);$('publish-dialog').close();}finally{button.disabled=false;}};
 $('reset').onclick=()=>{clearConversation();notice('Percakapan uji baru. Riwayat dan pesanan simulasi dimulai ulang.');};
 for(const id of [...profileFields.map(f=>'test-profile-'+f),'test-behavior','test-products'])$(id).addEventListener('input',()=>{clearConversation();notice('Data uji berubah. Pengujian berikutnya memakai percakapan baru.');});
 $('stop').onclick=()=>controller?.abort();
@@ -70,8 +77,8 @@ $('chat-form').onsubmit=async e=>{
  let products;try{products=JSON.parse($('test-products').value);}catch{notice('JSON produk simulasi tidak valid.',true);return;}
  controller=new AbortController();busy(true);notice('Pengujian berjalan…');$('run-status').textContent='Sedang berjalan';trace=[];nodeEvents={};selectedAgent=null;$('trace-list').replaceChildren();document.querySelectorAll('[data-node]').forEach(b=>delete b.dataset.state);document.querySelectorAll('.edge').forEach(p=>p.classList.remove('active'));document.querySelector('.empty-chat')?.remove();bubble(message,'user');$('chat-input').value='';
  try{
-  const profile=Object.fromEntries(profileFields.map(f=>[f,$('test-profile-'+f).value]));
-  const res=await fetch(path+'/run',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message,session,revision:state.revision,profile,behavior:$('test-behavior').value,products})});
+  const knowledge=Object.fromEntries(profileFields.map(f=>[f,$('test-profile-'+f).value]));
+  const res=await fetch(studioUrl('/run'),{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message,session,revision:state.revision,profile_type:profile,profile:knowledge,behavior:$('test-behavior').value,products})});
   if(!res.ok){const error=await res.json();throw Error(error.message||error.error);}
   const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';
   while(true){const {done,value}=await reader.read();if(done){buffer+=decoder.decode();break;}buffer+=decoder.decode(value,{stream:true});let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(line.trim())onEvent(JSON.parse(line));}}
@@ -82,4 +89,4 @@ $('chat-form').onsubmit=async e=>{
 };
 window.addEventListener('beforeunload',e=>{if(dirty||running){e.preventDefault();e.returnValue='';}});
 $('test-products').value=pretty([{name:'Produk Basic',type:'product',description:'Produk harian, satuan pcs',price:150000,stock:10,active:true},{name:'Produk Premium',type:'product',description:'Pilihan premium, satuan pcs',price:350000,stock:5,active:true}]);
-(async()=>{try{const me=await api('/api/me');if(me.role!=='owner')throw Error('Halaman ini hanya tersedia untuk pemilik layanan.');await load();$('access').hidden=true;$('studio').hidden=false;setZoom(($('canvas-viewport').clientWidth-20)/1500);}catch(error){$('access').textContent=error.message+' Buka dashboard untuk masuk.';const a=document.createElement('a');a.href='/dashboard';a.textContent=' Kembali ke dashboard';$('access').append(a);}})();
+(async()=>{try{const me=await api('/api/me');if(me.role!=='owner')throw Error('Halaman ini hanya tersedia untuk pemilik layanan.');await loadProfiles();await load();$('access').hidden=true;$('studio').hidden=false;setZoom(($('canvas-viewport').clientWidth-20)/1500);}catch(error){$('access').textContent=error.message+' Buka dashboard untuk masuk.';const a=document.createElement('a');a.href='/dashboard';a.textContent=' Kembali ke dashboard';$('access').append(a);}})();

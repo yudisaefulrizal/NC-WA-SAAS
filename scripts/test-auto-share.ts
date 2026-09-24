@@ -23,8 +23,9 @@ try{
  else await run(['--test','test/auto-share.test.ts']);
  await run(['scripts/browser-template-source-check.ts']);
  await run(['scripts/browser-job-form-check.ts']);
- // browser-auto-share-check masih gagal pada langkah AI karena regresi di luar Auto Share
- // (lihat DEBUG.MD). Dijalankan terakhir agar kegagalan lama itu tidak menutupi hasil di atasnya.
+ // browser-auto-share-check masih gagal pada langkah template: skripnya mengisi pesan di tahap pertama,
+ // padahal form template kini berupa wizard tiga tahap. Dijalankan terakhir agar kegagalan lama itu tidak
+ // menutupi hasil di atasnya; bagian simpan kontak dari tab Percakapan sebelum langkah itu sudah lulus.
  await run(['scripts/browser-auto-share-check.ts']);
 }finally{
  if(connection){try{await connection.query('SHUTDOWN');}catch{}await connection.end().catch(()=>{});}

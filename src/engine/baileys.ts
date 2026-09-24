@@ -52,6 +52,14 @@ export function baileysConnector(store: SessionStore, registerSystemMessage: (se
         update({ incoming });
       }
     });
+    // Delivery and read receipts for messages this session sent (WhatsApp status 2 server ack, 3 delivered, 4/5 read/played).
+    socket.ev.on('messages.update', updates => {
+      for (const { key, update: change } of updates) {
+        const status = change.status == null ? undefined : change.status >= 4 ? 'read' : change.status === 3 ? 'delivered' : change.status === 2 ? 'sent' : undefined;
+        if (!key.fromMe || !key.id || !key.remoteJid || !status) continue;
+        update({ receipt: { messageId: key.id, to: key.remoteJidAlt ?? key.remoteJid, status } });
+      }
+    });
     let qrGeneration = 0;
     socket.ev.on('connection.update', event => {
       if (event.connection === 'open' || event.connection === 'close') qrGeneration++;
@@ -97,7 +105,7 @@ export function baileysConnector(store: SessionStore, registerSystemMessage: (se
         if (!message?.key.id) throw new Error('WhatsApp tidak memberikan ID pesan');
         return message.key.id;
       },
-      async close() { qrGeneration++; socket.ev.removeAllListeners('connection.update'); socket.ev.removeAllListeners('messages.upsert'); socket.end(undefined); await saves; },
+      async close() { qrGeneration++; socket.ev.removeAllListeners('connection.update'); socket.ev.removeAllListeners('messages.upsert'); socket.ev.removeAllListeners('messages.update'); socket.end(undefined); await saves; },
       async logout() { await socket.logout(); await saves; },
     };
   };

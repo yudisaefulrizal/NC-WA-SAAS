@@ -65,13 +65,21 @@ test('Duplicate messages charge and send once; rates are snapshotted and latest 
  const usage=await rows(f.id);assert.equal(usage.length,1);assert.equal(f.sent(),1);assert.equal(usage[0].status,'sent');assert.equal(usage[0].input_rate,1);assert.equal(usage[0].output_rate,2);assert.equal(usage[0].input_words,seen.slice(0,-1).reduce((n,m)=>n+countWords(m.content),0));assert.equal(seen.filter(m=>m.content==='Halo pelanggan').length,1);assert.equal(usage[0].charged,usage[0].input_words+4);assert.equal((await f.service.wallet(f.id)).balance,10000-usage[0].charged);assert.equal((await basicWallet(f.id)).balance,99);
 });
 test('Memory holds individual messages within the global limit and is isolated by tenant/session/customer',async()=>{
- const calls:AIMessage[][]=[];const f=await fixture(async(_c,m)=>{calls.push(m);return 'Balasan';});
- for(let i=0;i<3;i++)await f.service.incoming(f.id,f.manager,'shop',f.message('m'+i,'Pesan '+i));
- assert.deepEqual(calls[2].filter(m=>m.role!=='system').map(m=>m.content),['Pesan 1','Balasan','Pesan 2']);
- await f.service.incoming(f.id,f.manager,'shop',f.message('new','Pelanggan lain','628999999999'));assert.equal(calls[3].filter(m=>m.role!=='system').length,1);
- await f.manager.create('other');await f.service.saveAssistant(f.id,'other',{enabled:true,profile:{},behavior:''});await f.service.incoming(f.id,f.manager,'other',f.message('same','Nomor lain'));assert.equal(calls[4].filter(m=>m.role!=='system').length,1);
- const other=await fixture();assert.equal((await other.service.conversations(other.id,'shop')).length,0);assert.equal((await other.service.assistant(other.id,'other')).enabled,false);
- const [memory]=await db.execute<any[]>('SELECT JSON_LENGTH(messages) AS n FROM ai_conversations WHERE account_id=?',[f.id]);assert.ok(memory.every(m=>m.n<=3));
+ // Stored memory is trimmed with the limit saved in ai_settings, so the test sets it there too, not only on the fixture.
+ const [saved]=await db.query<any[]>('SELECT * FROM ai_settings WHERE id=1');
+ try{
+  await db.query("INSERT INTO ai_settings(id,endpoint,model,secret,memory_limit) VALUES (1,'https://8.8.8.8/v1/chat/completions','fixture','',3) ON DUPLICATE KEY UPDATE memory_limit=3");
+  const calls:AIMessage[][]=[];const f=await fixture(async(_c,m)=>{calls.push(m);return 'Balasan';});
+  for(let i=0;i<3;i++)await f.service.incoming(f.id,f.manager,'shop',f.message('m'+i,'Pesan '+i));
+  assert.deepEqual(calls[2].filter(m=>m.role!=='system').map(m=>m.content),['Pesan 1','Balasan','Pesan 2']);
+  await f.service.incoming(f.id,f.manager,'shop',f.message('new','Pelanggan lain','628999999999'));assert.equal(calls[3].filter(m=>m.role!=='system').length,1);
+  await f.manager.create('other');await f.service.saveAssistant(f.id,'other',{enabled:true,profile:{},behavior:''});await f.service.incoming(f.id,f.manager,'other',f.message('same','Nomor lain'));assert.equal(calls[4].filter(m=>m.role!=='system').length,1);
+  const other=await fixture();assert.equal((await other.service.conversations(other.id,'shop')).length,0);assert.equal((await other.service.assistant(other.id,'other')).enabled,false);
+  const [memory]=await db.execute<any[]>('SELECT JSON_LENGTH(messages) AS n FROM ai_conversations WHERE account_id=?',[f.id]);assert.equal(memory.length,3);assert.ok(memory.every(m=>m.n<=3));
+ }finally{
+  await db.query('DELETE FROM ai_settings WHERE id=1');
+  if(saved[0]){const keys=Object.keys(saved[0]);await db.execute('INSERT INTO ai_settings ('+keys.join(',')+') VALUES ('+keys.map(()=>'?').join(',')+')',keys.map(k=>saved[0][k]));}
+ }
 });
 test('WhatsApp failure still charges AI; provider failure and invalid output release the reservation',async()=>{
  const f=await fixture(undefined,true);await f.service.incoming(f.id,f.manager,'shop',f.message('failure'));let usage=await rows(f.id);assert.equal(usage[0].status,'send_failed');assert.ok(usage[0].charged>0);assert.equal((await basicWallet(f.id)).balance,100);
@@ -222,11 +230,12 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
  };
  const f=await fixture(transport,false,async()=>{},[],false,true);
  await f.service.saveAssistant(f.id,'shop',{enabled:true,profile:{faq:'KNOWLEDGE_PRIVATE'},behavior:'Ramah'});
- await aiData.saveProduct(f.id,'shop','',{name:'Produk asli tenant',description:'Produk harian',type:'product',price:100000,stock:5,active:true});
+ const profile=(await f.service.assistant(f.id,'shop')).data_profile!.id;
+ await aiData.saveProduct(f.id,profile,'',{name:'Produk asli tenant',description:'Produk harian',type:'product',price:100000,stock:5,active:true});
  await f.service.incoming(f.id,f.manager,'shop',f.message('order-create','Pesankan dua produk'));
- assert.ok(orderId);assert.equal((await aiData.orders(f.id,'shop'))[0].total,200000);
+ assert.ok(orderId);assert.equal((await aiData.orders(f.id,profile))[0].total,200000);
  await f.service.incoming(f.id,f.manager,'shop',f.message('order-check','Bagaimana statusnya?'));
- assert.equal(f.sent(),2);assert.equal((await aiData.orders(f.id,'shop')).length,1);
+ assert.equal(f.sent(),2);assert.equal((await aiData.orders(f.id,profile)).length,1);
 });
 
 test('Product photo is sent before the text answer, via WhatsApp media, and only for the final answer',async()=>{
@@ -250,8 +259,10 @@ test('Product photo is sent before the text answer, via WhatsApp media, and only
  await service.adjust(id,id,{amount:10000,reason:'fixture',requestId:'fixture'});
  await service.saveAssistant(id,'shop',{enabled:true,profile:{faq:'Produk tersedia'},behavior:'Ramah'});
  const photo=await sharp({create:{width:100,height:100,channels:3,background:{r:1,g:2,b:3}}}).png().toBuffer();
- const saved=await images.save(id,'shop','photo.png',Readable.from(photo));
- await aiData.saveProduct(id,'shop','',{name:'Produk berfoto',description:'Ada fotonya',type:'product',price:50000,stock:5,active:true,image_id:saved.id});
+ // Products and photos live on the session's data profile.
+ const profile=(await service.assistant(id,'shop')).data_profile!.id;
+ const saved=await images.save(id,profile,'photo.png',Readable.from(photo));
+ await aiData.saveProduct(id,profile,'',{name:'Produk berfoto',description:'Ada fotonya',type:'product',price:50000,stock:5,active:true,image_id:saved.id});
  const sentContent:unknown[]=[];
  const manager=new SessionManager(async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){},async exists(){return true;},async read(){},async typing(){},async send(jid:string,content:unknown){sentContent.push(content);return 'reply-'+sentContent.length;}};});
  managers.push(manager);await manager.create('shop');

@@ -1,8 +1,8 @@
 import {routerResponseFormat} from './ai-router-schema.js';
 import {modelTiers,tierConfig,schemaEnabled,type ModelRole,type ModelTier,type AgentWorkflow,type AITraceEvent} from './ai-models.js';
-import {activeWorkflow} from './ai-workflow.js';
+import {activeWorkflow,profileDefinition,enabledProfiles} from './ai-profiles.js';
 import {transientAIError} from './ai-retry.js';
-import {publicSources,sourceInput,saveSource} from './ai-data.js';
+import {publicSources,sourceInput,saveSource,builtinSource} from './ai-data.js';
 import {runAgents,updateRouterContext,defaultTools,type AITools} from './ai-agents.js';
 import {randomInt,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -17,6 +17,7 @@ import {object} from './engine/messages.js';
 import type {IncomingMessage} from './engine/incoming.js';
 import {basicWallet} from './plans.js';
 import {sendBilled} from './outbound.js';
+import {recordNote,recordOutgoing} from './ai-chat.js';
 import {ProductImageStore} from './ai-product-images.js';
 import {resolve} from 'node:path';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
@@ -82,7 +83,7 @@ export class AIService {
   const profiles:NonNullable<AIConfig['tier_profiles']>=Object.fromEntries(routes.map(r=>[r.tier,{id:r.id,provider:r.provider,endpoint:r.endpoint,secret:r.secret,model:r['model_'+r.tier]||r.model_cheap}]));
   if(!profiles.structured&&profiles.cheap)profiles.structured=profiles.cheap;
   config.tier_profiles=profiles;
- }catch(error){console.error('Rute provider AI gagal dimuat; memakai konfigurasi lama.',error instanceof Error?error.message:error);}}config.workflow=await activeWorkflow();return config;}
+ }catch(error){console.error('Rute provider AI gagal dimuat; memakai konfigurasi lama.',error instanceof Error?error.message:error);}}return config;}
  async configuration(){const {secret,workflow,onTrace,tier_profiles,...config}=await this.config();return {...config,configured:Boolean(secret),apiKey:secret?'********':null};}
  async providerProfiles(){try{
   // SELECT * so the list still loads before `npm run migrate` adds a newer tier column; the secret never leaves the server.
@@ -140,10 +141,15 @@ export class AIService {
   return rows;
  }
  async trial(account:string,body:unknown){
-  const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=text(input.session,64,'Sesi');
-  if(!question)throw fail('Pertanyaan wajib diisi');if(!session)throw fail('Pilih nomor layanan yang akan diuji');
+  // Tests either a session's attached data profile or a data profile directly (Data Profil page, even unattached).
+  const input=object(body),question=text(input.question,2000,'Pertanyaan'),session=input.data_profile===undefined?text(input.session,64,'Sesi'):'';
+  if(!question)throw fail('Pertanyaan wajib diisi');if(input.data_profile===undefined&&!session)throw fail('Pilih nomor layanan yang akan diuji');
   const config=await this.config();if(!config.secret)throw fail('AI belum dikonfigurasi');
-  const assistant=await this.assistant(account,session);
+  const assistant=session?await this.assistant(account,session):await this.dataProfile(account,input.data_profile);
+  const profile='data_profile' in assistant?assistant.data_profile:{id:assistant.id,name:assistant.name,profile_type:assistant.profile_type};
+  if(!profile)throw new ApiError(409,'no_profile','Pasang profil AI ke sesi ini terlebih dahulu.');
+  if(!(await enabledProfiles()).has(profile.profile_type))throw new ApiError(409,'profile_disabled','Profil AI ini sedang dinonaktifkan admin.');
+  config.workflow=await activeWorkflow(profile.profile_type) as AgentWorkflow;
   const id=digest(JSON.stringify(['trial',account,session,randomUUID()]));
   const messages:AIMessage[]=[{role:'user',content:question}];
   const inputWords=countWords(question);
@@ -155,12 +161,12 @@ export class AIService {
    if(maxWords<1)throw new ApiError(402,'insufficient_credit','Kredit AI tidak cukup untuk uji coba');
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
-   await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,'trial','generating',?,?,?,?,?)",[account,id,session,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
+   await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model,profile_type,data_profile_id) VALUES (?,?,?,'trial','generating',?,?,?,?,?,?,?)",[account,id,session,inputWords,config.input_rate,config.output_rate,reserved,config.model,profile.profile_type,profile.id]);
    return {reserved,maxWords};
   });
   let answer:string,agent:string|null=null,generationFailed=false;
   try{
-   const result=await runAgents(this.transport,config,messages,prepared.maxWords,{account,session,customer:'628000000000',requestId:id,knowledge:assistant.knowledge,behavior:assistant.behavior,fallbackEnabled:false},this.tools,null);
+   const result=await runAgents(this.transport,config,messages,prepared.maxWords,{account,profile:profile.id,session,customer:'628000000000',requestId:id,knowledge:assistant.knowledge,behavior:assistant.behavior,fallbackEnabled:false},this.tools,null);
    answer=result.answer;agent=result.agent;
   }catch{generationFailed=true;answer=aiFallback;}
   const outputWords=generationFailed?0:countWords(answer),charged=generationFailed?0:creditCost(inputWords,outputWords,config.input_rate,config.output_rate);
@@ -179,49 +185,162 @@ export class AIService {
   const [items]=await db.execute('SELECT request_id,session_id,customer,status,input_words,output_words,input_rate,output_rate,charged,reserved,agent,created_at FROM ai_usage WHERE account_id=? ORDER BY created_at DESC,request_id DESC LIMIT '+size+' OFFSET '+((page-1)*size),[account]);
   return {items,page,pages,total,page_size:size};
  }
- async enabledMap(account:string){
-  const [rows]=await db.execute<RowDataPacket[]>('SELECT session_id,enabled FROM ai_assistants WHERE account_id=?',[account]);
-  return Object.fromEntries(rows.map(row=>[String(row.session_id),Boolean(row.enabled)])) as Record<string,boolean>;
+ // Per session: the AI switch and which data profile (content for one profile) the session runs.
+ async sessionProfiles(account:string){
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT a.session_id,a.enabled,p.id,p.name,p.profile_type FROM ai_assistants a LEFT JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=?',[account]);
+  return Object.fromEntries(rows.map(row=>[String(row.session_id),{enabled:Boolean(row.enabled)&&Boolean(row.id),profile:row.id?{id:String(row.id),name:String(row.name),profile_type:String(row.profile_type)}:null}])) as Record<string,{enabled:boolean;profile:{id:string;name:string;profile_type:string}|null}>;
  }
  async setEnabled(account:string,session:string,enabled:boolean){
-  await db.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior) VALUES (?,?,?,'') ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),revision=revision+1",[account,session,enabled]);
+  await transaction(async c=>{await lockAccount(c,account);if(enabled)await this.ensureDataProfile(c,account,session);await c.execute('INSERT INTO ai_assistants(account_id,session_id,enabled) VALUES (?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),revision=revision+1',[account,session,enabled]);});
   return {enabled};
+ }
+ // Integrations written before profiles existed configure a session directly. When that session has no data
+ // profile, one is created for it ("CS – <sesi>", the same name the upgrade migration uses) and attached.
+ private async ensureDataProfile(c:PoolConnection,account:string,session:string){
+  const [rows]=await c.execute<RowDataPacket[]>('SELECT data_profile_id FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);
+  if(rows[0]?.data_profile_id)return String(rows[0].data_profile_id);
+  if(!(await enabledProfiles()).has('cs'))throw new ApiError(409,'profile_disabled','Profil CS Usaha sedang dinonaktifkan admin.');
+  const id=await this.insertDataProfile(c,account,'cs',await this.uniqueName(c,account,'CS – '+session));
+  await c.execute('INSERT INTO ai_assistants(account_id,session_id,enabled,data_profile_id) VALUES (?,?,FALSE,?) ON DUPLICATE KEY UPDATE data_profile_id=VALUES(data_profile_id),revision=revision+1',[account,session,id]);
+  return id;
+ }
+ private async uniqueName(c:PoolConnection,account:string,base:string){const [rows]=await c.execute<RowDataPacket[]>('SELECT name FROM ai_data_profiles WHERE account_id=? FOR UPDATE',[account]);const names=new Set(rows.map(row=>String(row.name).toLowerCase()));let name=base.slice(0,100);for(let n=2;names.has(name.toLowerCase());n++)name=base.slice(0,94)+' ('+n+')';return name;}
+ private async insertDataProfile(c:PoolConnection,account:string,type:string,name:string,from?:RowDataPacket){
+  const [count]=await c.execute<RowDataPacket[]>('SELECT COUNT(*) AS n FROM ai_data_profiles WHERE account_id=?',[account]);
+  if(Number(count[0].n)>=100)throw new ApiError(409,'data_profile_limit','Maksimal 100 data profil per akun.');
+  const id=randomUUID(),columns=profileFields.map(field=>'profil_'+field);
+  await c.execute(`INSERT INTO ai_data_profiles(id,account_id,profile_type,name,behavior,fallback_number,fallback_notify,${columns.join(',')}) VALUES (?,?,?,?,?,?,?,${columns.map(()=>'?').join(',')})`,[id,account,type,name,String(from?.behavior??''),String(from?.fallback_number??''),Boolean(from?.fallback_notify),...columns.map(column=>String(from?.[column]??''))]);
+  return id;
+ }
+ // The data profile a session runs (null when none is attached).
+ async sessionProfile(account:string,session:string){
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT data_profile_id FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);
+  return rows[0]?.data_profile_id?String(rows[0].data_profile_id):null;
+ }
+ // For legacy session-scoped writes: the attached data profile, created and attached first when there is none.
+ async ensureSessionProfile(account:string,session:string){return transaction(async c=>{await lockAccount(c,account);return this.ensureDataProfile(c,account,session);});}
+ private dataProfileId(value:unknown){if(typeof value!=='string'||!/^[0-9a-f-]{36}$/.test(value))throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');return value;}
+ async ownedDataProfile(account:string,value:unknown){const id=this.dataProfileId(value);const [rows]=await db.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE id=? AND account_id=?',[id,account]);if(!rows[0])throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');return id;}
+ private profileView(row:RowDataPacket){
+  const profile=Object.fromEntries(profileFields.map(field=>[field,String(row['profil_'+field]??'')])) as Record<ProfileField,string>;
+  return {profile,knowledge:composeKnowledge(profile),behavior:String(row.behavior??''),fallback_number:String(row.fallback_number??''),fallback_notify:Boolean(row.fallback_notify),revision:Number(row.revision??0)};
+ }
+ async dataProfiles(account:string){
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT p.id,p.profile_type,p.name,p.updated_at,(SELECT COUNT(*) FROM ai_products x WHERE x.data_profile_id=p.id) AS products,(SELECT COUNT(*) FROM ai_orders o WHERE o.data_profile_id=p.id) AS orders FROM ai_data_profiles p WHERE p.account_id=? ORDER BY p.name',[account]);
+  const [attached]=await db.execute<RowDataPacket[]>('SELECT data_profile_id,session_id FROM ai_assistants WHERE account_id=? AND data_profile_id IS NOT NULL ORDER BY session_id',[account]);
+  const enabled=await enabledProfiles();
+  return rows.map(row=>({id:String(row.id),profile_type:String(row.profile_type),profile_name:profileDefinition(row.profile_type).name,profile_enabled:enabled.has(row.profile_type),name:String(row.name),products:Number(row.products),orders:Number(row.orders),updated_at:row.updated_at,sessions:attached.filter(a=>a.data_profile_id===row.id).map(a=>String(a.session_id))}));
+ }
+ async dataProfile(account:string,value:unknown){
+  const id=this.dataProfileId(value);
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT * FROM ai_data_profiles WHERE id=? AND account_id=?',[id,account]);const row=rows[0];
+  if(!row)throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');
+  const [attached]=await db.execute<RowDataPacket[]>('SELECT session_id FROM ai_assistants WHERE account_id=? AND data_profile_id=? ORDER BY session_id',[account,id]);
+  return {id,profile_type:String(row.profile_type),profile_name:profileDefinition(row.profile_type).name,profile_enabled:(await enabledProfiles()).has(row.profile_type),name:String(row.name),sessions:attached.map(a=>String(a.session_id)),...this.profileView(row),...await publicSources(account,id)};
+ }
+ async createDataProfile(account:string,body:unknown){
+  const input=object(body),name=text(input.name,100,'Nama data profil');if(!name)throw fail('Nama data profil wajib diisi');
+  const copyFrom=input.copy_from===undefined?undefined:this.dataProfileId(input.copy_from);
+  const images=new Map<string,string>();
+  let id:string;
+  try{
+   id=await transaction(async c=>{await lockAccount(c,account);
+    let from:RowDataPacket|undefined,type:string;
+    if(copyFrom){const [rows]=await c.execute<RowDataPacket[]>('SELECT * FROM ai_data_profiles WHERE id=? AND account_id=? FOR SHARE',[copyFrom,account]);from=rows[0];if(!from)throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');type=String(from.profile_type);}
+    else type=profileDefinition(input.profile_type).id;
+    if(!(await enabledProfiles()).has(type))throw new ApiError(409,'profile_disabled','Profil AI ini sedang dinonaktifkan admin.');
+    const [taken]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE account_id=? AND name=? FOR UPDATE',[account,name]);if(taken[0])throw new ApiError(409,'name_taken','Nama data profil sudah dipakai.');
+    const created=await this.insertDataProfile(c,account,type,name,from);
+    if(copyFrom){
+     // A duplicate owns its own copy of every photo, so deleting either data profile never breaks the other.
+     const [photos]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_product_images WHERE account_id=? AND data_profile_id=?',[account,copyFrom]);
+     for(const photo of photos){const copy=await this.productImages.copy(account,String(photo.id));images.set(String(photo.id),copy.id);await c.execute('INSERT INTO ai_product_images(id,account_id,data_profile_id,size_bytes) VALUES (?,?,?,?)',[copy.id,account,created,copy.sizeBytes]);}
+     const [products]=await c.execute<RowDataPacket[]>('SELECT * FROM ai_products WHERE account_id=? AND data_profile_id=?',[account,copyFrom]);
+     for(const p of products)await c.execute('INSERT INTO ai_products(account_id,data_profile_id,name,type,description,price,stock,active,image_id) VALUES (?,?,?,?,?,?,?,?,?)',[account,created,p.name,p.type,p.description,p.price,p.stock,p.active,p.image_id?images.get(String(p.image_id))??null:null]);
+     await c.execute('INSERT INTO ai_data_sources(account_id,data_profile_id,kind,mode,endpoint,secret) SELECT account_id,?,kind,mode,endpoint,secret FROM ai_data_sources WHERE account_id=? AND data_profile_id=?',[created,account,copyFrom]);
+    }
+    return created;
+   });
+  }catch(error){for(const copy of images.values())await this.productImages.removeFile(account,copy).catch(()=>{});throw error;}
+  return this.dataProfile(account,id);
+ }
+ async renameDataProfile(account:string,value:unknown,body:unknown){
+  const id=this.dataProfileId(value),name=text(object(body).name,100,'Nama data profil');if(!name)throw fail('Nama data profil wajib diisi');
+  await transaction(async c=>{await lockAccount(c,account);
+   const [rows]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE id=? AND account_id=? FOR UPDATE',[id,account]);if(!rows[0])throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');
+   const [taken]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE account_id=? AND name=? AND id<>?',[account,name,id]);if(taken[0])throw new ApiError(409,'name_taken','Nama data profil sudah dipakai.');
+   await c.execute('UPDATE ai_data_profiles SET name=? WHERE id=?',[name,id]);
+  });return this.dataProfile(account,id);
+ }
+ // Only an unattached data profile can be deleted; its products, sources, orders and photos go with it.
+ async deleteDataProfile(account:string,value:unknown){
+  const id=this.dataProfileId(value);
+  const photos=await transaction(async c=>{await lockAccount(c,account);
+   const [rows]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE id=? AND account_id=? FOR UPDATE',[id,account]);if(!rows[0])throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');
+   const [attached]=await c.execute<RowDataPacket[]>('SELECT session_id FROM ai_assistants WHERE account_id=? AND data_profile_id=? FOR UPDATE',[account,id]);
+   if(attached.length)throw new ApiError(409,'data_profile_in_use','Data profil masih dipasang di sesi '+attached.map(a=>a.session_id).join(', ')+'. Cabut dari sesi terlebih dahulu.');
+   const [images]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_product_images WHERE account_id=? AND data_profile_id=?',[account,id]);
+   await c.execute('DELETE FROM ai_data_profiles WHERE id=? AND account_id=?',[id,account]);
+   return images.map(image=>String(image.id));
+  });
+  for(const photo of photos)await this.productImages.removeFile(account,photo).catch(()=>{});
+  return {ok:true};
+ }
+ // Attaches a data profile to a session, switches it, or detaches it (null). Memory built for another business
+ // no longer applies, so a change empties the session's AI memory and S-P-O context; the chat history stays.
+ async attachProfile(account:string,session:string,body:unknown){
+  const input=object(body);if(input.data_profile_id!==null&&typeof input.data_profile_id!=='string')throw fail('Data profil wajib dipilih');
+  if(input.enabled!==undefined&&typeof input.enabled!=='boolean')throw fail('Status asisten wajib valid');
+  const target=input.data_profile_id===null?null:this.dataProfileId(input.data_profile_id);
+  await transaction(async c=>{await lockAccount(c,account);
+   let profile:RowDataPacket|undefined;
+   if(target){const [rows]=await c.execute<RowDataPacket[]>('SELECT id,name,profile_type FROM ai_data_profiles WHERE id=? AND account_id=? FOR SHARE',[target,account]);profile=rows[0];if(!profile)throw new ApiError(404,'data_profile_not_found','Data profil tidak ditemukan');if(!(await enabledProfiles()).has(String(profile.profile_type)))throw new ApiError(409,'profile_disabled','Profil AI ini sedang dinonaktifkan admin.');}
+   const [current]=await c.execute<RowDataPacket[]>('SELECT data_profile_id,enabled FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);
+   const previous=current[0]?.data_profile_id?String(current[0].data_profile_id):null;
+   const enabled=target?(input.enabled===undefined?Boolean(current[0]?.enabled):input.enabled===true):false;
+   await c.execute('INSERT INTO ai_assistants(account_id,session_id,enabled,data_profile_id) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),data_profile_id=VALUES(data_profile_id),revision=revision+1',[account,session,enabled,target]);
+   if(previous===target)return;
+   const [customers]=await c.execute<RowDataPacket[]>('SELECT customer FROM ai_conversations WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);
+   await c.execute('UPDATE ai_conversations SET messages=JSON_ARRAY(),router_context=NULL,revision=revision+1 WHERE account_id=? AND session_id=?',[account,session]);
+   const note=!profile?'Profil AI dicabut; AI berhenti membalas':previous?'Profil diganti ke '+profile.name+'; memori AI dikosongkan':'Profil AI dipasang: '+profile.name;
+   for(const row of customers)await recordNote(account,session,String(row.customer),note,c);
+  });
+  return this.assistant(account,session);
  }
  // Autosave: one field at a time, read-modify-write against the stored row so an in-flight edit
  // in another tab never gets clobbered by a save that only carries a single field's value.
  async saveField(account:string,session:string,field:string,value:unknown){
+  await this.saveProfileField(account,await this.ensureSessionProfile(account,session),field,value);
+  return this.assistant(account,session);
+ }
+ async saveDataProfileField(account:string,value:unknown,field:string,input:unknown){const id=await this.ownedDataProfile(account,value);await this.saveProfileField(account,id,field,input);return this.dataProfile(account,id);}
+ private async saveProfileField(account:string,profile:string,field:string,value:unknown){
   if(profileFields.includes(field as ProfileField)){
-   const column='profil_'+field;
-   await db.execute(`INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,${column}) VALUES (?,?,FALSE,'',?) ON DUPLICATE KEY UPDATE ${column}=VALUES(${column}),revision=revision+1`,[account,session,text(value,2000,profileLabels[field as ProfileField])]);
-   return this.assistant(account,session);
+   await db.execute(`UPDATE ai_data_profiles SET profil_${field}=?,revision=revision+1 WHERE id=? AND account_id=?`,[text(value,2000,profileLabels[field as ProfileField]),profile,account]);return;
   }
-  if(field==='behavior'){
-   await db.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior) VALUES (?,?,FALSE,?) ON DUPLICATE KEY UPDATE behavior=VALUES(behavior),revision=revision+1",[account,session,text(value,2000,'Perilaku AI')]);
-   return this.assistant(account,session);
-  }
+  if(field==='behavior'){await db.execute('UPDATE ai_data_profiles SET behavior=?,revision=revision+1 WHERE id=? AND account_id=?',[text(value,2000,'Perilaku AI'),profile,account]);return;}
   if(field==='fallback_number'||field==='fallback_notify'){
-   const [rows]=await db.execute<RowDataPacket[]>('SELECT fallback_number,fallback_notify FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);
+   const [rows]=await db.execute<RowDataPacket[]>('SELECT fallback_number,fallback_notify FROM ai_data_profiles WHERE id=? AND account_id=?',[profile,account]);
    const current={fallback_number:String(rows[0]?.fallback_number??''),fallback_notify:Boolean(rows[0]?.fallback_notify)};
    const fallbackNumber=field==='fallback_number'?(value===''?'':text(value,20,'Nomor fallback')):current.fallback_number;
    if(fallbackNumber&&!/^[1-9][0-9]{5,14}$/.test(fallbackNumber))throw fail('Nomor fallback harus nomor internasional tanpa +');
    const fallbackNotify=field==='fallback_notify'?value===true:current.fallback_notify;
-   await db.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,fallback_number,fallback_notify) VALUES (?,?,FALSE,'',?,?) ON DUPLICATE KEY UPDATE fallback_number=VALUES(fallback_number),fallback_notify=VALUES(fallback_notify),revision=revision+1",[account,session,fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify]);
-   return this.assistant(account,session);
+   await db.execute('UPDATE ai_data_profiles SET fallback_number=?,fallback_notify=?,revision=revision+1 WHERE id=? AND account_id=?',[fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify,profile,account]);return;
   }
   if(field==='products_source'||field==='orders_source'){
    const kind=field==='products_source'?'products':'orders';
    const input=await sourceInput(value);
-   await transaction(async c=>{await lockAccount(c,account);await saveSource(c,account,session,kind,input);});
-   return this.assistant(account,session);
+   await transaction(async c=>{await lockAccount(c,account);await saveSource(c,account,profile,kind,input);});return;
   }
   throw fail('Bidang tidak dikenal');
  }
+ // A session's AI settings: its switch plus the attached data profile's content (empty when none is attached).
  async assistant(account:string,session:string){
-  const profileColumns=profileFields.map(field=>'profil_'+field).join(',');
-  const [rows]=await db.execute<RowDataPacket[]>(`SELECT enabled,behavior,fallback_number,fallback_notify,revision,${profileColumns} FROM ai_assistants WHERE account_id=? AND session_id=?`,[account,session]);
-  const row=rows[0];
-  const profile=Object.fromEntries(profileFields.map(field=>[field,String(row?.['profil_'+field]??'')])) as Record<ProfileField,string>;
-  return {enabled:Boolean(row?.enabled),profile,knowledge:composeKnowledge(profile),behavior:String(row?.behavior??''),fallback_number:String(row?.fallback_number??''),fallback_notify:Boolean(row?.fallback_notify),revision:Number(row?.revision??0),...await publicSources(account,session)};
+  const [rows]=await db.execute<RowDataPacket[]>('SELECT a.enabled,a.data_profile_id,p.* FROM ai_assistants a LEFT JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=? AND a.session_id=?',[account,session]);
+  const row=rows[0],attached=row?.data_profile_id?String(row.data_profile_id):null;
+  const view=attached?this.profileView(row):{profile:Object.fromEntries(profileFields.map(field=>[field,''])) as Record<ProfileField,string>,knowledge:'',behavior:'',fallback_number:'',fallback_notify:false,revision:0};
+  const {secret:_,...builtin}=builtinSource,sources=attached?await publicSources(account,attached):{products_source:{...builtin,has_token:false},orders_source:{...builtin,has_token:false}};
+  return {enabled:Boolean(row?.enabled)&&Boolean(attached),data_profile:attached?{id:attached,name:String(row.name),profile_type:String(row.profile_type)}:null,profile_enabled:attached?(await enabledProfiles()).has(String(row.profile_type)):false,...view,...sources};
  }
  async saveAssistant(account:string,session:string,body:unknown){
   const input=object(body);if(typeof input.enabled!=='boolean')throw fail('Status asisten wajib valid');
@@ -232,15 +351,17 @@ export class AIService {
   const products=input.products_source===undefined?undefined:await sourceInput(input.products_source),orders=input.orders_source===undefined?undefined:await sourceInput(input.orders_source);
   const profileColumns=profileFields.map(field=>'profil_'+field),profileValues=profileFields.map(field=>profile[field]);
   await transaction(async c=>{await lockAccount(c,account);
-   await c.execute(`INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,fallback_number,fallback_notify,${profileColumns.join(',')}) VALUES (?,?,?,?,?,?,${profileColumns.map(()=>'?').join(',')}) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),behavior=VALUES(behavior),fallback_number=VALUES(fallback_number),fallback_notify=VALUES(fallback_notify),revision=revision+1,${profileColumns.map(c=>c+'=VALUES('+c+')').join(',')}`,[account,session,Boolean(input.enabled),behavior,fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify,...profileValues] as any[]);
-   if(products)await saveSource(c,account,session,'products',products);if(orders)await saveSource(c,account,session,'orders',orders);
+   const id=await this.ensureDataProfile(c,account,session);
+   await c.execute(`UPDATE ai_data_profiles SET behavior=?,fallback_number=?,fallback_notify=?,revision=revision+1,${profileColumns.map(column=>column+'=?').join(',')} WHERE id=? AND account_id=?`,[behavior,fallbackNumber,Boolean(fallbackNumber)&&fallbackNotify,...profileValues,id,account]);
+   await c.execute('UPDATE ai_assistants SET enabled=?,revision=revision+1 WHERE account_id=? AND session_id=?',[Boolean(input.enabled),account,session]);
+   if(products)await saveSource(c,account,id,'products',products);if(orders)await saveSource(c,account,id,'orders',orders);
   });return this.assistant(account,session);
  }
  async registerSystemMessage(account:string,session:string,messageId:string){
   await db.execute("INSERT INTO ai_message_origins(account_id,session_id,message_id,origin) VALUES (?,?,?,'system')",[account,session,messageId]);
  }
  private async handleFallbackReply(account:string,manager:SessionManager,session:string,message:IncomingMessage){
-  const [settings]=await db.execute<RowDataPacket[]>('SELECT fallback_number FROM ai_assistants WHERE account_id=? AND session_id=? AND fallback_number=? AND fallback_notify=TRUE',[account,session,message.from]);
+  const [settings]=await db.execute<RowDataPacket[]>('SELECT p.fallback_number FROM ai_assistants a JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=? AND a.session_id=? AND p.fallback_number=? AND p.fallback_notify=TRUE',[account,session,message.from]);
   if(!settings[0]?.fallback_number)return false;
   const ticketId=message.text.match(/\b(FB-[A-Z0-9]{8,48})\b/i)?.[1]?.toUpperCase();
   const ticket=await transaction(async c=>{
@@ -252,7 +373,7 @@ export class AIService {
   if(!ticket)return true;
   const answer='Berikut konfirmasi dari tim: '+message.text.trim();
   let sent=false;
-  try{await sendBilled(account,manager,session,'text',{to:ticket.customer,text:answer},'fallback_resume_'+digest(message.messageId).slice(0,64));sent=true;}catch{}
+  try{const relayed=await sendBilled(account,manager,session,'text',{to:ticket.customer,text:answer},'fallback_resume_'+digest(message.messageId).slice(0,64));sent=true;await recordOutgoing(account,session,{customer:ticket.customer,messageId:relayed.messageId,origin:'manual',text:answer}).catch(()=>{});}catch{}
   await transaction(async c=>{
    await c.execute('UPDATE ai_fallbacks SET status=?,resolved_at=IF(?,UTC_TIMESTAMP(),NULL) WHERE id=?',[sent?'resolved':'failed',sent,ticket.id]);
    if(!sent)return;
@@ -271,7 +392,7 @@ export class AIService {
    await c.execute("UPDATE ai_fallbacks SET status='answered',staff_answer=?,answered_at=UTC_TIMESTAMP() WHERE id=?",[answer,rows[0].id]);return rows[0];
   });
   const customerAnswer='Berikut konfirmasi dari tim: '+answer;let sent=false;
-  try{await sendBilled(account,manager,session,'text',{to:ticket.customer,text:customerAnswer},'fallback_web_'+digest(id+'\0'+answer).slice(0,64));sent=true;}catch{}
+  try{await sendBilled(account,manager,session,'text',{to:ticket.customer,text:customerAnswer},'fallback_web_'+digest(id+'\0'+answer).slice(0,64)).then(async relayed=>{await recordOutgoing(account,session,{customer:ticket.customer,messageId:relayed.messageId,origin:'manual',text:customerAnswer}).catch(()=>{});});sent=true;}catch{}
   await transaction(async c=>{await c.execute('UPDATE ai_fallbacks SET status=?,resolved_at=IF(?,UTC_TIMESTAMP(),NULL) WHERE id=?',[sent?'resolved':'failed',sent,id]);if(sent){const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');const [rows]=await c.execute<RowDataPacket[]>('SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,ticket.customer]);if(rows[0])await c.execute('UPDATE ai_conversations SET messages=?,revision=revision+1 WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify([...parseMemory(rows[0].messages),{role:'assistant',content:customerAnswer}].slice(-(limits[0]?.memory_limit??defaults.memory_limit))),account,session,ticket.customer]);}});
   return {ok:sent,status:sent?'resolved':'failed'};
  }
@@ -282,18 +403,36 @@ export class AIService {
    const [known]=await c.execute<RowDataPacket[]>('SELECT origin FROM ai_message_origins WHERE account_id=? AND session_id=? AND message_id=?',[account,session,message.messageId]);
    if(known[0])return;
    await c.execute("INSERT INTO ai_message_origins(account_id,session_id,message_id,origin) VALUES (?,?,?,'manual')",[account,session,message.messageId]);
-   const [assistant]=await c.execute<RowDataPacket[]>('SELECT enabled FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);
-   if(!assistant[0]?.enabled)return;
-   const [settings]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
-   const limit=settings[0]?.memory_limit??defaults.memory_limit;
-   await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,message.from]);
-   const [rows]=await c.execute<RowDataPacket[]>('SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);
-   const content=(message.type==='text'?message.text:`[Pesan ${message.type} manual] ${message.text}`).trim().slice(0,4000);
-   const memory=[...parseMemory(rows[0].messages),...(content?[{role:'assistant' as const,content}]:[])].slice(-limit);
-   await c.execute('UPDATE ai_conversations SET paused=IF(full_auto,FALSE,TRUE),revision=revision+1,router_context=NULL,messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);
+   await this.applyManualReply(c,account,session,message.from,(message.type==='text'?message.text:`[Pesan ${message.type} manual] ${message.text}`).trim().slice(0,4000));
   });
  }
- async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_data_sources','ai_products','ai_orders','ai_fallbacks'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
+ // A human reply, from the phone or the dashboard, enters AI memory and pauses the AI unless full auto is on.
+ private async applyManualReply(c:PoolConnection,account:string,session:string,customer:string,content:string){
+  const [assistant]=await c.execute<RowDataPacket[]>('SELECT enabled FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);
+  if(!assistant[0]?.enabled)return;
+  const [settings]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
+  const limit=settings[0]?.memory_limit??defaults.memory_limit;
+  await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,customer]);
+  const [rows]=await c.execute<RowDataPacket[]>('SELECT messages,paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,customer]);
+  const memory=[...parseMemory(rows[0].messages),...(content?[{role:'assistant' as const,content}]:[])].slice(-limit);
+  await c.execute('UPDATE ai_conversations SET paused=IF(full_auto,FALSE,TRUE),revision=revision+1,router_context=NULL,messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,customer]);
+  if(!rows[0].paused&&!rows[0].full_auto)await recordNote(account,session,customer,'AI dijeda karena ada balasan manual',c);
+ }
+ // What sent a message this session already knows about: 'system' for API/AI/Auto Share sends, 'manual' for phone replies.
+ async knownOrigin(account:string,session:string,messageId:string){const [rows]=await db.execute<RowDataPacket[]>('SELECT origin FROM ai_message_origins WHERE account_id=? AND session_id=? AND message_id=?',[account,session,messageId]);return rows[0]?.origin as string|undefined;}
+ // Dashboard reply: billed like any API send, recorded as manual, and handled like a reply typed on the phone.
+ async dashboardReply(account:string,manager:SessionManager,session:string,customer:string,body:unknown,key:unknown){
+  if(!/^[0-9]{5,20}$/.test(customer))throw fail('Nomor pelanggan tidak valid');
+  if(typeof key!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw fail('Idempotency-Key wajib diisi');
+  const input=object(body),message=text(input.text,4000,'Pesan');if(!message)throw fail('Pesan wajib diisi');
+  const sent=await sendBilled(account,manager,session,'text',{to:customer,text:message},'manual_'+key);
+  // A retried request returns the original send; only its first completion touches memory and history.
+  const [existing]=await db.execute<RowDataPacket[]>("SELECT origin FROM ai_chat_messages WHERE account_id=? AND session_id=? AND message_id=? AND origin='manual'",[account,session,sent.messageId]);
+  if(!existing[0])await transaction(async c=>{await lockAccount(c,account,true);await recordOutgoing(account,session,{customer,messageId:sent.messageId,origin:'manual',text:message},c);await this.applyManualReply(c,account,session,customer,message);});
+  return {messageId:sent.messageId};
+ }
+ // Products, sources and orders belong to the data profile and stay with it; only this session's own state goes.
+ async removeSession(account:string,session:string){await transaction(async c=>{await lockAccount(c,account,true);for(const table of ['ai_chat_messages','ai_fallbacks'])await c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',[account,session]);await c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',[account,session]);});}
  async conversations(account:string,session:string){const [rows]=await db.execute('SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',[account,session]);return rows;}
  async fallbacks(account:string,session:string,value:unknown){
   if(typeof value!=='string'||!/^\d{1,9}$/.test(value)||Number(value)<1)throw fail('Halaman tidak valid');
@@ -313,14 +452,22 @@ export class AIService {
   if(!/^FB-[A-Z0-9]{8,48}$/.test(id))throw fail('ID fallback tidak valid');
   const content=text(object(body).content,2000,'Knowledge dari fallback');if(!content)throw fail('Knowledge dari fallback wajib diisi');
   return transaction(async c=>{await lockAccount(c,account);const [tickets]=await c.execute<RowDataPacket[]>("SELECT status FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=? FOR UPDATE",[id,account,session]);if(!tickets[0]||tickets[0].status!=='resolved')throw new ApiError(409,'fallback_not_ready','Tiket harus sudah selesai sebelum diterapkan.');
-   const [assistants]=await c.execute<RowDataPacket[]>('SELECT profil_faq FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',[account,session]);const previous=String(assistants[0]?.profil_faq??''),faq=(previous?previous+'\n\n':'')+content;if(faq.length>2000)throw fail('Bagian FAQ melebihi batas 2.000 karakter; kosongkan sebagian sebelum menambah lagi.');
-   await c.execute("INSERT INTO ai_assistants(account_id,session_id,enabled,behavior,profil_faq) VALUES (?,?,FALSE,'',?) ON DUPLICATE KEY UPDATE profil_faq=VALUES(profil_faq),revision=revision+1",[account,session,faq]);const knowledge=composeKnowledge({faq});return {ok:true,knowledge};
+   const profile=await this.ensureDataProfile(c,account,session);
+   const [profiles]=await c.execute<RowDataPacket[]>('SELECT profil_faq FROM ai_data_profiles WHERE id=? AND account_id=? FOR UPDATE',[profile,account]);const previous=String(profiles[0]?.profil_faq??''),faq=(previous?previous+'\n\n':'')+content;if(faq.length>2000)throw fail('Bagian FAQ melebihi batas 2.000 karakter; kosongkan sebagian sebelum menambah lagi.');
+   await c.execute('UPDATE ai_data_profiles SET profil_faq=?,revision=revision+1 WHERE id=? AND account_id=?',[faq,profile,account]);const knowledge=composeKnowledge({faq});return {ok:true,knowledge};
   });
  }
  async conversation(account:string,session:string,customer:string,body:unknown){
   if(!/^[0-9]{5,20}$/.test(customer))throw fail('Nomor pelanggan tidak valid');
   const input=object(body);if(typeof input.paused!=='boolean'||(input.clear!==undefined&&typeof input.clear!=='boolean')||(input.full_auto!==undefined&&typeof input.full_auto!=='boolean')||(input.paused&&input.full_auto===true))throw fail('Status percakapan tidak valid');
-  await transaction(async c=>{await lockAccount(c,account);await c.execute("INSERT INTO ai_conversations(account_id,session_id,customer,paused,full_auto,messages) VALUES (?,?,?,?,?,'[]') ON DUPLICATE KEY UPDATE paused=VALUES(paused),full_auto=IF(?,VALUES(full_auto),full_auto),router_context=IF(?,NULL,router_context),messages=IF(?,JSON_ARRAY(),messages),revision=revision+1",[account,session,customer,Boolean(input.paused),input.full_auto===true,Boolean(input.paused)||input.full_auto!==undefined,input.clear===true,input.clear===true]);});return {ok:true};
+  await transaction(async c=>{await lockAccount(c,account);const [before]=await c.execute<RowDataPacket[]>('SELECT paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,customer]);await c.execute("INSERT INTO ai_conversations(account_id,session_id,customer,paused,full_auto,messages) VALUES (?,?,?,?,?,'[]') ON DUPLICATE KEY UPDATE paused=VALUES(paused),full_auto=IF(?,VALUES(full_auto),full_auto),router_context=IF(?,NULL,router_context),messages=IF(?,JSON_ARRAY(),messages),revision=revision+1",[account,session,customer,Boolean(input.paused),input.full_auto===true,Boolean(input.paused)||input.full_auto!==undefined,input.clear===true,input.clear===true]);
+   // Shown in the chat history, so the owner can see why the AI stopped or resumed answering.
+   const was={paused:Boolean(before[0]?.paused),full_auto:Boolean(before[0]?.full_auto)},[after]=await c.execute<RowDataPacket[]>('SELECT paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',[account,session,customer]);
+   if(!was.paused&&after[0].paused)await recordNote(account,session,customer,'AI dijeda oleh admin',c);
+   if(was.paused&&!after[0].paused)await recordNote(account,session,customer,'AI dilanjutkan oleh admin',c);
+   if(was.full_auto!==Boolean(after[0].full_auto))await recordNote(account,session,customer,after[0].full_auto?'Full auto diaktifkan':'Full auto dinonaktifkan',c);
+   if(input.clear===true)await recordNote(account,session,customer,'Konteks AI dihapus; riwayat chat tetap tersimpan',c);
+  });return {ok:true};
  }
  async adjust(actor:string,account:string,body:unknown){const input=object(body),amount=integer(input.amount,-100000000,100000000,'Jumlah'),reason=text(input.reason,200,'Alasan'),id=text(input.requestId,64,'ID');if(!amount||!reason||! /^[A-Za-z0-9_-]{1,64}$/.test(id))throw fail('Jumlah, alasan, dan ID wajib valid');await transaction(async c=>{await lockAccount(c,account);const [old]=await c.execute<RowDataPacket[]>('SELECT amount,reason FROM ai_adjustments WHERE account_id=? AND request_id=?',[account,id]);if(old[0]){if(old[0].amount!==amount||old[0].reason!==reason)throw new ApiError(409,'idempotency_conflict','ID sudah digunakan');return;}await c.execute('INSERT IGNORE INTO ai_wallets VALUES (?,0)',[account]);const [rows]=await c.execute<RowDataPacket[]>('SELECT balance FROM ai_wallets WHERE account_id=?',[account]);if(rows[0].balance+amount<0||rows[0].balance+amount>1000000000)throw fail('Saldo di luar batas');await c.execute('UPDATE ai_wallets SET balance=balance+? WHERE account_id=?',[amount,account]);await c.execute('INSERT INTO ai_adjustments(account_id,request_id,actor_id,amount,reason) VALUES (?,?,?,?,?)',[account,id,actor,amount,reason]);await c.execute('INSERT INTO audit_events(account_id,action) VALUES (?,?)',[actor,'ai_credit_adjusted:'+account]);});return this.wallet(account);}
  incoming(account:string,manager:SessionManager,session:string,message:IncomingMessage){
@@ -335,14 +482,16 @@ export class AIService {
    await c.execute("UPDATE ai_usage u LEFT JOIN credit_reservations r ON r.account_id=u.account_id AND r.request_id=CONCAT('ai_',u.request_id) SET u.status=CONCAT(IF(u.status='fallback_generated','fallback_',''),IF(r.status='sent','sent','send_unknown')) WHERE u.status IN ('generated','fallback_generated')"+(account?' AND u.account_id=?':''),account?[account]:[]);});
  }
  private async process(account:string,manager:SessionManager,session:string,message:IncomingMessage){
+  // The CS profile's runtime: the only pipeline shipped so far. A session runs it when its attached data
+  // profile is a CS one and the owner has CS switched on.
   const config=await this.config();if(!config.secret)return;
-  const assistant=await this.assistant(account,session);if(!assistant.enabled)return;
+  const assistant=await this.assistant(account,session);if(!assistant.enabled||assistant.data_profile?.profile_type!=='cs'||!assistant.profile_enabled)return;
   manager.connected(session);if((await basicWallet(account)).balance<1)return;
   const id=digest(JSON.stringify([session,message.from,message.messageId]));
   const prepared=await transaction(async c=>{await lockAccount(c,account);
    const [existing]=await c.execute<RowDataPacket[]>('SELECT request_id FROM ai_usage WHERE account_id=? AND request_id=?',[account,id]);if(existing[0])return;
-   const profileColumns=profileFields.map(field=>'profil_'+field).join(',');
-   const [current]=await c.execute<RowDataPacket[]>(`SELECT enabled,behavior,fallback_number,fallback_notify,revision,${profileColumns} FROM ai_assistants WHERE account_id=? AND session_id=?`,[account,session]);if(!current[0]?.enabled)return;
+   const profileColumns=profileFields.map(field=>'p.profil_'+field).join(',');
+   const [current]=await c.execute<RowDataPacket[]>(`SELECT a.enabled,p.id AS data_profile_id,p.behavior,p.fallback_number,p.fallback_notify,${profileColumns} FROM ai_assistants a JOIN ai_data_profiles p ON p.id=a.data_profile_id AND p.account_id=a.account_id JOIN ai_profile_types t ON t.id=p.profile_type AND t.enabled=TRUE WHERE a.account_id=? AND a.session_id=? AND p.profile_type='cs'`,[account,session]);if(!current[0]?.enabled)return;
    const knowledge=composeKnowledge(Object.fromEntries(profileFields.map(field=>[field,String(current[0]['profil_'+field]??'')])) as Record<ProfileField,string>);
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
    await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,message.from]);
@@ -360,9 +509,10 @@ export class AIService {
    system[0].content=system[0].content.replace('300 kata',maxWords+' kata');
    const reserved=creditCost(inputWords,maxWords,config.input_rate,config.output_rate);
    await c.execute('UPDATE ai_wallets SET balance=balance-? WHERE account_id=?',[reserved,account]);
-   await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model) VALUES (?,?,?,?,'generating',?,?,?,?,?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model]);
-   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,knowledge,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify)};
+   await c.execute("INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model,profile_type,data_profile_id) VALUES (?,?,?,?,'generating',?,?,?,?,?,'cs',?)",[account,id,session,message.from,inputWords,config.input_rate,config.output_rate,reserved,config.model,current[0].data_profile_id]);
+   await c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?',[JSON.stringify(memory),account,session,message.from]);return {messages,inputWords,reserved,maxWords,routerContext:conversations[0].router_context as string|null,revision:conversations[0].revision,knowledge,behavior:current[0].behavior as string,pendingFallbacks:pending.map(row=>({id:String(row.id),question:String(row.question)})),fallbackNumber,fallbackNotify:Boolean(current[0].fallback_notify),profileId:String(current[0].data_profile_id)};
   });if(!prepared)return;
+  config.workflow=await activeWorkflow('cs') as AgentWorkflow;
   const jid=message.from+'@s.whatsapp.net';
   // Customer-facing order: a short pause, blue ticks, then "typing..." for the whole generation.
   // Read/presence are best effort and never add a message or a credit charge.
@@ -377,13 +527,14 @@ export class AIService {
   // Assistant config (knowledge/behavior/fallback) can autosave mid-flight; a request already in
   // progress finishes with the config it started with rather than being cancelled by every edit.
   // Disabling the assistant is the one config change that still cancels in-flight work immediately.
+  // Switching the session to another data profile, or the owner switching the profile off, cancels too.
   const guard=async()=>{const enabled=await this.assistant(account,session);const [rows]=await db.execute<RowDataPacket[]>('SELECT paused,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',[account,session,message.from]);
-   if(!enabled.enabled||rows[0]?.paused||rows[0]?.revision!==prepared.revision)throw new ApiError(409,'ai_cancelled','Asisten atau konteks percakapan telah berubah');};
+   if(!enabled.enabled||enabled.data_profile?.id!==prepared.profileId||!enabled.profile_enabled||rows[0]?.paused||rows[0]?.revision!==prepared.revision)throw new ApiError(409,'ai_cancelled','Asisten atau konteks percakapan telah berubah');};
   const modelCalls:{role:ModelRole|undefined;model:string;status:string;attempt:number}[]=[];
   const deadline=Date.now()+120000;
   const retryPause=async(attempt:number)=>{await this.wait(500*2**attempt+randomInt(0,251));await guard();};
   let lastMessages:AIMessage[]|undefined,lastModel:string|undefined;
-  const trace=config.trace_enabled?(event:AITraceEvent)=>{db.execute('INSERT INTO ai_trace_log(account_id,session_id,request_id,node,state,model,attempt,duration_ms,input,output,error) VALUES (?,?,?,?,?,?,?,?,?,?,?)',[account,session,id,event.node.slice(0,20),event.state.slice(0,20),event.model?.slice(0,100)??null,event.attempt??null,event.duration_ms??null,event.input!==undefined?JSON.stringify(event.input).slice(0,60000):null,event.output!==undefined?JSON.stringify(event.output).slice(0,60000):null,event.error?.slice(0,200)??null]).catch(()=>{});}:undefined;
+  const trace=config.trace_enabled?(event:AITraceEvent)=>{db.execute('INSERT INTO ai_trace_log(account_id,session_id,request_id,profile_type,node,state,model,attempt,duration_ms,input,output,error) VALUES (?,?,?,\'cs\',?,?,?,?,?,?,?,?)',[account,session,id,event.node.slice(0,20),event.state.slice(0,20),event.model?.slice(0,100)??null,event.attempt??null,event.duration_ms??null,event.input!==undefined?JSON.stringify(event.input).slice(0,60000):null,event.output!==undefined?JSON.stringify(event.output).slice(0,60000):null,event.error?.slice(0,200)??null]).catch(()=>{});}:undefined;
   const trackedTransport:AITransport=async(selected,messages,maxWords)=>{
    lastMessages=messages;lastModel=selected.model;
    const node=selected.call_role??'model';
@@ -399,7 +550,7 @@ export class AIService {
   let answer:string,agent:string|null=null,generationFailed=false,fallback:{reason:string;question:string}|undefined;
   let lastNode:string|undefined,lastTraceError:string|undefined,lastRawOutput:string|undefined,pendingImageId:string|undefined;
   config.onTrace=event=>{trace?.(event);if(event.node==='router'&&event.state==='routed')lastNode=String((event.output as {sub_agent?:unknown})?.sub_agent??lastNode);if(event.error){lastNode=event.node;lastTraceError=event.error;if(typeof event.output==='string')lastRawOutput=event.output;}};
-  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
+  try{const result=await runAgents(trackedTransport,config,prepared.messages,prepared.maxWords,{account,profile:prepared.profileId,session,customer:message.from,requestId:id,knowledge:prepared.knowledge,behavior:prepared.behavior,fallbackEnabled:true,pendingFallbacks:prepared.pendingFallbacks},{execute:async(name,query,context)=>{
    await guard();
    const start=Date.now();trace?.({node:name,state:'running',input:query});
    try{const result=await this.tools.execute(name,query,context);trace?.({node:name,state:'done',output:result,duration_ms:Date.now()-start});
@@ -434,12 +585,13 @@ export class AIService {
    if(!generationFailed&&!fallback&&pendingImageId){
     await guard();
     const readImage=async(imageId:string)=>{const file=await this.productImages.get(account,imageId);return {path:file.path,mimetype:file.mimetype,cleanup:async()=>{}};};
-    await sendBilled(account,manager,session,'media',{to:message.from,type:'image'as const,url:pendingImageId},'ai_image_'+id,readImage,guard).catch(()=>{});
+    const image=await sendBilled(account,manager,session,'media',{to:message.from,type:'image'as const,url:pendingImageId},'ai_image_'+id,readImage,guard).catch(()=>undefined);
+    if(image)await recordOutgoing(account,session,{customer:message.from,messageId:image.messageId,origin:'ai',type:'image',text:''}).catch(()=>{});
    }
-   await guard();const confirmation=await sendBilled(account,manager,session,'text',{to:message.from,text:answer},'ai_'+id,undefined,guard);if(fallbackId)await db.execute('UPDATE ai_fallbacks SET confirmation_message_id=? WHERE id=?',[confirmation.messageId,fallbackId]);
+   await guard();const confirmation=await sendBilled(account,manager,session,'text',{to:message.from,text:answer},'ai_'+id,undefined,guard);await recordOutgoing(account,session,{customer:message.from,messageId:confirmation.messageId,origin:'ai',text:answer}).catch(()=>{});if(fallbackId)await db.execute('UPDATE ai_fallbacks SET confirmation_message_id=? WHERE id=?',[confirmation.messageId,fallbackId]);
   }catch(error){status=error instanceof ApiError&&error.code==='ai_cancelled'?'cancelled':error instanceof ApiError&&error.code==='send_unknown'?'send_unknown':'send_failed';}
   finally{await stopTyping();}
-  if(status==='sent'&&fallbackId&&fallback&&prepared.fallbackNotify&&prepared.fallbackNumber)try{const notification=await sendBilled(account,manager,session,'text',{to:prepared.fallbackNumber,text:'Konfirmasi diperlukan ['+fallbackId+']\\nPelanggan: '+message.from+'\\nPertanyaan: '+fallback.question+'\\nKonteks: '+(prepared.routerContext??'-')+'\\nBalas pesan ini atau awali balasan dengan '+fallbackId+'.'},'fallback_team_'+id);await db.execute('UPDATE ai_fallbacks SET notification_message_id=? WHERE id=?',[notification.messageId,fallbackId]);}catch{await db.execute("UPDATE ai_fallbacks SET status='failed' WHERE id=?",[fallbackId]);}
+  if(status==='sent'&&fallbackId&&fallback&&prepared.fallbackNotify&&prepared.fallbackNumber)try{const notification=await sendBilled(account,manager,session,'text',{to:prepared.fallbackNumber,text:'Konfirmasi diperlukan ['+fallbackId+']\\nPelanggan: '+message.from+'\\nPertanyaan: '+fallback.question+'\\nKonteks: '+(prepared.routerContext??'-')+'\\nBalas pesan ini atau awali balasan dengan '+fallbackId+'.'},'fallback_team_'+id);await recordOutgoing(account,session,{customer:prepared.fallbackNumber,messageId:notification.messageId,origin:'system',text:'Konfirmasi diperlukan ['+fallbackId+']'}).catch(()=>{});await db.execute('UPDATE ai_fallbacks SET notification_message_id=? WHERE id=?',[notification.messageId,fallbackId]);}catch{await db.execute("UPDATE ai_fallbacks SET status='failed' WHERE id=?",[fallbackId]);}
   await transaction(async c=>{await lockAccount(c,account,true);await c.execute('UPDATE ai_usage SET status=? WHERE account_id=? AND request_id=?',[generationFailed&&status!=='cancelled'?'fallback_'+status:status,account,id]);if(status==='sent'){
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');const [rows]=await c.execute<RowDataPacket[]>('SELECT messages,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);
    if(!rows[0]||rows[0].revision!==prepared.revision)return;

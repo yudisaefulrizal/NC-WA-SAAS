@@ -15,29 +15,30 @@ const accounts:string[]=[];
 const assistant=new AIService();
 const product:Product={name:'Produk A',type:'product',description:'Produk ringan',price:125000,stock:10,active:true,image_id:null};
 const input={items:[{product_name:'Produk A',quantity:2}],notes:'Tolong siapkan'};
-async function fixture():Promise<ToolContext>{const account=randomUUID();accounts.push(account);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);return {account,session:'shop',customer:'628123456789',requestId:'request-1',knowledge:'Knowledge '+account,behavior:'Ramah'};}
+// Each fixture account runs session 'shop' on its own CS data profile, where products and orders live.
+async function fixture():Promise<ToolContext>{const account=randomUUID();accounts.push(account);await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[account,account+'@test.invalid','unused']);return {account,profile:await assistant.ensureSessionProfile(account,'shop'),session:'shop',customer:'628123456789',requestId:'request-1',knowledge:'Knowledge '+account,behavior:'Ramah'};}
 async function configure(scope:ToolContext,products:unknown,orders:unknown){return assistant.saveAssistant(scope.account,scope.session,{enabled:true,profile:{faq:scope.knowledge},behavior:scope.behavior,products_source:products,orders_source:orders});}
 after(async()=>{for(const id of accounts){await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);await db.execute('DELETE FROM accounts WHERE id=?',[id]);}await db.end();});
 
-test('Built-in product and order tables isolate tenant, session and customer; preserve price snapshots and status',async()=>{
- const a=await fixture(),b=await fixture(),data=new AIData();
- await data.saveProduct(a.account,a.session,'',product);await data.saveProduct(b.account,b.session,'',{...product,name:'Produk B',price:70000});
- assert.equal((await data.catalog(a,''))[0].name,'Produk A');assert.equal((await data.catalog(b,''))[0].name,'Produk B');assert.deepEqual(await data.catalog({...a,session:'other'},''),[]);
+test('Built-in product and order tables isolate tenant, data profile and customer; preserve price snapshots and status',async()=>{
+ const a=await fixture(),b=await fixture(),data=new AIData(),elsewhere={...a,profile:(await assistant.createDataProfile(a.account,{profile_type:'cs',name:'Lain'})).id};
+ await data.saveProduct(a.account,a.profile,'',product);await data.saveProduct(b.account,b.profile,'',{...product,name:'Produk B',price:70000});
+ assert.equal((await data.catalog(a,''))[0].name,'Produk A');assert.equal((await data.catalog(b,''))[0].name,'Produk B');assert.deepEqual(await data.catalog(elsewhere,''),[]);
  const result=await data.execute('create_order',JSON.stringify(input),a) as any;
- assert.equal(result.order.total,250000);assert.equal(result.order.customer,a.customer);assert.equal(result.order.status,'Pesanan masuk');assert.equal((await data.order(a.account,a.session,result.order.id))?.status,'pesanan_masuk');
- await data.saveProduct(a.account,a.session,product.name,{...product,price:200000});
- assert.equal((await new AIData().order(a.account,a.session,result.order.id,a.customer))?.total,250000);
- for(const scope of [b,{...a,session:'other'},{...a,customer:'628999999999'}])assert.deepEqual(await data.execute('check_order',result.order.id,scope),{order:null});
- await assert.rejects(data.updateOrder(b.account,b.session,result.order.id,{status:'selesai'}),{code:'not_found'});
- await data.updateOrder(a.account,a.session,result.order.id,{status:'diproses',notes:'Dikerjakan admin'});
+ assert.equal(result.order.total,250000);assert.equal(result.order.customer,a.customer);assert.equal(result.order.status,'Pesanan masuk');assert.equal((await data.order(a.account,a.profile,result.order.id))?.status,'pesanan_masuk');
+ await data.saveProduct(a.account,a.profile,product.name,{...product,price:200000});
+ assert.equal((await new AIData().order(a.account,a.profile,result.order.id,a.customer))?.total,250000);
+ for(const scope of [b,elsewhere,{...a,customer:'628999999999'}])assert.deepEqual(await data.execute('check_order',result.order.id,scope),{order:null});
+ await assert.rejects(data.updateOrder(b.account,b.profile,result.order.id,{status:'selesai'}),{code:'not_found'});
+ await data.updateOrder(a.account,a.profile,result.order.id,{status:'diproses',notes:'Dikerjakan admin'});
  assert.equal((await data.execute('check_order',result.order.id,a) as any).order.status,'Diproses');
 });
 
 test('Concurrent order creation is idempotent across restart and rejects conflicting payloads',async()=>{
- const scope=await fixture(),data=new AIData();await data.saveProduct(scope.account,scope.session,'',product);
+ const scope=await fixture(),data=new AIData();await data.saveProduct(scope.account,scope.profile,'',product);
  const orders=await Promise.all(Array.from({length:4},()=>data.createOrder(scope,input)));assert.equal(new Set(orders.map(o=>o.id)).size,1);
- await data.saveProduct(scope.account,scope.session,product.name,{...product,price:99,active:false});assert.deepEqual(await new AIData().createOrder(scope,input),orders[0]);
- assert.equal((await data.orders(scope.account,scope.session)).length,1);
+ await data.saveProduct(scope.account,scope.profile,product.name,{...product,price:99,active:false});assert.deepEqual(await new AIData().createOrder(scope,input),orders[0]);
+ assert.equal((await data.orders(scope.account,scope.profile)).length,1);
  await assert.rejects(data.createOrder(scope,{...input,notes:'Changed'}),{code:'idempotency_conflict'});
  await assert.rejects(data.createOrder({...scope,customer:'628999999999'},input),{code:'idempotency_conflict'});
  await assert.rejects(data.createOrder({...scope,requestId:'new'},input),{code:'invalid_request'});
@@ -45,35 +46,35 @@ test('Concurrent order creation is idempotent across restart and rejects conflic
 
 test('Product validation, insufficient stock and forged order prices or customer are rejected',async()=>{
  const scope=await fixture(),data=new AIData();
- for(const p of [{...product,price:-1},{...product,stock:1.5},{...product,active:'yes'},{...product,name:''}])await assert.rejects(data.saveProduct(scope.account,scope.session,'',p),{code:'invalid_request'});
- await data.saveProduct(scope.account,scope.session,'',product);
+ for(const p of [{...product,price:-1},{...product,stock:1.5},{...product,active:'yes'},{...product,name:''}])await assert.rejects(data.saveProduct(scope.account,scope.profile,'',p),{code:'invalid_request'});
+ await data.saveProduct(scope.account,scope.profile,'',product);
  for(const o of [{...input,customer:'628999999999'},{items:[{product_name:'Produk A',quantity:1,price:1}]},{items:[{product_name:'Produk A',quantity:0}]},{items:[{product_name:'Produk A',quantity:1},{product_name:'Produk A',quantity:1}]}])assert.throws(()=>orderInput(o),{code:'invalid_request'});
  await assert.rejects(data.execute('create_order',JSON.stringify({items:[{product_name:'Produk A',quantity:11}]}),scope),{code:'invalid_request'});
- assert.equal((await data.orders(scope.account,scope.session)).length,0);
+ assert.equal((await data.orders(scope.account,scope.profile)).length,0);
 });
 
 test('Independent endpoint sources keep encrypted tokens private and preserve built-in data',async()=>{
- const scope=await fixture(),other=await fixture(),data=new AIData();await data.saveProduct(scope.account,scope.session,'',product);
+ const scope=await fixture(),other=await fixture(),data=new AIData();await data.saveProduct(scope.account,scope.profile,'',product);
  const config=await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/products',token:'private-token'},{mode:'builtin'});
  assert.equal(config.products_source.has_token,true);assert.equal(config.orders_source.mode,'builtin');assert.ok(!JSON.stringify(config).includes('private-token'));assert.ok(!JSON.stringify(config).includes('secret'));
- const saved=await source(scope.account,scope.session,'products');assert.notEqual(saved.secret,'private-token');assert.equal(decrypt(saved.secret),'private-token');assert.equal((await assistant.assistant(other.account,other.session)).products_source.mode,'builtin');
- await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/products',token:''},{mode:'builtin'});assert.equal((await source(scope.account,scope.session,'products')).secret,saved.secret);
- await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/other',token:''},{mode:'builtin'});assert.equal((await source(scope.account,scope.session,'products')).secret,'');
+ const saved=await source(scope.account,scope.profile,'products');assert.notEqual(saved.secret,'private-token');assert.equal(decrypt(saved.secret),'private-token');assert.equal((await assistant.assistant(other.account,other.session)).products_source.mode,'builtin');
+ await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/products',token:''},{mode:'builtin'});assert.equal((await source(scope.account,scope.profile,'products')).secret,saved.secret);
+ await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/other',token:''},{mode:'builtin'});assert.equal((await source(scope.account,scope.profile,'products')).secret,'');
  await configure(scope,{mode:'builtin'},{mode:'builtin'});assert.equal((await data.catalog(scope,''))[0].name,product.name);
 });
 
 test('Custom products and built-in orders work together with the same normalized tool results',async()=>{
  const scope=await fixture();await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/products',token:'fixture'},{mode:'builtin'});
- let calls=0;const data=new AIData(async(config,payload,key)=>{calls++;assert.equal(config.endpoint,'https://8.8.8.8/products');assert.equal(decrypt(config.secret),'fixture');assert.equal(payload.action,'get_products');assert.deepEqual(payload.context,{account_id:scope.account,session_id:scope.session,customer:scope.customer,request_id:scope.requestId});assert.equal(key,digest(JSON.stringify([scope.account,scope.session,scope.customer,scope.requestId,'get_products',payload.query])));return {products:[product]};});
+ let calls=0;const data=new AIData(async(config,payload,key)=>{calls++;assert.equal(config.endpoint,'https://8.8.8.8/products');assert.equal(decrypt(config.secret),'fixture');assert.equal(payload.action,'get_products');assert.deepEqual(payload.context,{account_id:scope.account,data_profile_id:scope.profile,session_id:scope.session,customer:scope.customer,request_id:scope.requestId});assert.equal(key,digest(JSON.stringify([scope.account,scope.session,scope.customer,scope.requestId,'get_products',payload.query])));return {products:[product]};});
  assert.deepEqual(await data.execute('get_products','',scope),{products:[productForAI(product)]});const created=await data.execute('create_order',JSON.stringify(input),scope) as any;
- assert.equal(created.order.total,250000);assert.equal((await data.orders(scope.account,scope.session)).length,1);assert.equal(calls,2);
+ assert.equal(created.order.total,250000);assert.equal((await data.orders(scope.account,scope.profile)).length,1);assert.equal(calls,2);
 });
 
 test('Built-in products and custom orders route independently, validate customer and pass priced items',async()=>{
  const scope=await fixture();await configure(scope,{mode:'builtin'},{mode:'endpoint',endpoint:'https://8.8.8.8/orders'});
  const order={id:'EXT-1',customer:scope.customer,items:[{product_name:product.name,quantity:2,price:product.price}],total:250000,status:'pesanan_masuk',notes:input.notes};
- const actions:string[]=[];const data=new AIData(async(config,payload)=>{assert.equal(config.endpoint,'https://8.8.8.8/orders');actions.push(String(payload.action));if(payload.action==='create_order')assert.deepEqual(payload.query,{...input,items:order.items});return {order};});await data.saveProduct(scope.account,scope.session,'',product);
- assert.deepEqual(await data.execute('create_order',JSON.stringify(input),scope),{order:{...order,status:'Pesanan masuk'}});assert.deepEqual(await data.execute('check_order','EXT-1',scope),{order:{...order,status:'Pesanan masuk'}});assert.deepEqual(actions,['create_order','check_order']);assert.deepEqual(await data.orders(scope.account,scope.session),[]);
+ const actions:string[]=[];const data=new AIData(async(config,payload)=>{assert.equal(config.endpoint,'https://8.8.8.8/orders');actions.push(String(payload.action));if(payload.action==='create_order')assert.deepEqual(payload.query,{...input,items:order.items});return {order};});await data.saveProduct(scope.account,scope.profile,'',product);
+ assert.deepEqual(await data.execute('create_order',JSON.stringify(input),scope),{order:{...order,status:'Pesanan masuk'}});assert.deepEqual(await data.execute('check_order','EXT-1',scope),{order:{...order,status:'Pesanan masuk'}});assert.deepEqual(actions,['create_order','check_order']);assert.deepEqual(await data.orders(scope.account,scope.profile),[]);
  // The old "baru" status is no longer a valid order status, including from client endpoints.
  for(const bad of [{...order,customer:'628999999999'},{...order,id:'wrong'},{...order,total:1},{...order,status:'baru'}])await assert.rejects(new AIData(async()=>({order:bad})).execute('check_order','EXT-1',scope));
  await assert.rejects(new AIData(async()=>{throw Error('endpoint_timeout');}).execute('check_order','EXT-1',scope),/endpoint_timeout/);
@@ -81,10 +82,11 @@ test('Built-in products and custom orders route independently, validate customer
 
 test('send_product_image reports availability without ever dispatching WhatsApp itself',async()=>{
  const scope=await fixture(),data=new AIData();
- await data.saveProduct(scope.account,scope.session,'',product);
+ await data.saveProduct(scope.account,scope.profile,'',product);
  assert.deepEqual(await data.execute('send_product_image',product.name,scope),{available:false,reason:'Produk tidak ditemukan atau belum memiliki foto'});
- await data.saveProduct(scope.account,scope.session,product.name,{...product,image_id:'11111111-1111-1111-1111-111111111111'});
- assert.deepEqual(await data.execute('send_product_image',product.name,scope),{available:true,product_name:product.name,image_id:'11111111-1111-1111-1111-111111111111'});
+ const photo=randomUUID();await db.execute('INSERT INTO ai_product_images(id,account_id,data_profile_id,size_bytes) VALUES (?,?,?,1)',[photo,scope.account,scope.profile]);
+ await data.saveProduct(scope.account,scope.profile,product.name,{...product,image_id:photo});
+ assert.deepEqual(await data.execute('send_product_image',product.name,scope),{available:true,product_name:product.name,image_id:photo});
  assert.deepEqual(await data.execute('send_product_image','Produk tidak ada',scope),{available:false,reason:'Produk tidak ditemukan atau belum memiliki foto'});
 });
 
@@ -128,21 +130,21 @@ test('AI sees whether a product has a photo, never the internal image id',()=>{
  const withPhoto=productForAI({...base,image_id:'a'.repeat(32)});
  assert.equal(withPhoto.ada_foto,true);assert.equal('image_id' in withPhoto,false);
 });
-test('Deleting an order is scoped to its tenant and session',async()=>{
- const a=await fixture(),b=await fixture(),data=new AIData();
- await data.saveProduct(a.account,a.session,'',product);
+test('Deleting an order is scoped to its tenant and data profile',async()=>{
+ const a=await fixture(),b=await fixture(),data=new AIData(),elsewhere=(await assistant.createDataProfile(a.account,{profile_type:'cs',name:'Lain'})).id;
+ await data.saveProduct(a.account,a.profile,'',product);
  const {order}=await data.execute('create_order',JSON.stringify(input),a) as any;
- for(const [account,session] of [[b.account,a.session],[a.account,'other']])await assert.rejects(data.deleteOrder(account,session,order.id),{code:'not_found'});
- assert.deepEqual(await data.deleteOrder(a.account,a.session,order.id),{ok:true});
- assert.deepEqual(await data.orders(a.account,a.session),[]);assert.equal(await data.order(a.account,a.session,order.id),null);
- await assert.rejects(data.deleteOrder(a.account,a.session,order.id),{code:'not_found'});
+ for(const [account,profile] of [[b.account,a.profile],[a.account,elsewhere]])await assert.rejects(data.deleteOrder(account,profile,order.id),{code:'not_found'});
+ assert.deepEqual(await data.deleteOrder(a.account,a.profile,order.id),{ok:true});
+ assert.deepEqual(await data.orders(a.account,a.profile),[]);assert.equal(await data.order(a.account,a.profile,order.id),null);
+ await assert.rejects(data.deleteOrder(a.account,a.profile,order.id),{code:'not_found'});
  // Stock was never reserved by the order, so it is unchanged after deletion.
  assert.equal((await data.catalog(a,''))[0].stock,product.stock);
 });
 test('Orders can be marked paid, and migrating the old status enum renames baru to pesanan_masuk',async()=>{
  const {migrateAI}=await import('../src/ai-schema.js');
  const a=await fixture(),data=new AIData();
- await data.saveProduct(a.account,a.session,'',product);
+ await data.saveProduct(a.account,a.profile,'',product);
  const first=(await data.execute('create_order',JSON.stringify(input),a) as any).order;
  const second=(await data.execute('create_order',JSON.stringify({...input,notes:'Kedua'}),{...a,requestId:'request-2'}) as any).order;
  // Recreate the table shape from before this change: "baru" instead of "pesanan_masuk" and no "dibayar".
@@ -154,11 +156,11 @@ test('Orders can be marked paid, and migrating the old status enum renames baru 
  await migrateAI();await migrateAI();
  const [column]=await db.execute<any[]>("SELECT COLUMN_TYPE,COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ai_orders' AND COLUMN_NAME='status'");
  assert.equal(column[0].COLUMN_TYPE,"enum('pesanan_masuk','dibayar','diproses','selesai','dibatalkan')");assert.match(String(column[0].COLUMN_DEFAULT),/pesanan_masuk/);
- assert.equal((await data.order(a.account,a.session,first.id))?.status,'pesanan_masuk');
- assert.equal((await data.order(a.account,a.session,second.id))?.status,'diproses');
- await data.updateOrder(a.account,a.session,first.id,{status:'dibayar',notes:'Transfer diterima'});
- assert.equal((await data.order(a.account,a.session,first.id))?.status,'dibayar');
- for(const status of ['baru','lunas'])await assert.rejects(data.updateOrder(a.account,a.session,first.id,{status}),{code:'invalid_request'});
+ assert.equal((await data.order(a.account,a.profile,first.id))?.status,'pesanan_masuk');
+ assert.equal((await data.order(a.account,a.profile,second.id))?.status,'diproses');
+ await data.updateOrder(a.account,a.profile,first.id,{status:'dibayar',notes:'Transfer diterima'});
+ assert.equal((await data.order(a.account,a.profile,first.id))?.status,'dibayar');
+ for(const status of ['baru','lunas'])await assert.rejects(data.updateOrder(a.account,a.profile,first.id,{status}),{code:'invalid_request'});
 });
 test('Terstruktur tier: every provider profile and route carries it, runtime uses it, and migration copies it from Murah',async()=>{
  const {migrateAI}=await import('../src/ai-schema.js');const {encrypt}=await import('../src/payments.js');
