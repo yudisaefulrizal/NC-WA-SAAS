@@ -19,6 +19,8 @@ async function transaction<T>(account:string,fn:(c:PoolConnection)=>Promise<T>){
 export interface Product {name:string;type:'product'|'service';description:string;price:number;stock:number;active:boolean;image_id:string|null}
 function imageId(value:unknown){if(value===null||value===undefined||value==='')return null;const id=text(value,36,'Foto');if(!/^[0-9a-f-]{36}$/.test(id))throw invalid('Referensi foto tidak valid');return id;}
 export function productInput(value:unknown):Product{const p=record(value);if(p.type!=='product'&&p.type!=='service')throw invalid('Jenis produk/layanan tidak valid');if(typeof p.active!=='boolean')throw invalid('Status produk tidak valid');return {name:text(p.name,150,'Nama'),type:p.type,description:text(p.description??'',500,'Deskripsi',true),price:integer(p.price,1000000000,'Harga'),stock:integer(p.stock,1000000,'Stok/kapasitas'),active:p.active,image_id:imageId(p.image_id)};}
+// What the AI sees: whether a photo exists, not the internal image id (send_product_image works by name).
+export function productForAI({image_id,...product}:Product){return {...product,ada_foto:Boolean(image_id)};}
 function productRow(p:RowDataPacket):Product{return productInput({...p,price:Number(p.price),active:Boolean(p.active)});}
 export interface OrderInput {items:{product_name:string;quantity:number}[];notes:string}
 export function orderInput(value:unknown):OrderInput{const o=record(value);if(Object.keys(o).some(k=>!['items','notes'].includes(k)))throw invalid('Pesanan hanya menerima items dan notes');if(!Array.isArray(o.items)||!o.items.length||o.items.length>20)throw invalid('Isi 1–20 item pesanan');const items=o.items.map(value=>{const item=record(value);if(Object.keys(item).some(k=>!['product_name','quantity'].includes(k)))throw invalid('Item hanya menerima product_name dan quantity');return {product_name:text(item.product_name,150,'Nama produk'),quantity:integer(item.quantity,1000,'Jumlah',1)};});if(new Set(items.map(i=>i.product_name)).size!==items.length)throw invalid('Gabungkan produk yang sama dalam satu item');return {items,notes:text(o.notes??'',1000,'Catatan',true)};}
@@ -76,7 +78,7 @@ export class AIData implements AITools {
  }
  async execute(name:ToolName,query:string,scope:ToolContext):Promise<unknown>{
   if(name==='get_knowledge')return {knowledge:scope.knowledge};
-  if(name==='get_products')return {products:await this.catalog(scope,query)};
+  if(name==='get_products')return {products:(await this.catalog(scope,query)).map(productForAI)};
   if(name==='send_product_image'){
    // Resolving which image to send is data (used by every caller, including AI Studio's simulation);
    // actually dispatching it over WhatsApp is a side effect only ai.ts's process() performs, after this returns.

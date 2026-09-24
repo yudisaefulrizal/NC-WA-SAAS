@@ -6,7 +6,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {db} from '../src/db.js';
-import {AIData,source,sourceInput,endpointUrl,callEndpoint,orderInput,type Product} from '../src/ai-data.js';
+import {AIData,source,sourceInput,endpointUrl,callEndpoint,orderInput,productForAI,type Product} from '../src/ai-data.js';
 import {AIService} from '../src/ai.js';
 import type {ToolContext} from '../src/ai-agents.js';
 import {decrypt} from '../src/payments.js';
@@ -65,7 +65,7 @@ test('Independent endpoint sources keep encrypted tokens private and preserve bu
 test('Custom products and built-in orders work together with the same normalized tool results',async()=>{
  const scope=await fixture();await configure(scope,{mode:'endpoint',endpoint:'https://8.8.8.8/products',token:'fixture'},{mode:'builtin'});
  let calls=0;const data=new AIData(async(config,payload,key)=>{calls++;assert.equal(config.endpoint,'https://8.8.8.8/products');assert.equal(decrypt(config.secret),'fixture');assert.equal(payload.action,'get_products');assert.deepEqual(payload.context,{account_id:scope.account,session_id:scope.session,customer:scope.customer,request_id:scope.requestId});assert.equal(key,digest(JSON.stringify([scope.account,scope.session,scope.customer,scope.requestId,'get_products',payload.query])));return {products:[product]};});
- assert.deepEqual(await data.execute('get_products','',scope),{products:[product]});const created=await data.execute('create_order',JSON.stringify(input),scope) as any;
+ assert.deepEqual(await data.execute('get_products','',scope),{products:[productForAI(product)]});const created=await data.execute('create_order',JSON.stringify(input),scope) as any;
  assert.equal(created.order.total,250000);assert.equal((await data.orders(scope.account,scope.session)).length,1);assert.equal(calls,2);
 });
 
@@ -119,4 +119,11 @@ test('Authenticated product/order APIs enforce ownership, CSRF and immutable ord
   await request(app).get(base+'/products-image/'+uploaded.body.id).set('Cookie',cookie).expect(200).expect('Content-Type','image/jpeg');
   await request(app).get(base+'/products-image/'+uploaded.body.id).set('Cookie',other).expect(404);
  }finally{await gateway.stop();await rm(root,{recursive:true,force:true});}
+});
+
+test('AI sees whether a product has a photo, never the internal image id',()=>{
+ const base:Product={name:'Kopi Susu',type:'product',description:'',price:18000,stock:20,active:true,image_id:null};
+ assert.deepEqual(productForAI(base),{name:'Kopi Susu',type:'product',description:'',price:18000,stock:20,active:true,ada_foto:false});
+ const withPhoto=productForAI({...base,image_id:'a'.repeat(32)});
+ assert.equal(withPhoto.ada_foto,true);assert.equal('image_id' in withPhoto,false);
 });

@@ -3,7 +3,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {ai,callAI,composeKnowledge,profileFields,type AIConfig,type AIMessage,type AITransport,type ProfileField} from './ai.js';
 import {runAgents,updateRouterContext,type AITools} from './ai-agents.js';
 import {workflowState} from './ai-workflow.js';
-import {productInput,orderInput,record,type Order} from './ai-data.js';
+import {productInput,productForAI,orderInput,record,type Order} from './ai-data.js';
 import {transientAIError} from './ai-retry.js';
 import {ApiError} from './engine/sessions.js';
 import type {AITraceEvent} from './ai-models.js';
@@ -60,7 +60,7 @@ export class AIStudio {
    try{
     let result:unknown;
     if(name==='get_knowledge')result={knowledge};
-    else if(name==='get_products')result={products:products.filter(p=>p.active&&(!query||`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase())))};
+    else if(name==='get_products')result={products:products.filter(p=>p.active&&(!query||`${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase()))).map(productForAI)};
     else if(name==='check_order')result={order:sandbox.orders.find(o=>o.id===query.trim())??null};
     else if(name==='send_product_image'){
      // Sandbox never dispatches WhatsApp media; this only reports whether a real send would have found a photo.

@@ -249,3 +249,7 @@ Agent Layanan kini memanggil `create_order` dengan satu baris teks berformat `2 
 Workflow tersimpan yang belum memiliki node `pesanan` otomatis memakai default.
 
 Bukti: regresi penuh 158/159 pada MySQL sementara dengan satu kegagalan batas memori AI pra-eksisting; `scripts/browser-ai-studio-check.ts` lulus setelah diperbarui (jumlah node dan tiruan agent `transaksi` di skrip itu sudah usang sebelum perubahan ini). Uji provider nyata: `inclusionai/ling-3.0-flash-fin:free` menolak `response_format` ("structured outputs not support"), sedangkan `nvidia/nemotron-3-super-120b-a12b:free` menerima schema pesanan. Mode prompt dengan model ling belum terverifikasi karena provider gratis membalas HTTP 429 berulang saat pengujian.
+
+### Status pesanan dan info foto produk untuk AI — 24 September 2026
+
+Status pesanan `baru` ditampilkan sebagai "Pesanan masuk" di dashboard; nilai tersimpan dan API tetap `baru`. Hasil `get_products` untuk AI (tool nyata dan sandbox AI Studio) kini memuat `ada_foto` yang diturunkan dari `image_id`, tanpa mengirim id internal; prompt `send_product_image` meminta agent hanya memakai produk dengan `ada_foto=true`. Tidak ada kolom database baru. Asersi jeda di `test/ai.test.ts` disesuaikan dengan jeda awal sebelum read (tes retry sempat gagal sejak perubahan urutan balasan). Bukti: regresi penuh 159/160 dengan satu kegagalan batas memori AI pra-eksisting; pemeriksaan browser AI Studio lulus.

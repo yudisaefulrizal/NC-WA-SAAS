@@ -312,7 +312,8 @@ test('Transient provider failures retry with backoff, retain billing and record 
  let calls=0;const delays:number[]=[];
  const f=await fixture(async()=>{if(++calls<3)throw Error('ai_provider_http_503');return 'Jawaban';},false,async ms=>{delays.push(ms);});
  await f.service.incoming(f.id,f.manager,'shop',f.message('retry'));
- assert.equal(calls,3);assert.equal(f.sent(),1);assert.ok(delays[0]>=500&&delays[0]<=750);assert.ok(delays[1]>=1000&&delays[1]<=1250);
+ // delays[0] is the short pause before the read receipt; retry backoff follows.
+ assert.equal(calls,3);assert.equal(f.sent(),1);assert.ok(delays[0]>=200&&delays[0]<=1000);assert.ok(delays[1]>=500&&delays[1]<=750);assert.ok(delays[2]>=1000&&delays[2]<=1250);
  const usage=(await rows(f.id))[0],trace=typeof usage.model_calls==='string'?JSON.parse(usage.model_calls):usage.model_calls;
  assert.deepEqual(trace.filter((c:any)=>c.role==='profil_perusahaan').map((c:any)=>[c.status,c.attempt]),[['failed',1],['failed',2],['responded',3]]);
  assert.equal(usage.charged,usage.input_words+2);assert.equal(usage.status,'sent');
@@ -328,7 +329,8 @@ test('Permanent provider errors do not retry; exhausted retries send a single fa
 });
 
 test('Pause during retry cancels further calls and suppresses fallback',async()=>{
- let calls=0;const f=await fixture(async()=>{calls++;throw Error('ai_provider_http_503');},false,async()=>{await f.service.conversation(f.id,'shop','628123456789',{paused:true});});
+ // The first wait is the pause before the read receipt; the second is the retry backoff.
+ let calls=0,waits=0;const f=await fixture(async()=>{calls++;throw Error('ai_provider_http_503');},false,async()=>{if(++waits===2)await f.service.conversation(f.id,'shop','628123456789',{paused:true});});
  await f.service.incoming(f.id,f.manager,'shop',f.message('cancel-retry'));
  assert.equal(calls,1);assert.equal(f.sent(),0);assert.equal((await rows(f.id))[0].status,'cancelled');assert.equal((await f.service.wallet(f.id)).balance,10000);
 });
