@@ -21,7 +21,7 @@ import {ProductImageStore} from './ai-product-images.js';
 import {resolve} from 'node:path';
 export type AIMessage={role:'system'|'user'|'assistant';content:string};
 export type AIProvider='sumopod'|'compatible'|'openrouter';
-export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;tier_profiles?:Partial<Record<'cheap'|'medium'|'smart',{id:string;provider:AIProvider;endpoint:string;secret:string;model:string}>>;call_role?:ModelRole;provider:AIProvider;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;context_memory_limit:number;trace_enabled:boolean;credit_price:number;tidy_prompt?:string}
+export interface AIConfig {signal?:AbortSignal;workflow?:AgentWorkflow;onTrace?:(event:AITraceEvent)=>void;model_cheap?:string;model_medium?:string;model_smart?:string;tier_profiles?:Partial<Record<'cheap'|'medium'|'smart',{id:string;provider:AIProvider;endpoint:string;secret:string;model:string}>>;call_role?:ModelRole;response_format?:Record<string,unknown>;provider:AIProvider;endpoint:string;model:string;secret:string;input_rate:number;output_rate:number;memory_limit:number;context_memory_limit:number;trace_enabled:boolean;credit_price:number;tidy_prompt?:string}
 export const defaults:AIConfig={provider:'compatible',endpoint:'https://ai.sumopod.com/v1/chat/completions',model:'deepseek-v4-flash',secret:'',input_rate:1,output_rate:2,memory_limit:60,context_memory_limit:6,trace_enabled:false,credit_price:0,tidy_prompt:''};
 export const countWords=(text:string)=>text.match(/\S+/gu)?.length??0;
 // Product and price are handled by the dedicated products table (ai-data.ts), not free-text here.
@@ -45,7 +45,7 @@ export function chatEndpoint(value:string){let url:URL;try{url=new URL(value);}c
 export type AITransport=(config:AIConfig,messages:AIMessage[],maxWords:number)=>Promise<string>;
 // Validate and pin DNS. Never follow redirects carrying the provider credential.
 export function aiRequestPayload(config:AIConfig,messages:AIMessage[]){
- return {model:config.model,messages:[...messages],stream:false,max_tokens:2048,...(config.call_role==='router'&&config.workflow?.nodes.router.structured_output===true?{response_format:routerResponseFormat()}:{})};
+ return {model:config.model,messages:[...messages],stream:false,max_tokens:2048,...(config.response_format?{response_format:config.response_format}:config.call_role==='router'&&config.workflow?.nodes.router.structured_output===true?{response_format:routerResponseFormat()}:{})};
 }
 export const callAI:AITransport=async(config,messages,maxWords)=>{
  const {url,addresses}=await validatePublicUrl(config.endpoint);

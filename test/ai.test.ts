@@ -210,13 +210,14 @@ test('WhatsApp transaction creates a built-in order, support reads it using shar
  const {aiData}=await import('../src/ai-data.js');let orderId='';
  const transport:AITransport=async(_c,m)=>{
   if(m[0].content.startsWith('Anda adalah Context Agent'))return 'pelanggan-menunggu-pesanan';
+  if(m[0].content.startsWith('Anda adalah Agent Pesanan')){assert.deepEqual(JSON.parse(m[1].content).produk,['Produk asli tenant']);return JSON.stringify({lengkap:true,items:[{product_name:'Produk asli tenant',quantity:2}],notes:'Pesanan pelanggan'});}
   const input=m.filter(x=>x.role==='user').at(-1)!.content,checking=input==='Bagaimana statusnya?';
   assert.ok(!JSON.stringify(m).includes('KNOWLEDGE_PRIVATE'));
   if(m[0].content.startsWith('Anda adalah ROUTER')){if(checking)assert.ok(m[1].content.includes('pelanggan-menunggu-pesanan'));return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan meminta pesanan',isi_pesan:input});}
   const result=m.find(x=>x.content.startsWith('Tool result '+(checking?'check_order':'create_order')));
   if(result){const data=JSON.parse(result.content.slice(result.content.indexOf('{')));orderId=data.order.id;return JSON.stringify({answer:checking?'Status '+data.order.status:'Pesanan '+orderId+' tercatat'});}
   if(checking){assert.ok(m.some(x=>x.content.includes(orderId)));return JSON.stringify({tool:'check_order',query:orderId});}
-  if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_name:'Produk asli tenant',quantity:2}],notes:'Pesanan pelanggan'})});
+  if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:'2 Produk asli tenant, catatan: Pesanan pelanggan'});
   return JSON.stringify({tool:'get_products',query:'Produk asli tenant'});
  };
  const f=await fixture(transport,false,async()=>{},[],false,true);
@@ -337,9 +338,10 @@ test('Read tools retry once but uncertain order mutations are never replayed',as
   let executions=0;const f=await fixture(async(c,m)=>{
    if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan barang',isi_pesan:m.filter(x=>x.role==='user').at(-1)!.content});
    if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
+   if(c.call_role==='pesanan')return JSON.stringify({lengkap:true,items:[{product_name:'Produk',quantity:1}],notes:''});
    if(m.some(x=>x.content.startsWith('Tool result')))return JSON.stringify({answer:'Baik'});
    return JSON.stringify({tool:name,query:''});
-  },false,async()=>{},[],false,true,{execute:async()=>{if(++executions===1)throw Error('endpoint_http_503');return [];}});
+  },false,async()=>{},[],false,true,{execute:async tool=>{if(tool!==name)return {products:[{name:'Produk'}]};if(++executions===1)throw Error('endpoint_http_503');return [];}});
   await f.service.incoming(f.id,f.manager,'shop',f.message('tool-retry'));
   assert.equal(executions,name==='get_products'?2:1);assert.equal(f.sent(),1);assert.equal((await rows(f.id))[0].status,name==='get_products'?'sent':'fallback_sent');
  }

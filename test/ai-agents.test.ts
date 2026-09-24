@@ -5,6 +5,10 @@ import {defaults,type AIMessage,type AITransport} from '../src/ai.js';
 const context:ToolContext={account:'tenant-a',session:'shop',customer:'628123456789',requestId:'message-1',knowledge:'Bisnis A buka jam 9',behavior:'Ramah'};
 const messages:AIMessage[]=[{role:'system',content:'Bisnis A'},{role:'user',content:'Saya mencari frame ringan'},{role:'assistant',content:'Frame Basic tersedia'},{role:'user',content:'Saya ingin memesan itu'}];
 const route=(agent:AgentName,input=messages.at(-1)!.content)=>JSON.stringify({sub_agent:agent,s_p_o_konteks:'Pelanggan memesan frame',isi_pesan:input});
+// Reply of the Pesanan node and the JSON create_order then receives.
+const frameOrder={items:[{product_name:'Frame Basic',quantity:1}],notes:''};
+const pesanan=(order:object|null=frameOrder)=>JSON.stringify(order?{lengkap:true,...order}:{lengkap:false,items:[],notes:''});
+const catalog={products:[{name:'Frame Basic'},{name:'Frame Pro'}]};
 test('Router selects pending tickets and only selected questions reach the specialist',async()=>{
  const pendingFallbacks=[{id:'FB-A',question:'Persetujuan diskon khusus'},{id:'FB-B',question:'Penggantian bingkai rusak'}];
  for(const selected of [[],['FB-A']]){
@@ -42,14 +46,15 @@ test('Specialists receive shared history while router receives only latest input
  assert.equal(messages.length,4);
 });
 test('Tool loop passes trusted scope, shares results, and deduplicates identical calls',async()=>{
- let calls=0,executions=0;
- const result=await runAgents(async(_c,m)=>{
+ let calls=0,executions=0,nodeCalls=0;
+ const result=await runAgents(async(c,m)=>{
+  if(c.call_role==='pesanan'){nodeCalls++;assert.deepEqual(JSON.parse(m[1].content),{permintaan:'Frame Basic untuk pelanggan',produk:['Frame Basic','Frame Pro']});return pesanan();}
   calls++;if(calls===1)return route('layanan');
   if(calls<=3)return JSON.stringify({tool:'create_order',query:'Frame Basic untuk pelanggan'});
   assert.equal(m.filter(x=>x.content.includes('Tool result create_order')).length,2);
   return JSON.stringify({answer:'Pesanan simulasi dibuat.'});
- },defaults,messages,300,context,{async execute(name,query,scope){executions++;assert.equal(name,'create_order');assert.equal(query,'Frame Basic untuk pelanggan');assert.deepEqual(scope,context);assert.equal(Object.isFrozen(scope),true);return {order_id:'SIM-test',simulasi:true};}});
- assert.equal(executions,1);assert.equal(result.agent,'layanan');
+ },defaults,messages,300,context,{async execute(name,query,scope){assert.deepEqual(scope,context);assert.equal(Object.isFrozen(scope),true);if(name==='get_products')return catalog;executions++;assert.equal(name,'create_order');assert.deepEqual(JSON.parse(query),frameOrder);return {order_id:'SIM-test',simulasi:true};}});
+ assert.equal(executions,1);assert.equal(nodeCalls,1);assert.equal(result.agent,'layanan');
 });
 test('Invalid routes cannot dispatch agents or tools',async()=>{
  for(const raw of ['not JSON',route('profil_perusahaan','changed input'),JSON.stringify({sub_agent:'unknown',s_p_o_konteks:'S P O',isi_pesan:messages.at(-1)!.content}),JSON.stringify({sub_agent:'profil_perusahaan',s_p_o_konteks:'   ',isi_pesan:messages.at(-1)!.content})]){
@@ -89,11 +94,15 @@ test('Agent Lainnya can read knowledge, products, and order status without creat
 
 test('A specialist can correct invalid order input without repeating a successful mutation',async()=>{
  const {ApiError}=await import('../src/engine/sessions.js');let calls=0,mutations=0;
- const result=await runAgents(async()=>{
+ const result=await runAgents(async(c,m)=>{
+  if(c.call_role==='pesanan')return JSON.parse(m[1].content).permintaan==='unclear'?pesanan(null):JSON.parse(m[1].content).permintaan==='rejected'?pesanan({items:[{product_name:'Frame Pro',quantity:1}],notes:''}):pesanan();
   calls++;if(calls===1)return route('layanan');
-  if(calls<=4)return JSON.stringify({tool:'create_order',query:calls===2?'invalid':calls===3?'corrected':'different'});
+  if(calls===2)return JSON.stringify({tool:'create_order',query:'unclear'});
+  if(calls===3){assert.ok(m.at(-1)!.content.includes('order_unclear'));return JSON.stringify({tool:'create_order',query:'rejected'});}
+  if(calls===4){assert.ok(m.at(-1)!.content.includes('Pilih produk dahulu'));return JSON.stringify({tool:'create_order',query:'corrected'});}
+  if(calls===5)return JSON.stringify({tool:'create_order',query:'different'});
   return JSON.stringify({answer:'Pesanan tercatat'});
- },defaults,messages,300,context,{async execute(_name,query){if(query==='invalid')throw new ApiError(400,'invalid_request','Pilih produk dahulu');mutations++;return {order:{id:'ORD-1'}};}});
+ },defaults,messages,300,context,{async execute(name,query){if(name==='get_products')return catalog;if(JSON.parse(query).items[0].product_name==='Frame Pro')throw new ApiError(400,'invalid_request','Pilih produk dahulu');mutations++;return {order:{id:'ORD-1'}};}});
  assert.equal(result.answer,'Pesanan tercatat');assert.equal(mutations,1);
 });
 
@@ -130,12 +139,13 @@ test('Invalid router and specialist output is repaired once without replaying a 
  let routerCalls=0,specialistCalls=0,mutations=0;
  const result=await runAgents(async(c,m)=>{
   if(c.call_role==='router'){if(routerCalls++===0)return 'invalid';assert.ok(m.at(-1)!.content.includes('Output sebelumnya'));return route('layanan');}
+  if(c.call_role==='pesanan')return pesanan();
   specialistCalls++;
   if(specialistCalls===1)return JSON.stringify({tool:'create_order',query:'one'});
   if(specialistCalls===2)return '{broken';
   assert.ok(m.some(x=>x.content.includes('ORD-1')));assert.ok(m.at(-1)!.content.includes('Output sebelumnya'));
   return JSON.stringify({answer:'Pesanan tercatat'});
- },defaults,messages,300,context,{execute:async()=>{mutations++;return {id:'ORD-1'};}});
+ },defaults,messages,300,context,{execute:async name=>{if(name==='get_products')return catalog;mutations++;return {id:'ORD-1'};}});
  assert.equal(result.answer,'Pesanan tercatat');assert.equal(routerCalls,2);assert.equal(specialistCalls,3);assert.equal(mutations,1);
 });
 
@@ -144,4 +154,62 @@ test('Context repair retains the customer exchange and stops after one correctio
  const result=await updateRouterContext(async(_c,m)=>{calls++;if(calls===1)return 'invalid';assert.equal(JSON.parse(m[1].content).pesan_pelanggan,'ya');return 'pelanggan-menunggu-pesanan';},defaults,'ya','Baik');
  assert.equal(calls,2);assert.equal(result,'pelanggan-menunggu-pesanan');
  calls=0;await assert.rejects(updateRouterContext(async()=>{calls++;return 'invalid';},defaults,'ya','Baik'));assert.equal(calls,2);
+});
+
+test('Pesanan node runs in prompt mode by default and uses provider schema only when enabled',async()=>{
+ const {aiRequestPayload}=await import('../src/ai.js');const {defaultWorkflow}=await import('../src/ai-workflow.js');
+ const run=async(config:any,reply:(c:any)=>string)=>{let node:any,specialist=0;
+  await runAgents(async(c,m)=>{
+   if(c.call_role==='router')return route('layanan');
+   if(c.call_role==='pesanan'){node={config:c,messages:m};return reply(c);}
+   specialist++;
+   if(specialist===1)return JSON.stringify({tool:'get_products',query:'frame'});
+   if(specialist===2)return JSON.stringify({tool:'create_order',query:'satu frame yang karbon'});
+   return JSON.stringify({answer:'Pesanan dibuat'});
+  },config,messages,300,context,{async execute(name,query){if(name==='get_products')return query?{products:[{name:'Frame Karbon'}]}:catalog;assert.deepEqual(JSON.parse(query),{items:[{product_name:'Frame Karbon',quantity:1}],notes:''});return {order:{id:'ORD-1'}};}});
+  return node;};
+ const answer=JSON.stringify({lengkap:true,items:[{product_name:'Frame Karbon',quantity:1}],notes:''});
+ const config={...defaults,model_cheap:'cheap-test',model_medium:'medium-test'};
+ const prompt=await run(config,()=>answer);
+ assert.equal(prompt.config.model,'cheap-test');assert.equal(aiRequestPayload(prompt.config,[]).response_format,undefined);
+ // Products the specialist already looked up count as candidates even beyond the default listing.
+ assert.ok(prompt.messages[0].content.includes('"enum":["Frame Karbon","Frame Basic","Frame Pro"]'));
+ const workflow=defaultWorkflow();workflow.nodes.pesanan.structured_output=true;
+ const strict=await run({...config,workflow},()=>answer);
+ assert.equal((aiRequestPayload(strict.config,[]).response_format as any).json_schema.strict,true);
+ // A model without JSON Schema support rejects the request; the node retries once in prompt mode.
+ const events:any[]=[];
+ const fallback=await run({...config,workflow,onTrace:(e:any)=>events.push(e)},c=>{if(c.response_format)throw Error('ai_provider_http_400');return answer;});
+ assert.equal(fallback.config.response_format,undefined);assert.ok(events.some(e=>e.node==='pesanan'&&e.error==='structured_output_unsupported'));
+});
+test('Orders in the line format skip the Pesanan model entirely',async()=>{
+ let nodeCalls=0,specialist=0,created:unknown;const events:any[]=[];
+ await runAgents(async(c)=>{
+  if(c.call_role==='router')return route('layanan');
+  if(c.call_role==='pesanan')nodeCalls++;
+  if(++specialist===1)return JSON.stringify({tool:'create_order',query:'2 x frame basic; 1 x Frame Pro; catatan: bungkus kado'});
+  return JSON.stringify({answer:'Pesanan dibuat'});
+ },{...defaults,onTrace:e=>events.push(e)},messages,300,context,{async execute(name,query){if(name==='get_products')return catalog;created=JSON.parse(query);return {order:{id:'ORD-1'}};}});
+ assert.equal(nodeCalls,0);assert.deepEqual(created,{items:[{product_name:'Frame Basic',quantity:2},{product_name:'Frame Pro',quantity:1}],notes:'bungkus kado'});
+ assert.equal(events.find(e=>e.node==='pesanan').input.metode,'parser');
+});
+test('Pesanan output outside the catalog never reaches create_order',async()=>{
+ let mutations=0,nodeCalls=0,specialist=0;
+ await assert.rejects(runAgents(async(c,m)=>{
+  if(c.call_role==='router')return route('layanan');
+  if(c.call_role==='pesanan'){nodeCalls++;return pesanan({items:[{product_name:'Frame Palsu',quantity:1}],notes:''});}
+  if(++specialist===2)assert.ok(m.at(-1)!.content.includes('order_invalid'));
+  return JSON.stringify({tool:'create_order',query:'Frame Palsu '+specialist});
+ },defaults,messages,300,context,{async execute(name){if(name==='get_products')return catalog;mutations++;return {};}}),/ai_invalid_tool/);
+ assert.equal(mutations,0);assert.equal(nodeCalls,8);
+});
+test('Pesanan is skipped when there is nothing to order',async()=>{
+ let nodeCalls=0,specialist=0;
+ const result=await runAgents(async(c,m)=>{
+  if(c.call_role==='router')return route('layanan');
+  if(c.call_role==='pesanan')nodeCalls++;
+  if(++specialist===1)return JSON.stringify({tool:'create_order',query:'1 Frame Basic'});
+  assert.ok(m.at(-1)!.content.includes('order_unavailable'));return JSON.stringify({answer:'Produk belum tersedia'});
+ },defaults,messages,300,context,{async execute(name){assert.equal(name,'get_products');return {products:[]};}});
+ assert.equal(result.answer,'Produk belum tersedia');assert.equal(nodeCalls,0);
 });

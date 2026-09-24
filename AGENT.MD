@@ -237,3 +237,15 @@ Dialog template kini memakai alur tiga tahap: Dasar untuk nama dan pilihan data,
 ### Pembaruan Auto tambah — 24 September 2026
 
 Listener hanya mengenali pesan keluar dari sesi sendiri. Perintah memakai pemisah hubung agar dua metadata dapat dibawa sekaligus: `tambah-nama-kelompok`, misalnya `tambah-budi-alyusro`; `tambah` tanpa nama maupun kelompok tetap valid. Pesan pribadi menyimpan lawan bicara, sedangkan pesan grup menyimpan ID grup. Nama dan kelompok dibatasi 100 karakter dan kontak yang sudah ada tidak ditimpa.
+
+### Node Pesanan terstruktur — 24 September 2026
+
+Agent Layanan kini memanggil `create_order` dengan satu baris teks berformat `2 x Produk; 1 x Produk lain; catatan: ...`, bukan JSON di dalam string. Server mengubahnya menjadi JSON dalam tiga lapis (`src/ai-order-schema.ts`):
+
+1. Parser kode membaca format tersebut beserta variasinya (`2x`, `2 Produk`, `Produk x 2`, koma sebelum jumlah baru). Nama dicocokkan ke katalog tanpa membedakan huruf besar-kecil dan spasi, dan hanya diterima bila cocok ke tepat satu produk. Bila ada yang tidak pasti, parser mengembalikan null tanpa menebak.
+2. Node workflow `pesanan` (tier default Murah, model dapat diganti di AI Studio) hanya dipanggil bila parser gagal. Mode default adalah prompt: schema dan daftar produk ditulis di instruksi, sehingga model tanpa dukungan JSON Schema tetap bisa dipakai. `structured_output` dapat dicentang untuk mengirim `response_format`; bila provider menolak dengan HTTP 400, node mencoba ulang dalam mode prompt. Jawaban diperbaiki secara deterministik (JSON di dalam teks atau code fence, jumlah berupa string angka, huruf besar-kecil nama, item identik ganda) sebelum divalidasi.
+3. Kandidat nama produk berasal dari hasil `get_products` percakapan itu ditambah daftar katalog default, maksimal 100 nama. Katalog kosong, pesanan ambigu (`lengkap=false`), atau output di luar katalog dikembalikan ke Agent Layanan sebagai error 400 (`order_unavailable`, `order_unclear`, `order_invalid`) tanpa mutasi.
+
+Workflow tersimpan yang belum memiliki node `pesanan` otomatis memakai default. Rencana tier khusus structured dicatat di `plane-tier-structured.md`.
+
+Bukti: regresi penuh 158/159 pada MySQL sementara dengan satu kegagalan batas memori AI pra-eksisting; `scripts/browser-ai-studio-check.ts` lulus setelah diperbarui (jumlah node dan tiruan agent `transaksi` di skrip itu sudah usang sebelum perubahan ini). Uji provider nyata: `inclusionai/ling-3.0-flash-fin:free` menolak `response_format` ("structured outputs not support"), sedangkan `nvidia/nemotron-3-super-120b-a12b:free` menerima schema pesanan. Mode prompt dengan model ling belum terverifikasi karena provider gratis membalas HTTP 429 berulang saat pengujian.

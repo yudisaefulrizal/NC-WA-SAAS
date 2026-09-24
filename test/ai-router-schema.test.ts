@@ -35,3 +35,11 @@ test('Custom prompt and repair preserve enum contract before dispatch',async()=>
  },{...defaults,workflow},[{role:'user',content:'ya'}],300,{account:'test',session:'test',customer:'test',requestId:'test',knowledge:''});
  assert.equal(calls,2);assert.equal(result.agent,'layanan');
 });
+test('Workflows saved before the Pesanan node still load with its default',()=>{
+ const workflow=defaultWorkflow() as any;delete workflow.nodes.pesanan;workflow.nodes.router.prompt='Router lama';
+ const loaded=workflowInput(workflow);
+ assert.equal(loaded.nodes.router.prompt,'Router lama');assert.deepEqual(loaded.nodes.pesanan,defaultWorkflow().nodes.pesanan);assert.equal(loaded.nodes.pesanan.tier,'cheap');
+ assert.equal(loaded.nodes.pesanan.structured_output,false);
+ workflow.nodes.pesanan={...defaultWorkflow().nodes.pesanan,structured_output:true};assert.equal(workflowInput(workflow).nodes.pesanan.structured_output,true);
+ workflow.nodes.pesanan.structured_output='ya';assert.throws(()=>workflowInput(workflow));
+});

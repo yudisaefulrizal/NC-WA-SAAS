@@ -19,11 +19,12 @@ const {createApp}=await import('../src/app.js');
 const transport:AITransport=async(c,m)=>{
  await new Promise(r=>setTimeout(r,150));
  const input=m.filter(x=>x.role==='user').at(-1)!.content;
- if(c.call_role==='router')return JSON.stringify({sub_agent:'transaksi',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:input});
+ if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:input});
  if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
+ if(c.call_role==='pesanan')return JSON.stringify({lengkap:true,items:[{product_name:JSON.parse(m[1].content).produk[0],quantity:1}],notes:''});
  if(m.some(x=>x.content.startsWith('Tool result create_order')))return JSON.stringify({answer:'Pesanan SIM-1 dibuat.'});
- if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_id:'P-001',quantity:1}],notes:''})});
- return JSON.stringify({tool:'get_products',query:'P-001'});
+ if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:'1 produk pertama'});
+ return JSON.stringify({tool:'get_products',query:''});
 };
 const runner=new AIStudio(transport,async()=>({...defaults,model_cheap:'cheap-fixture',model_medium:'medium-fixture',model_smart:'smart-fixture',secret:'browser-fixture'}),async()=>{});
 const gateway=createGateway(()=>async(_id,update)=>{update({status:'connected'});return {close(){},async logout(){}};},temporary);
@@ -38,7 +39,9 @@ try{
  const context=await browser.newContext({viewport:{width:1440,height:1100}});await context.addCookies([{name:'ncwa_session',value:ownerToken,url:origin}]);
  const page=await context.newPage(),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/dashboard/admin/ai-studio');await page.locator('#studio').waitFor();
- assert.equal(await page.locator('[data-node]').count(),20);
+ assert.equal(await page.locator('[data-node]').count(),18);
+ await page.getByRole('button',{name:'Node Pesanan terstruktur',exact:true}).click();
+ assert.equal(await page.locator('#order-settings').isVisible(),true);assert.equal(await page.locator('#router-settings').isVisible(),false);assert.ok((await page.locator('#order-schema').textContent())?.includes('enum'));assert.equal(await page.locator('#node-tier').inputValue(),'cheap');
  await page.getByRole('button',{name:'Node Router',exact:true}).click();
  assert.ok((await page.locator('#router-schema').textContent())?.includes('enum'));
  await page.locator('#node-structured-output').check();

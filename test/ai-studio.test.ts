@@ -30,9 +30,10 @@ const transport:AITransport=async(c,m)=>{
  const latest=m.filter(x=>x.role==='user').at(-1)!.content;
  if(c.call_role==='router')return JSON.stringify({sub_agent:'layanan',s_p_o_konteks:'Pelanggan memesan produk',isi_pesan:latest});
  if(c.call_role==='context')return 'pelanggan-menunggu-pesanan';
+ if(c.call_role==='pesanan')return JSON.stringify({lengkap:true,items:[{product_name:'Produk uji',quantity:2}],notes:''});
  if(latest==='statusnya?')return m.some(x=>x.content.startsWith('Tool result check_order'))?JSON.stringify({answer:'Pesanan SIM-1 berstatus baru.'}):JSON.stringify({tool:'check_order',query:'SIM-1'});
  if(m.some(x=>x.content.startsWith('Tool result create_order')))return JSON.stringify({answer:'Pesanan SIM-1 dibuat.'});
- if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:JSON.stringify({items:[{product_name:'Produk uji',quantity:2}],notes:''})});
+ if(m.some(x=>x.content.startsWith('Tool result get_products')))return JSON.stringify({tool:'create_order',query:'2 Produk uji'});
  return JSON.stringify({tool:'get_products',query:'Produk uji'});
 };
 
@@ -57,7 +58,7 @@ test('Sandbox traces real agent/tool flow, keeps context across turns, and never
  const runner=new AIStudio(transport,configuration,async()=>{}),events:any[]=[];
  await runner.run(owner,await input(),e=>events.push(structuredClone(e)));
  assert.equal(events.at(-1).node,'output');assert.equal(events.at(-1).state,'done');assert.equal(events.at(-1).output.orders[0].total,300000);
- assert.ok(events.some(e=>e.node==='create_order'&&e.state==='done'));assert.ok(events.some(e=>e.node==='router'&&e.state==='routed'));
+ assert.ok(events.some(e=>e.node==='create_order'&&e.state==='done'));assert.ok(events.some(e=>e.node==='router'&&e.state==='routed'));assert.ok(events.some(e=>e.node==='pesanan'&&e.state==='done'&&e.output.items[0].quantity===2));
  const session=events[0].session;events.length=0;
  await runner.run(owner,{...await input('statusnya?'),session},e=>events.push(structuredClone(e)));
  assert.equal(events[0].context,'pelanggan-menunggu-pesanan');assert.equal(events.at(-1).output.agent,'layanan');assert.equal(events.at(-1).output.orders.length,1);assert.ok(events.some(e=>e.node==='check_order'&&e.output?.order?.id==='SIM-1'));
