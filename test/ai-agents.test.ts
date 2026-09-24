@@ -156,7 +156,7 @@ test('Context repair retains the customer exchange and stops after one correctio
  calls=0;await assert.rejects(updateRouterContext(async()=>{calls++;return 'invalid';},defaults,'ya','Baik'));assert.equal(calls,2);
 });
 
-test('Pesanan node runs in prompt mode by default and uses provider schema only when enabled',async()=>{
+test('Pesanan runs on the Terstruktur tier with provider schema, and in prompt mode on other tiers',async()=>{
  const {aiRequestPayload}=await import('../src/ai.js');const {defaultWorkflow}=await import('../src/ai-workflow.js');
  const run=async(config:any,reply:(c:any)=>string)=>{let node:any,specialist=0;
   await runAgents(async(c,m)=>{
@@ -169,18 +169,22 @@ test('Pesanan node runs in prompt mode by default and uses provider schema only 
   },config,messages,300,context,{async execute(name,query){if(name==='get_products')return query?{products:[{name:'Frame Karbon'}]}:catalog;assert.deepEqual(JSON.parse(query),{items:[{product_name:'Frame Karbon',quantity:1}],notes:''});return {order:{id:'ORD-1'}};}});
   return node;};
  const answer=JSON.stringify({lengkap:true,items:[{product_name:'Frame Karbon',quantity:1}],notes:''});
- const config={...defaults,model_cheap:'cheap-test',model_medium:'medium-test'};
- const prompt=await run(config,()=>answer);
- assert.equal(prompt.config.model,'cheap-test');assert.equal(aiRequestPayload(prompt.config,[]).response_format,undefined);
+ const config={...defaults,model_cheap:'cheap-test',model_medium:'medium-test',model_structured:'structured-test'};
+ // Default: the Terstruktur tier model, with the schema sent to the provider.
+ const strict=await run(config,()=>answer);
+ assert.equal(strict.config.model,'structured-test');assert.equal((aiRequestPayload(strict.config,[]).response_format as any).json_schema.strict,true);
  // Products the specialist already looked up count as candidates even beyond the default listing.
- assert.ok(prompt.messages[0].content.includes('"enum":["Frame Karbon","Frame Basic","Frame Pro"]'));
- const workflow=defaultWorkflow();workflow.nodes.pesanan.structured_output=true;
- const strict=await run({...config,workflow},()=>answer);
- assert.equal((aiRequestPayload(strict.config,[]).response_format as any).json_schema.strict,true);
+ assert.ok(strict.messages[0].content.includes('"enum":["Frame Karbon","Frame Basic","Frame Pro"]'));
+ // On another tier the schema only lives in the prompt, unless structured_output is switched on.
+ const cheap=defaultWorkflow();cheap.nodes.pesanan.tier='cheap';
+ const prompt=await run({...config,workflow:cheap},()=>answer);
+ assert.equal(prompt.config.model,'cheap-test');assert.equal(aiRequestPayload(prompt.config,[]).response_format,undefined);
+ const cheapStrict=defaultWorkflow();cheapStrict.nodes.pesanan.tier='cheap';cheapStrict.nodes.pesanan.structured_output=true;
+ assert.equal((aiRequestPayload((await run({...config,workflow:cheapStrict},()=>answer)).config,[]).response_format as any).json_schema.strict,true);
  // A model without JSON Schema support rejects the request; the node retries once in prompt mode.
  const events:any[]=[];
- const fallback=await run({...config,workflow,onTrace:(e:any)=>events.push(e)},c=>{if(c.response_format)throw Error('ai_provider_http_400');return answer;});
- assert.equal(fallback.config.response_format,undefined);assert.ok(events.some(e=>e.node==='pesanan'&&e.error==='structured_output_unsupported'));
+ const fallback=await run({...config,onTrace:(e:any)=>events.push(e)},c=>{if(c.response_format)throw Error('ai_provider_http_400');return answer;});
+ assert.equal(fallback.config.response_format,undefined);assert.equal(fallback.config.model,'structured-test');assert.ok(events.some(e=>e.node==='pesanan'&&e.error==='structured_output_unsupported'));
 });
 test('Orders in the line format skip the Pesanan model entirely',async()=>{
  let nodeCalls=0,specialist=0,created:unknown;const events:any[]=[];

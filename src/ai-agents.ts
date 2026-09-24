@@ -1,5 +1,5 @@
 import {routerOutputSchema,validateRouterOutput,type RouterAgentName} from './ai-router-schema.js';
-import {roleConfig} from './ai-models.js';
+import {roleConfig,schemaEnabled} from './ai-models.js';
 import {validatedAI} from './ai-retry.js';
 import type {AIConfig, AIMessage, AITransport} from './ai.js';
 import {aiData} from './ai-data.js';
@@ -47,7 +47,7 @@ async function structuredOrder(transport:AITransport,config:AIConfig,request:str
  if(!names.size)throw new ApiError(400,'order_unavailable','Belum ada produk aktif yang dapat dipesan.');
  const list=[...names],parsed=parseOrderText(request,list);
  if(parsed){config.onTrace?.({node:'pesanan',state:'done',input:{metode:'parser',permintaan:request},output:parsed});return JSON.stringify(parsed);}
- const node=roleConfig(config,'pesanan'),schema=config.workflow?.nodes.pesanan.structured_output===true;
+ const node=roleConfig(config,'pesanan'),schema=schemaEnabled(config,'pesanan');
  const messages:AIMessage[]=[{role:'system',content:(config.workflow?.nodes.pesanan.prompt??orderPrompt)+'\n'+orderSchemaInstruction(list)},{role:'user',content:JSON.stringify({permintaan:request,produk:list})}];
  const run=(format:boolean)=>validatedAI(transport,format?{...node,response_format:orderResponseFormat(list)}:node,messages,300,raw=>validateOrderOutput(extractOrderJson(raw),list),'Kembalikan hanya satu objek JSON dengan lengkap, items berisi product_name persis dari daftar produk dan quantity bilangan bulat, serta notes.');
  let order;

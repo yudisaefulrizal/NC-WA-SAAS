@@ -30,7 +30,7 @@ export class AIStudio {
   const base=await this.configuration();if(!base.secret)throw bad('Konfigurasikan koneksi AI di Pengaturan AI terlebih dahulu.');
   if(this.busy.has(owner))throw new ApiError(409,'studio_busy','Pengujian sebelumnya masih berjalan.');
   for(const [id,s] of this.sessions)if(Date.now()-s.touched>1800000&&!this.busy.has(s.owner))this.sessions.delete(id);
-  const signature=JSON.stringify([state.revision,knowledge,behavior,products,base.model,base.model_cheap,base.model_medium,base.model_smart,base.memory_limit]);
+  const signature=JSON.stringify([state.revision,knowledge,behavior,products,base.model,base.model_cheap,base.model_medium,base.model_smart,base.model_structured,base.memory_limit]);
   let id:string,sandbox:Sandbox;
   if(body.session){
    id=text(body.session,64);const found=this.sessions.get(id);

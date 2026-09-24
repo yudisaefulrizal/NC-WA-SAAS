@@ -4,6 +4,7 @@ import {routerAgentNames,routerOutputSchema,validateRouterOutput} from '../src/a
 import {agents,runAgents} from '../src/ai-agents.js';
 import {aiRequestPayload,defaults} from '../src/ai.js';
 import {defaultWorkflow,workflowInput} from '../src/ai-workflow.js';
+import {roleConfig} from '../src/ai-models.js';
 import {db} from '../src/db.js';
 after(()=>db.end());
 test('Router enum covers exactly the executable agents and rejects invalid routes',()=>{
@@ -38,8 +39,19 @@ test('Custom prompt and repair preserve enum contract before dispatch',async()=>
 test('Workflows saved before the Pesanan node still load with its default',()=>{
  const workflow=defaultWorkflow() as any;delete workflow.nodes.pesanan;workflow.nodes.router.prompt='Router lama';
  const loaded=workflowInput(workflow);
- assert.equal(loaded.nodes.router.prompt,'Router lama');assert.deepEqual(loaded.nodes.pesanan,defaultWorkflow().nodes.pesanan);assert.equal(loaded.nodes.pesanan.tier,'cheap');
+ assert.equal(loaded.nodes.router.prompt,'Router lama');assert.deepEqual(loaded.nodes.pesanan,defaultWorkflow().nodes.pesanan);assert.equal(loaded.nodes.pesanan.tier,'structured');
  assert.equal(loaded.nodes.pesanan.structured_output,false);
  workflow.nodes.pesanan={...defaultWorkflow().nodes.pesanan,structured_output:true};assert.equal(workflowInput(workflow).nodes.pesanan.structured_output,true);
  workflow.nodes.pesanan.structured_output='ya';assert.throws(()=>workflowInput(workflow));
+});
+test('Router sends its schema when moved to the Terstruktur tier, and uses that tier model',()=>{
+ const workflow=defaultWorkflow();workflow.nodes.router.tier='structured';
+ const config={...defaults,workflow,model_cheap:'cheap-test',model_structured:'structured-test'};
+ const selected=roleConfig(config,'router');
+ assert.equal(selected.model,'structured-test');
+ assert.deepEqual(aiRequestPayload(selected,[]).response_format,{type:'json_schema',json_schema:{name:'router_output',strict:true,schema:routerOutputSchema}});
+ // Other roles on the Terstruktur tier get its model but no schema; only Router and Pesanan have one.
+ workflow.nodes.layanan.tier='structured';
+ const layanan=roleConfig(config,'layanan');assert.equal(layanan.model,'structured-test');assert.equal(aiRequestPayload(layanan,[]).response_format,undefined);
+ assert.ok(workflowInput(workflow).nodes.router.tier==='structured');
 });

@@ -29,9 +29,11 @@ Mode `full_auto` disimpan per akun/sesi/pelanggan, default FALSE. Full auto meng
 
 Context Agent membaca pesan pelanggan dan jawaban final, lalu menghasilkan satu baris tiga kata `subjek-predikat-objek` (maksimal 200 karakter). Konteks disimpan di `ai_conversations.router_context` hanya setelah pengiriman berhasil dan revision masih sama, terpisah dari riwayat chat. Router menggunakan konteks ini untuk pesan seperti “ya”, “yang itu”, atau “cukup”, dan mengikuti intent baru bila topik berubah. Jika pembaruan konteks gagal/invalid, jawaban tetap dikirim dan konteks lama dikosongkan agar tidak menyesatkan. Takeover manual mengosongkan konteks router; Hapus konteks menghapus kedua memori. Dashboard menampilkan S-P-O terakhir. Migrasi `migrateAI` menambahkan kolom nullable secara idempoten; percakapan lama dimulai tanpa S-P-O.
 
-## Tiga tingkat model (khusus pemilik)
+## Empat tingkat model (khusus pemilik)
 
 Pengaturan `/dashboard/admin/ai` menyediakan model murah, sedang, dan cerdas dengan endpoint/API key bersama. Router, Context Agent, Pembuka, dan Penutup memakai murah; Informasi, Konsultasi, Transaksi, Dukungan, dan Keluhan memakai sedang; Lainnya memakai cerdas. Pembagian ini tetap berdasarkan peran, tanpa eskalasi atau fallback otomatis saat provider gagal. Tombol tes per tingkat menguji konfigurasi yang sudah disimpan.
+
+Tingkat keempat, Terstruktur (`structured`), menampung model yang mendukung JSON Schema strict. Node Pesanan memakainya secara default dan Router dapat dipindah ke sana; node yang punya schema otomatis mengirim `response_format` di tingkat ini. Kolom `model_structured` ditambahkan pada pengaturan AI dan profil provider, diisi dari model murah, dan rute `structured` disalin dari rute murah.
 
 Migrasi menambahkan `model_cheap`, `model_medium`, `model_smart` nullable. Nilai yang belum diatur memakai model lama agar migrasi tidak mengganti provider/model aktif. Nama model di prototype tidak otomatis diaktifkan. Pemilik memilih nama model yang tersedia pada providernya. Konfigurasi diambil sekali per turn agar perubahan setting tidak mengganti model di tengah turn.
 

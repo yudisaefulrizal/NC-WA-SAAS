@@ -160,3 +160,41 @@ test('Orders can be marked paid, and migrating the old status enum renames baru 
  assert.equal((await data.order(a.account,a.session,first.id))?.status,'dibayar');
  for(const status of ['baru','lunas'])await assert.rejects(data.updateOrder(a.account,a.session,first.id,{status}),{code:'invalid_request'});
 });
+test('Terstruktur tier: every provider profile and route carries it, runtime uses it, and migration copies it from Murah',async()=>{
+ const {migrateAI}=await import('../src/ai-schema.js');const {encrypt}=await import('../src/payments.js');
+ const [settings]=await db.query<any[]>('SELECT id FROM ai_settings WHERE id=1'),createdSettings=!settings.length;
+ if(createdSettings)await db.execute("INSERT INTO ai_settings(id,endpoint,model,secret) VALUES (1,'https://openrouter.ai/api/v1/chat/completions','legacy',?)",[encrypt('legacy-key')]);
+ try{
+  const base={name:'OpenRouter uji',provider:'openrouter',endpoint:'https://openrouter.ai/api/v1/chat/completions',apiKey:'key-1',model_cheap:'m-cheap',model_medium:'m-medium',model_smart:'m-smart'};
+  await assert.rejects(assistant.saveProviderProfile(base),{code:'invalid_request'});
+  const {id}=await assistant.saveProviderProfile({...base,model_structured:'m-structured'});
+  assert.equal((await assistant.providerProfiles()).profiles.find((p:any)=>p.id===id)?.model_structured,'m-structured');
+  const routes={cheap:{profileId:id},medium:{profileId:id},smart:{profileId:id}};
+  await assert.rejects(assistant.setProviderRoutes(routes),{code:'invalid_request'});
+  await assistant.setProviderRoutes({...routes,structured:{profileId:id}});
+  const config=await assistant.config();
+  assert.equal(config.tier_profiles?.structured?.model,'m-structured');assert.equal(config.tier_profiles?.cheap?.model,'m-cheap');
+  // New code running before `npm run migrate`: neither the column nor the route exists yet. Routing must keep
+  // every tier on its profile, and Terstruktur falls back to Murah instead of the whole config going legacy.
+  await db.query("DELETE FROM ai_provider_routes WHERE tier='structured'");
+  await db.query('ALTER TABLE ai_provider_profiles DROP COLUMN model_structured');
+  const early=await assistant.config();
+  assert.deepEqual([early.tier_profiles?.cheap?.model,early.tier_profiles?.medium?.model,early.tier_profiles?.smart?.model,early.tier_profiles?.structured?.model],['m-cheap','m-medium','m-smart','m-cheap']);
+  assert.equal(early.tier_profiles?.structured?.id,id);
+  const listed=(await assistant.providerProfiles()).profiles;assert.deepEqual(listed.map((p:any)=>p.id),[id]);assert.equal('secret' in listed[0],false);
+  await migrateAI();
+  // A database from before the tier existed: no structured model on the profile and no structured route.
+  await db.execute("UPDATE ai_provider_profiles SET model_structured='' WHERE id=?",[id]);
+  await db.query("DELETE FROM ai_provider_routes WHERE tier='structured'");
+  await db.query('UPDATE ai_settings SET model_structured=NULL WHERE id=1');
+  await migrateAI();await migrateAI();
+  const [route]=await db.query<any[]>("SELECT profile_id,model FROM ai_provider_routes WHERE tier='structured'");
+  assert.deepEqual({...route[0]},{profile_id:id,model:'m-cheap'});
+  assert.equal((await assistant.providerProfiles()).profiles.find((p:any)=>p.id===id)?.model_structured,'m-cheap');
+  assert.equal((await assistant.config()).tier_profiles?.structured?.model,'m-cheap');
+ }finally{
+  // Routing is global; leave later tests with the unrouted configuration they expect.
+  await db.query('DELETE FROM ai_provider_routes');await db.query('DELETE FROM ai_provider_profiles');
+  if(createdSettings)await db.query('DELETE FROM ai_settings WHERE id=1');else await db.query('UPDATE ai_settings SET profile_routing_enabled=FALSE WHERE id=1');
+ }
+});

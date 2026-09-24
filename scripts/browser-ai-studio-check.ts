@@ -41,7 +41,13 @@ try{
  await page.goto(origin+'/dashboard/admin/ai-studio');await page.locator('#studio').waitFor();
  assert.equal(await page.locator('[data-node]').count(),18);
  await page.getByRole('button',{name:'Node Pesanan terstruktur',exact:true}).click();
- assert.equal(await page.locator('#order-settings').isVisible(),true);assert.equal(await page.locator('#router-settings').isVisible(),false);assert.ok((await page.locator('#order-schema').textContent())?.includes('enum'));assert.equal(await page.locator('#node-tier').inputValue(),'cheap');
+ assert.equal(await page.locator('#order-settings').isVisible(),true);assert.equal(await page.locator('#router-settings').isVisible(),false);assert.ok((await page.locator('#order-schema').textContent())?.includes('enum'));assert.equal(await page.locator('#node-tier').inputValue(),'structured');
+ assert.equal(await page.locator('[data-node="pesanan"] small').textContent(),'Model terstruktur');
+ assert.equal(await page.locator('#node-structured-output').isChecked(),true);assert.equal(await page.locator('#node-structured-output').isDisabled(),true);
+ await page.locator('#node-tier').selectOption('cheap');
+ assert.equal(await page.locator('#node-structured-output').isChecked(),false);assert.equal(await page.locator('#node-structured-output').isDisabled(),false);
+ assert.equal(await page.locator('[data-node="pesanan"] small').textContent(),'Model murah');
+ await page.locator('#node-tier').selectOption('structured');assert.equal(await page.locator('#node-structured-output').isChecked(),true);
  await page.getByRole('button',{name:'Node Router',exact:true}).click();
  assert.ok((await page.locator('#router-schema').textContent())?.includes('enum'));
  await page.locator('#node-structured-output').check();
