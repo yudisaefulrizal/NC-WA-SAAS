@@ -72,9 +72,10 @@ test('CS Lembaga Pendidikan starts switched off; once on, clients create data pr
  assert.deepEqual(types.find((p:any)=>p.id==='pendidikan').tabs,['knowledge','edu_program','edu_jadwal','edu_dokumen','edu_kontak','usage','trial']);
  await t.api('post','/ai/data-profiles').send({profile_type:'pendidikan',name:'X',edu_kind:'universitas'}).expect(400);
  const created=(await t.api('post','/ai/data-profiles').send({profile_type:'pendidikan',name:"Ma'had Darul Ilmi",edu_kind:'pesantren'}).expect(201)).body;
- assert.deepEqual([created.profile_type,created.knowledge,created.edu.kind,created.edu.peserta,created.edu.wali,created.edu.pendidik],['pendidikan','','pesantren','santri','wali santri','ustadz/ustadzah']);
+ assert.deepEqual([created.profile_type,created.knowledge,created.edu.kind,created.edu.kind_label],['pendidikan','','pesantren','Pesantren']);
+ assert.equal('peserta' in created.edu,false);
  const plain=(await t.api('post','/ai/data-profiles').send({profile_type:'pendidikan',name:'Sekolah Tanpa Jenis'}).expect(201)).body;
- assert.deepEqual([plain.edu.kind,plain.edu.peserta],['sekolah','siswa']);
+ assert.equal(plain.edu.kind,'sekolah');
  // Text fields: each profile accepts only its own; FAQ is longer for an institution than for CS.
  const base='/ai/data-profiles/'+created.id;
  await t.api('patch',base+'/field').send({field:'edu_lembaga',value:'Pesantren di Lembang.'}).expect(200);
@@ -82,8 +83,9 @@ test('CS Lembaga Pendidikan starts switched off; once on, clients create data pr
  await t.api('patch',base+'/field').send({field:'edu_jadwal',value:'J'.repeat(8001)}).expect(400);
  await t.api('patch',base+'/field').send({field:'faq',value:'F'.repeat(4000)}).expect(200);
  await t.api('patch',base+'/field').send({field:'edu_kind',value:'kampus'}).expect(200);
- const updated=(await t.api('patch',base+'/field').send({field:'edu_peserta',value:'mahasantri'}).expect(200)).body;
- assert.deepEqual([updated.edu.kind,updated.edu.peserta,updated.edu.lembaga,updated.profile.faq.length],['kampus','mahasantri','Pesantren di Lembang.',4000]);
+ await t.api('patch',base+'/field').send({field:'edu_peserta',value:'mahasantri'}).expect(400);
+ const updated=(await t.api('patch',base+'/field').send({field:'behavior',value:'Sebut peserta didik sebagai mahasantri.'}).expect(200)).body;
+ assert.deepEqual([updated.edu.kind,updated.behavior,updated.edu.lembaga,updated.profile.faq.length],['kampus','Sebut peserta didik sebagai mahasantri.','Pesantren di Lembang.',4000]);
  await t.api('patch',base+'/field').send({field:'usaha',value:'Toko'}).expect(400);
  await t.api('patch',base+'/field').send({field:'products_source',value:{mode:'builtin'}}).expect(400);
  const cs=(await t.api('post','/ai/data-profiles').send({profile_type:'cs',name:'Kantin'}).expect(201)).body;
@@ -174,7 +176,7 @@ test('A session on CS Lembaga Pendidikan answers from live data, sends a documen
  assert.deepEqual(document.file,pdf);
  assert.deepEqual('text' in answer.content?answer.content.text:'','Ini brosurnya.');
  // Router and specialist are told who they speak for and how to address people.
- assert.ok(calls.find(c=>c.role==='router')!.messages[0].content.includes('Sebut peserta didik sebagai santri'));
+ assert.ok(calls.find(c=>c.role==='router')!.messages[0].content.includes('Anda melayani pesantren "Pesantren Uji". Ikuti Perilaku AI untuk cara menyebut'));
  assert.ok(calls.find(c=>c.role==='program')!.messages.some(m=>m.role==='system'&&m.content.includes('Tools tersedia: get_program, get_dokumen, kirim_dokumen')));
  const history=await eventually(()=>chatMessages(t.id,'psb',customer),h=>h.messages.filter(m=>m.origin==='ai').length===2);
  assert.deepEqual(history.messages.filter(m=>m.origin==='ai').map(m=>[m.type,m.text]),[['document','brosur.pdf'],['text','Ini brosurnya.']]);

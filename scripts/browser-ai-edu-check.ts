@@ -51,13 +51,13 @@ try{
  assert.ok(!tabs.includes('Pesanan Masuk'));
  // Knowledge: the institution's own sections, opening on Profil Lembaga with the pesantren terms.
  assert.deepEqual(await page.locator('[data-knowledge-tab]:visible').allTextContents(),['Perilaku AI','Profil Lembaga','FAQ','Fallback Tim']);
- assert.equal(await page.locator('#ai-form [name=edu_peserta]').inputValue(),'santri');
+ assert.equal(await page.locator('#ai-form [name=edu_kind]').inputValue(),'pesantren');assert.equal(await page.locator('#ai-form [name=edu_peserta]').count(),0);
  await page.locator('#ai-form [name=edu_lembaga]').fill('Pesantren di Lembang, berdiri 1998.');
  await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.lembaga==='Pesantren di Lembang, berdiri 1998.',profile.id,5000);
  await page.locator('#ai-form [name=edu_kind]').selectOption('kampus');
- await until(page,async id=>{const edu=(await (await fetch('/ai/data-profiles/'+id)).json()).edu;return edu.kind==='kampus'&&edu.peserta==='mahasiswa'&&edu.pendidik==='dosen';},profile.id,8000);
+ await until(page,async id=>{const edu=(await (await fetch('/ai/data-profiles/'+id)).json()).edu;return edu.kind==='kampus';},profile.id,8000);
  await page.locator('#ai-form [name=edu_kind]').selectOption('pesantren');
- await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.peserta==='santri',profile.id,8000);
+ await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.kind==='pesantren',profile.id,8000);
  await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-knowledge.png'});
  // Program: add, rename and describe; each edit saves itself.
  await page.locator('[data-ai-tab=edu_program]').click();
@@ -102,7 +102,7 @@ try{
  await contact.locator('input').nth(1).fill('0856-2200-1199');
  await until(page,async id=>{const c=await (await fetch('/ai/data-profiles/'+id+'/contacts')).json();return c.length===1&&c[0].kontak==='0856-2200-1199';},profile.id,6000);
  await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-kontak.png'});
- const saved=await stored();assert.deepEqual([saved.edu?.lembaga,saved.edu?.peserta],['Pesantren di Lembang, berdiri 1998.','santri']);
+ const saved=await stored();assert.deepEqual([saved.edu?.lembaga,saved.edu?.kind],['Pesantren di Lembang, berdiri 1998.','pesantren']);
  // Data Profil: the card counts programs, documents and contacts; managing it shows the education tabs.
  await page.locator('[data-ai-view="profiles"]').click();
  const card=page.locator('.ai-profile-card',{hasText:"Ma'had Darul Ilmi"});await card.waitFor();
@@ -117,7 +117,7 @@ try{
  await page.locator('#ai-profile-create-form [name=name]').fill('Kursus Bahasa');
  await page.locator('#ai-profile-create-form').getByRole('button',{name:'Buat data profil'}).click();
  await page.locator('#ai-manage-name',{hasText:'Kursus Bahasa'}).waitFor();
- assert.equal(await page.locator('#ai-form [name=edu_peserta]').inputValue(),'peserta');
+ assert.equal(await page.locator('#ai-form [name=edu_kind]').inputValue(),'kursus');
  assert.deepEqual(errors,[]);await context.close();
 
  // Phone: one-row tabs, program picker instead of the list, no sideways scroll on any education tab.

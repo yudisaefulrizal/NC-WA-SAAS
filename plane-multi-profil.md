@@ -94,7 +94,7 @@ Satu profil untuk sekolah, pesantren, ma'had, kampus, dan kursus. Profil ini han
 
 | Menu | Isi |
 | --- | --- |
-| Knowledge | Perilaku AI, Profil Lembaga (jenis lembaga, sebutan peserta didik/orang tua/pendidik, teks profil 4.000 karakter), FAQ (4.000 karakter), Fallback Tim |
+| Knowledge | Perilaku AI, Profil Lembaga (jenis lembaga dan teks profil 4.000 karakter; cara menyebut siswa, wali, dan pendidik ditulis di Perilaku AI), FAQ (4.000 karakter), Fallback Tim |
 | Program | Nama + deskripsi longtext (4.000 karakter), maksimal 50 program |
 | Jadwal | Satu longtext 8.000 karakter: pendaftaran, tes, kunjungan, event, kalender akademik, pengumuman |
 | Dokumen | Deskripsi (300 karakter) + file: PDF, Word, Excel, PowerPoint (maks. 10 MB) atau gambar JPG/PNG/WebP (maks. 5 MB); maksimal 20 dokumen dan 100 MB per data profil |

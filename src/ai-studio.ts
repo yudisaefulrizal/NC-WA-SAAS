@@ -29,13 +29,12 @@ export class AIStudio {
   let knowledge='',products:ReturnType<typeof productInput>[]=[],snapshot:EduSnapshot|undefined,identity:string|undefined;
   if(edu){
    const input=record(body.edu??{}),kind=eduKind(input.kind??'sekolah'),terms=eduKinds[kind];
-   const term=(value:unknown,fallback:string)=>text(value??'',eduLimits.term).trim()||fallback;
    const list=(value:unknown,max:number,name:string)=>{if(value===undefined)return [];if(!Array.isArray(value)||value.length>max)throw bad('Maksimal '+max+' '+name+' simulasi.');return value;};
    const programs=list(input.programs,eduLimits.programs,'program').map(programInput);if(new Set(programs.map(p=>p.name)).size!==programs.length)throw bad('Nama program harus unik.');
    const documents=list(input.documents,eduLimits.documents,'dokumen').map((value,index)=>{const d=record(value);const filename=text(d.nama_file,255).trim();if(!filename)throw bad('Nama file dokumen simulasi wajib diisi.');return {id:'SIM-DOC-'+(index+1),filename,media_type:d.jenis==='gambar'?'image' as const:'document' as const,description:text(d.deskripsi??'',eduLimits.documentDescription)};});
    if(new Set(documents.map(d=>d.filename)).size!==documents.length)throw bad('Nama file dokumen harus unik.');
    snapshot={lembaga:text(input.lembaga??'',eduLimits.lembaga),jadwal:text(input.jadwal??'',eduLimits.jadwal),faq:text(input.faq??'',eduLimits.faq),programs,contacts:list(input.contacts,eduLimits.contacts,'kontak').map(contactInput),documents};
-   identity=eduIdentity(text(input.name??'',100).trim()||'Lembaga Simulasi',{kind,kind_label:terms.label,peserta:term(input.peserta,terms.peserta),wali:term(input.wali,terms.wali),pendidik:term(input.pendidik,terms.pendidik),lembaga:snapshot.lembaga,jadwal:snapshot.jadwal});
+   identity=eduIdentity(text(input.name??'',100).trim()||'Lembaga Simulasi',{kind,kind_label:terms.label,lembaga:snapshot.lembaga,jadwal:snapshot.jadwal});
   }else{
    const profileInput=record(body.profile??{});
    const profile=Object.fromEntries(profileFields.map(field=>[field,text(profileInput[field]??'',2000)])) as Record<ProfileField,string>;

@@ -17,26 +17,26 @@ const missing=(message='Data tidak ditemukan')=>new ApiError(404,'not_found',mes
 function text(value:unknown,max:number,name:string,empty=true){if(typeof value!=='string'||value.length>max||(!empty&&!value.trim()))throw invalid(name+' tidak valid atau terlalu panjang');return value.trim();}
 function rowId(value:unknown,name:string){if(typeof value!=='string'||!/^[0-9a-f-]{36}$/.test(value))throw missing(name+' tidak ditemukan');return value;}
 
-// The institution kind only seeds how the AI addresses people; each term stays editable per data profile.
+// The institution kind tells the AI what it speaks for; how it addresses people is written in Perilaku AI.
 export const eduKinds={
- sekolah:{label:'Sekolah',peserta:'siswa',wali:'orang tua siswa',pendidik:'guru'},
- pesantren:{label:'Pesantren',peserta:'santri',wali:'wali santri',pendidik:'ustadz/ustadzah'},
- mahad:{label:"Ma'had",peserta:'thalib',wali:'wali thalib',pendidik:'ustadz/ustadzah'},
- kampus:{label:'Kampus',peserta:'mahasiswa',wali:'orang tua mahasiswa',pendidik:'dosen'},
- kursus:{label:'Kursus',peserta:'peserta',wali:'orang tua peserta',pendidik:'pengajar'},
+ sekolah:{label:'Sekolah'},
+ pesantren:{label:'Pesantren'},
+ mahad:{label:"Ma'had"},
+ kampus:{label:'Kampus'},
+ kursus:{label:'Kursus'},
 } as const;
 export type EduKind=keyof typeof eduKinds;
 export function eduKind(value:unknown):EduKind{if(typeof value!=='string'||!Object.hasOwn(eduKinds,value))throw invalid('Jenis lembaga tidak valid');return value as EduKind;}
-export const eduLimits={lembaga:4000,jadwal:8000,faq:4000,term:40,programs:50,programName:150,programDescription:4000,contacts:30,contactPart:100,contact:150,contactDescription:300,documents:20,documentDescription:300,imageBytes:5*1024*1024,documentBytes:10*1024*1024,totalBytes:100*1024*1024} as const;
+export const eduLimits={lembaga:4000,jadwal:8000,faq:4000,programs:50,programName:150,programDescription:4000,contacts:30,contactPart:100,contact:150,contactDescription:300,documents:20,documentDescription:300,imageBytes:5*1024*1024,documentBytes:10*1024*1024,totalBytes:100*1024*1024} as const;
 // Text fields of a CS Lembaga Pendidikan data profile, stored on ai_data_profiles; FAQ shares profil_faq with CS.
-export const eduTextFields={edu_lembaga:{column:'edu_lembaga',max:eduLimits.lembaga,label:'Profil lembaga'},edu_jadwal:{column:'edu_jadwal',max:eduLimits.jadwal,label:'Jadwal'},edu_peserta:{column:'edu_peserta',max:eduLimits.term,label:'Sebutan peserta didik'},edu_wali:{column:'edu_wali',max:eduLimits.term,label:'Sebutan orang tua'},edu_pendidik:{column:'edu_pendidik',max:eduLimits.term,label:'Sebutan pendidik'}} as const;
+export const eduTextFields={edu_lembaga:{column:'edu_lembaga',max:eduLimits.lembaga,label:'Profil lembaga'},edu_jadwal:{column:'edu_jadwal',max:eduLimits.jadwal,label:'Jadwal'}} as const;
 export function eduView(row:RowDataPacket){
  const kind=(Object.hasOwn(eduKinds,String(row.edu_kind))?row.edu_kind:'sekolah') as EduKind,defaults=eduKinds[kind];
- return {kind,kind_label:defaults.label,peserta:String(row.edu_peserta||defaults.peserta),wali:String(row.edu_wali||defaults.wali),pendidik:String(row.edu_pendidik||defaults.pendidik),lembaga:String(row.edu_lembaga??''),jadwal:String(row.edu_jadwal??'')};
+ return {kind,kind_label:defaults.label,lembaga:String(row.edu_lembaga??''),jadwal:String(row.edu_jadwal??'')};
 }
-// What the router and specialists are told about the institution they speak for.
+// What the router and specialists are told about the institution they speak for; forms of address come from Perilaku AI.
 export function eduIdentity(name:string,view:ReturnType<typeof eduView>){
- return `Anda melayani ${view.kind_label.toLowerCase()} "${name}". Sebut peserta didik sebagai ${view.peserta}, orang tua sebagai ${view.wali}, dan pendidik sebagai ${view.pendidik}.`;
+ return `Anda melayani ${view.kind_label.toLowerCase()} "${name}". Ikuti Perilaku AI untuk cara menyebut peserta didik, orang tua, dan pendidik.`;
 }
 
 export interface EduProgram {id:string;name:string;description:string}

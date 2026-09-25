@@ -43,9 +43,8 @@ const fail=(message:string)=>new ApiError(400,'invalid_request',message);
 // The runtime pipeline of each profile a session can run.
 const pipelines:Record<string,Pipeline>={cs:csPipeline,pendidikan:eduPipeline};
 const faqLimit=(type:string)=>type==='pendidikan'?eduLimits.faq:2000;
-// Content columns of a new data profile: copied from another one, or empty (CS Lembaga Pendidikan starts from
-// its institution kind's terms).
-function eduColumns(from?:RowDataPacket,kind?:EduKind){const k=(from?String(from.edu_kind):kind)??'sekolah',terms=eduKinds[(Object.hasOwn(eduKinds,k)?k:'sekolah') as EduKind];return {edu_kind:k,edu_peserta:String(from?.edu_peserta??terms.peserta),edu_wali:String(from?.edu_wali??terms.wali),edu_pendidik:String(from?.edu_pendidik??terms.pendidik),edu_lembaga:String(from?.edu_lembaga??''),edu_jadwal:String(from?.edu_jadwal??'')};}
+// Content columns of a new data profile: copied from another one, or empty with the chosen institution kind.
+function eduColumns(from?:RowDataPacket,kind?:EduKind){const k=(from?String(from.edu_kind):kind)??'sekolah';return {edu_kind:Object.hasOwn(eduKinds,k)?k:'sekolah',edu_lembaga:String(from?.edu_lembaga??''),edu_jadwal:String(from?.edu_jadwal??'')};}
 function integer(value:unknown,min:number,max:number,name:string){if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)throw fail(name+' di luar batas');return Number(value);}
 function text(value:unknown,max:number,name:string){if(typeof value!=='string'||value.length>max)throw fail(name+' tidak valid atau terlalu panjang');return value.trim();}
 function provider(value:unknown):AIProvider{if(value==='sumopod'||value==='compatible'||value==='openrouter')return value;throw fail('Provider AI tidak valid');}
