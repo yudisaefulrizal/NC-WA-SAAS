@@ -4,7 +4,7 @@ import {activeWorkflow,profileDefinition,enabledProfiles} from './ai-profiles.js
 import {transientAIError} from './ai-retry.js';
 import {publicSources,sourceInput,saveSource,builtinSource} from './ai-data.js';
 import {runAgents,updateRouterContext,defaultTools,csPipeline,type AITools,type Pipeline} from './ai-agents.js';
-import {eduData,eduPipeline,eduView,eduIdentity,eduKinds,eduKind,eduLimits,eduTextFields,documentMarker,sentDocuments,type EduKind} from './ai-edu.js';
+import {eduData,eduPipeline,eduView,eduIdentity,eduLimits,eduTextFields,documentMarker,sentDocuments} from './ai-edu.js';
 import {randomInt,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {request} from 'node:https';
@@ -43,8 +43,8 @@ const fail=(message:string)=>new ApiError(400,'invalid_request',message);
 // The runtime pipeline of each profile a session can run.
 const pipelines:Record<string,Pipeline>={cs:csPipeline,pendidikan:eduPipeline};
 const faqLimit=(type:string)=>type==='pendidikan'?eduLimits.faq:2000;
-// Content columns of a new data profile: copied from another one, or empty with the chosen institution kind.
-function eduColumns(from?:RowDataPacket,kind?:EduKind){const k=(from?String(from.edu_kind):kind)??'sekolah';return {edu_kind:Object.hasOwn(eduKinds,k)?k:'sekolah',edu_lembaga:String(from?.edu_lembaga??''),edu_jadwal:String(from?.edu_jadwal??'')};}
+// Content columns of a new data profile: copied from another one, or empty.
+function eduColumns(from?:RowDataPacket){return {edu_lembaga:String(from?.edu_lembaga??''),edu_jadwal:String(from?.edu_jadwal??'')};}
 function integer(value:unknown,min:number,max:number,name:string){if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)throw fail(name+' di luar batas');return Number(value);}
 function text(value:unknown,max:number,name:string){if(typeof value!=='string'||value.length>max)throw fail(name+' tidak valid atau terlalu panjang');return value.trim();}
 function provider(value:unknown):AIProvider{if(value==='sumopod'||value==='compatible'||value==='openrouter')return value;throw fail('Provider AI tidak valid');}
@@ -156,7 +156,7 @@ export class AIService {
   if(!profile)throw new ApiError(409,'no_profile','Pasang profil AI ke sesi ini terlebih dahulu.');
   if(!(await enabledProfiles()).has(profile.profile_type))throw new ApiError(409,'profile_disabled','Profil AI ini sedang dinonaktifkan admin.');
   config.workflow=await activeWorkflow(profile.profile_type) as AgentWorkflow;
-  const pipeline=pipelines[profile.profile_type]??csPipeline,identity='edu' in assistant&&assistant.edu?eduIdentity(profile.name,assistant.edu):undefined;
+  const pipeline=pipelines[profile.profile_type]??csPipeline,identity=profile.profile_type==='pendidikan'?eduIdentity(profile.name):undefined;
   const id=digest(JSON.stringify(['trial',account,session,randomUUID()]));
   const messages:AIMessage[]=[{role:'user',content:question}];
   const inputWords=countWords(question);
@@ -213,10 +213,10 @@ export class AIService {
   return id;
  }
  private async uniqueName(c:PoolConnection,account:string,base:string){const [rows]=await c.execute<RowDataPacket[]>('SELECT name FROM ai_data_profiles WHERE account_id=? FOR UPDATE',[account]);const names=new Set(rows.map(row=>String(row.name).toLowerCase()));let name=base.slice(0,100);for(let n=2;names.has(name.toLowerCase());n++)name=base.slice(0,94)+' ('+n+')';return name;}
- private async insertDataProfile(c:PoolConnection,account:string,type:string,name:string,from?:RowDataPacket,kind?:EduKind){
+ private async insertDataProfile(c:PoolConnection,account:string,type:string,name:string,from?:RowDataPacket){
   const [count]=await c.execute<RowDataPacket[]>('SELECT COUNT(*) AS n FROM ai_data_profiles WHERE account_id=?',[account]);
   if(Number(count[0].n)>=100)throw new ApiError(409,'data_profile_limit','Maksimal 100 data profil per akun.');
-  const id=randomUUID(),columns=profileFields.map(field=>'profil_'+field),edu=eduColumns(from,kind);
+  const id=randomUUID(),columns=profileFields.map(field=>'profil_'+field),edu=eduColumns(from);
   await c.execute(`INSERT INTO ai_data_profiles(id,account_id,profile_type,name,behavior,fallback_number,fallback_notify,${columns.join(',')},${Object.keys(edu).join(',')}) VALUES (?,?,?,?,?,?,?,${columns.map(()=>'?').join(',')},${Object.keys(edu).map(()=>'?').join(',')})`,[id,account,type,name,String(from?.behavior??''),String(from?.fallback_number??''),Boolean(from?.fallback_notify),...columns.map(column=>String(from?.[column]??'')),...Object.values(edu)]);
   return id;
  }
@@ -250,7 +250,6 @@ export class AIService {
  async createDataProfile(account:string,body:unknown){
   const input=object(body),name=text(input.name,100,'Nama data profil');if(!name)throw fail('Nama data profil wajib diisi');
   const copyFrom=input.copy_from===undefined?undefined:this.dataProfileId(input.copy_from);
-  const kind=input.edu_kind===undefined?undefined:eduKind(input.edu_kind);
   const images=new Map<string,string>(),documents:string[]=[];
   let id:string;
   try{
@@ -260,7 +259,7 @@ export class AIService {
     else type=profileDefinition(input.profile_type).id;
     if(!(await enabledProfiles()).has(type))throw new ApiError(409,'profile_disabled','Profil AI ini sedang dinonaktifkan admin.');
     const [taken]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE account_id=? AND name=? FOR UPDATE',[account,name]);if(taken[0])throw new ApiError(409,'name_taken','Nama data profil sudah dipakai.');
-    const created=await this.insertDataProfile(c,account,type,name,from,kind);
+    const created=await this.insertDataProfile(c,account,type,name,from);
     if(copyFrom){
      // A duplicate owns its own copy of every photo, so deleting either data profile never breaks the other.
      const [photos]=await c.execute<RowDataPacket[]>('SELECT id FROM ai_product_images WHERE account_id=? AND data_profile_id=?',[account,copyFrom]);
@@ -332,7 +331,6 @@ export class AIService {
   const type=await this.profileType(account,profile);
   if(field==='faq'){await db.execute('UPDATE ai_data_profiles SET profil_faq=?,revision=revision+1 WHERE id=? AND account_id=?',[text(value,faqLimit(type),'FAQ'),profile,account]);return;}
   if(type==='pendidikan'){
-   if(field==='edu_kind'){await db.execute('UPDATE ai_data_profiles SET edu_kind=?,revision=revision+1 WHERE id=? AND account_id=?',[eduKind(value),profile,account]);return;}
    if(Object.hasOwn(eduTextFields,field)){const spec=eduTextFields[field as keyof typeof eduTextFields];await db.execute(`UPDATE ai_data_profiles SET ${spec.column}=?,revision=revision+1 WHERE id=? AND account_id=?`,[text(value,spec.max,spec.label),profile,account]);return;}
   }
   if(type==='cs'&&profileFields.includes(field as ProfileField)){
@@ -513,7 +511,7 @@ export class AIService {
    const [current]=await c.execute<RowDataPacket[]>('SELECT a.enabled,p.*,p.id AS data_profile_id FROM ai_assistants a JOIN ai_data_profiles p ON p.id=a.data_profile_id AND p.account_id=a.account_id JOIN ai_profile_types t ON t.id=p.profile_type AND t.enabled=TRUE WHERE a.account_id=? AND a.session_id=? AND p.profile_type=?',[account,session,type]);if(!current[0]?.enabled)return;
    // CS knowledge is a snapshot taken here; the education tools read the data profile when they run.
    const knowledge=type==='cs'?composeKnowledge(Object.fromEntries(profileFields.map(field=>[field,String(current[0]['profil_'+field]??'')])) as Record<ProfileField,string>):'';
-   const identity=type==='pendidikan'?eduIdentity(String(current[0].name),eduView(current[0])):undefined;
+   const identity=type==='pendidikan'?eduIdentity(String(current[0].name)):undefined;
    const [limits]=await c.query<RowDataPacket[]>('SELECT memory_limit FROM ai_settings WHERE id=1 FOR SHARE');
    await c.execute("INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",[account,session,message.from]);
    const [conversations]=await c.execute<RowDataPacket[]>('SELECT paused,messages,revision,router_context FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',[account,session,message.from]);if(conversations[0].paused)return;

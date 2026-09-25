@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {ai,callAI,composeKnowledge,profileFields,type AIConfig,type AIMessage,type AITransport,type ProfileField} from './ai.js';
 import {runAgents,updateRouterContext,type AITools} from './ai-agents.js';
-import {eduTool,eduIdentity,eduKind,eduKinds,eduLimits,eduToolNames,programInput,contactInput,documentMarker,type EduSnapshot,type EduToolName} from './ai-edu.js';
+import {eduTool,eduIdentity,eduLimits,eduToolNames,programInput,contactInput,documentMarker,type EduSnapshot,type EduToolName} from './ai-edu.js';
 import {workflowState,profileDefinition} from './ai-profiles.js';
 import type {AgentWorkflow} from './ai-models.js';
 import {productInput,productForAI,orderForAI,orderInput,record,type Order} from './ai-data.js';
@@ -28,13 +28,13 @@ export class AIStudio {
   const pipeline=profileDefinition(body.profile_type??'cs'),edu=pipeline.id==='pendidikan';
   let knowledge='',products:ReturnType<typeof productInput>[]=[],snapshot:EduSnapshot|undefined,identity:string|undefined;
   if(edu){
-   const input=record(body.edu??{}),kind=eduKind(input.kind??'sekolah'),terms=eduKinds[kind];
+   const input=record(body.edu??{});
    const list=(value:unknown,max:number,name:string)=>{if(value===undefined)return [];if(!Array.isArray(value)||value.length>max)throw bad('Maksimal '+max+' '+name+' simulasi.');return value;};
    const programs=list(input.programs,eduLimits.programs,'program').map(programInput);if(new Set(programs.map(p=>p.name)).size!==programs.length)throw bad('Nama program harus unik.');
    const documents=list(input.documents,eduLimits.documents,'dokumen').map((value,index)=>{const d=record(value);const filename=text(d.nama_file,255).trim();if(!filename)throw bad('Nama file dokumen simulasi wajib diisi.');return {id:'SIM-DOC-'+(index+1),filename,media_type:d.jenis==='gambar'?'image' as const:'document' as const,description:text(d.deskripsi??'',eduLimits.documentDescription)};});
    if(new Set(documents.map(d=>d.filename)).size!==documents.length)throw bad('Nama file dokumen harus unik.');
    snapshot={lembaga:text(input.lembaga??'',eduLimits.lembaga),jadwal:text(input.jadwal??'',eduLimits.jadwal),faq:text(input.faq??'',eduLimits.faq),programs,contacts:list(input.contacts,eduLimits.contacts,'kontak').map(contactInput),documents};
-   identity=eduIdentity(text(input.name??'',100).trim()||'Lembaga Simulasi',{kind,kind_label:terms.label,lembaga:snapshot.lembaga,jadwal:snapshot.jadwal});
+   identity=eduIdentity(text(input.name??'',100).trim()||'Lembaga Simulasi');
   }else{
    const profileInput=record(body.profile??{});
    const profile=Object.fromEntries(profileFields.map(field=>[field,text(profileInput[field]??'',2000)])) as Record<ProfileField,string>;

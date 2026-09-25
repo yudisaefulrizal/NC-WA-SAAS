@@ -217,9 +217,9 @@ async function migrateProfiles(){
 // CS Lembaga Pendidikan: its text fields live on ai_data_profiles (FAQ reuses profil_faq); programs, contacts and
 // documents get their own tables, removed with the data profile. Re-runnable.
 async function migrateEducation(){
- for(const [column,definition] of [['edu_kind',"VARCHAR(20) NOT NULL DEFAULT 'sekolah'"],['edu_lembaga','TEXT NULL'],['edu_jadwal','TEXT NULL']])if(!await hasColumn('ai_data_profiles',column))await db.query(`ALTER TABLE ai_data_profiles ADD COLUMN ${column} ${definition}`);
- // Forms of address moved into Perilaku AI; the separate term columns are dropped.
- for(const column of ['edu_peserta','edu_wali','edu_pendidik'])if(await hasColumn('ai_data_profiles',column))await db.query(`ALTER TABLE ai_data_profiles DROP COLUMN ${column}`);
+ for(const [column,definition] of [['edu_lembaga','TEXT NULL'],['edu_jadwal','TEXT NULL']])if(!await hasColumn('ai_data_profiles',column))await db.query(`ALTER TABLE ai_data_profiles ADD COLUMN ${column} ${definition}`);
+ // Forms of address moved into Perilaku AI and the institution kind into the Profil Lembaga text; their columns are dropped.
+ for(const column of ['edu_peserta','edu_wali','edu_pendidik','edu_kind'])if(await hasColumn('ai_data_profiles',column))await db.query(`ALTER TABLE ai_data_profiles DROP COLUMN ${column}`);
  const owned=(name:string)=>`KEY ${name}_account(account_id),KEY ${name}_profile(data_profile_id),CONSTRAINT ${name}_account_fk FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,CONSTRAINT ${name}_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE`;
  await db.query(`CREATE TABLE IF NOT EXISTS ai_edu_programs (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,name VARCHAR(150) NOT NULL,description TEXT NOT NULL,position INT UNSIGNED NOT NULL DEFAULT 0,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY edu_program_name(data_profile_id,name),${owned('ai_edu_programs')}) ENGINE=InnoDB`);
  await db.query(`CREATE TABLE IF NOT EXISTS ai_edu_contacts (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,bagian VARCHAR(100) NOT NULL,kontak VARCHAR(150) NOT NULL,deskripsi VARCHAR(300) NOT NULL,position INT UNSIGNED NOT NULL DEFAULT 0,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,${owned('ai_edu_contacts')}) ENGINE=InnoDB`);
