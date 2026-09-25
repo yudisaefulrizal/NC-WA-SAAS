@@ -23,10 +23,9 @@ export const eduTextFields={edu_lembaga:{column:'edu_lembaga',max:eduLimits.lemb
 export function eduView(row:RowDataPacket){
  return {lembaga:String(row.edu_lembaga??''),jadwal:String(row.edu_jadwal??'')};
 }
-// What the router and specialists are told about the institution they speak for. What kind of institution it is
-// comes from its own Profil Lembaga text, and forms of address from Perilaku AI.
+// What the router and specialists are told about the institution they speak for; the rest is in its own texts.
 export function eduIdentity(name:string){
- return `Anda melayani lembaga pendidikan "${name}". Jenis dan identitas lembaga dijelaskan di profil lembaga; ikuti Perilaku AI untuk cara menyebut peserta didik, orang tua, dan pendidik.`;
+ return `Anda melayani lembaga pendidikan "${name}".`;
 }
 
 export interface EduProgram {id:string;name:string;description:string}
