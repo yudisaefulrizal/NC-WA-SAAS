@@ -92,9 +92,11 @@ Hal yang khas satu profil, seperti produk dan pesanan, tetap milik profil terseb
 
 Satu profil untuk sekolah, pesantren, ma'had, kampus, dan kursus. Profil ini hanya memberi informasi dan **tidak menyimpan data pribadi** siswa, santri, atau wali (UU PDP): tidak ada pencatatan pendaftar, booking tes/kunjungan, atau data siswa aktif. Pendaftaran, tes, dan kunjungan mengikuti cara yang ditulis lembaga sendiri.
 
-| Menu | Isi |
+Semua isian berada di menu Knowledge sebagai sub-tab.
+
+| Sub-tab Knowledge | Isi |
 | --- | --- |
-| Knowledge | Perilaku AI, Profil Lembaga (jenis lembaga dan teks profil 4.000 karakter; cara menyebut siswa, wali, dan pendidik ditulis di Perilaku AI), FAQ (4.000 karakter), Fallback Tim |
+| Perilaku AI, Profil Lembaga, FAQ, Fallback Tim | Perilaku AI, Profil Lembaga (jenis lembaga dan teks profil 4.000 karakter; cara menyebut siswa, wali, dan pendidik ditulis di Perilaku AI), FAQ (4.000 karakter), Fallback Tim |
 | Program | Nama + deskripsi longtext (4.000 karakter), maksimal 50 program |
 | Jadwal | Satu longtext 8.000 karakter: pendaftaran, tes, kunjungan, event, kalender akademik, pengumuman |
 | Dokumen | Deskripsi (300 karakter) + file: PDF, Word, Excel, PowerPoint (maks. 10 MB) atau gambar JPG/PNG/WebP (maks. 5 MB); maksimal 20 dokumen dan 100 MB per data profil |

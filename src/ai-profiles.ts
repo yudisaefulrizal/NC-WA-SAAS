@@ -21,7 +21,7 @@ export interface ProfileDefinition {
 }
 export const profileDefinitions:Readonly<Record<string,ProfileDefinition>>={
  cs:{id:'cs',name:'CS Usaha',description:'Membalas pelanggan dari knowledge usaha, katalog produk, pesanan masuk, dan fallback tim.',nodeSummary:'Router, 5 specialist, Pesanan, Context',pipeline:csPipeline,tabs:['knowledge','orders','usage','trial'],defaultWorkflow:()=>defaultWorkflow(csPipeline),workflowInput:value=>workflowInput(value,csPipeline),studioMeta:csStudioMeta},
- pendidikan:{id:'pendidikan',name:'CS Lembaga Pendidikan',description:'Menjawab calon siswa, wali, dan siswa aktif dari profil lembaga, program, jadwal, dokumen, dan kontak. Tidak menyimpan data pribadi.',nodeSummary:'Router, 7 specialist, Context',pipeline:eduPipeline,tabs:['knowledge','edu_program','edu_jadwal','edu_dokumen','edu_kontak','usage','trial'],defaultWorkflow:()=>defaultWorkflow(eduPipeline),workflowInput:value=>workflowInput(value,eduPipeline),studioMeta:()=>studioMeta(eduPipeline)},
+ pendidikan:{id:'pendidikan',name:'CS Lembaga Pendidikan',description:'Menjawab calon siswa, wali, dan siswa aktif dari profil lembaga, program, jadwal, dokumen, dan kontak. Tidak menyimpan data pribadi.',nodeSummary:'Router, 7 specialist, Context',pipeline:eduPipeline,tabs:['knowledge','usage','trial'],defaultWorkflow:()=>defaultWorkflow(eduPipeline),workflowInput:value=>workflowInput(value,eduPipeline),studioMeta:()=>studioMeta(eduPipeline)},
 };
 // New profiles arrive switched off, so the owner tunes them in AI Studio before clients can pick them.
 export const enabledByDefault=(id:string)=>id==='cs';

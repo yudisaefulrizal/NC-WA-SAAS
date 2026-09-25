@@ -47,10 +47,10 @@ try{
  const strip=page.locator('#ai-profile-strip');await strip.getByText("Ma'had Darul Ilmi").waitFor();
  assert.match(await strip.innerText(),/memakai profil CS Lembaga Pendidikan/);
  const tabs=await page.locator('[data-ai-tab]:visible').allTextContents();
- for(const tab of ['Knowledge','Program','Jadwal','Dokumen','Kontak','Percakapan','Riwayat pemakaian','Uji Coba'])assert.ok(tabs.includes(tab),tab+' tampil');
- assert.ok(!tabs.includes('Pesanan Masuk'));
+ for(const tab of ['Knowledge','Percakapan','Riwayat pemakaian','Uji Coba'])assert.ok(tabs.includes(tab),tab+' tampil');
+ for(const tab of ['Pesanan Masuk','Program','Jadwal','Dokumen','Kontak'])assert.ok(!tabs.includes(tab),tab+' bukan menu atas');
  // Knowledge: the institution's own sections, opening on Profil Lembaga with the pesantren terms.
- assert.deepEqual(await page.locator('[data-knowledge-tab]:visible').allTextContents(),['Perilaku AI','Profil Lembaga','FAQ','Fallback Tim']);
+ assert.deepEqual(await page.locator('[data-knowledge-tab]:visible').allTextContents(),['Perilaku AI','Profil Lembaga','Program','Jadwal','Dokumen','Kontak','FAQ','Fallback Tim']);
  assert.equal(await page.locator('#ai-form [name=edu_kind]').inputValue(),'pesantren');assert.equal(await page.locator('#ai-form [name=edu_peserta]').count(),0);
  await page.locator('#ai-form [name=edu_lembaga]').fill('Pesantren di Lembang, berdiri 1998.');
  await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.lembaga==='Pesantren di Lembang, berdiri 1998.',profile.id,5000);
@@ -60,7 +60,7 @@ try{
  await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.kind==='pesantren',profile.id,8000);
  await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-knowledge.png'});
  // Program: add, rename and describe; each edit saves itself.
- await page.locator('[data-ai-tab=edu_program]').click();
+ await page.locator('[data-knowledge-tab=program]').click();
  await page.locator('#edu-program-add').click();await page.locator('#edu-program-name').waitFor();
  assert.equal(await page.locator('#edu-program-name').inputValue(),'Program baru');
  await page.locator('#edu-program-name').fill('Tahfidz Mukim Putra');
@@ -73,16 +73,15 @@ try{
  assert.equal(await page.locator('#edu-programs .edu-program-item').innerText().then(t=>t.startsWith('Tahfidz Mukim Putra')),true);
  await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-program.png'});
  // Jadwal: one long text.
- await page.locator('[data-ai-tab=edu_jadwal]').click();
+ await page.locator('[data-knowledge-tab=jadwal]').click();
  await page.locator('#edu-jadwal').fill('Gelombang 1: 1 November – 31 Desember 2026\nTes masuk setiap Sabtu pukul 08.00');
  await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.jadwal.startsWith('Gelombang 1'),profile.id,5000);
  assert.match(await page.locator('#edu-jadwal-count').innerText(),/\/ 8\.000 karakter/);
  // Dokumen: upload with a description, replace the file, edit the description.
- await page.locator('[data-ai-tab=edu_dokumen]').click();
- const form=page.locator('#edu-document-form');
- await form.locator('[name=description]').fill('Brosur umum PSB 2027, kirim bila ditanya brosur.');
- await form.locator('[name=file]').setInputFiles({name:'brosur-psb.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\n%%EOF\n')});
- await form.getByRole('button',{name:'Unggah dokumen'}).click();
+ await page.locator('[data-knowledge-tab=dokumen]').click();
+ await page.locator('#edu-document-description').fill('Brosur umum PSB 2027, kirim bila ditanya brosur.');
+ await page.locator('#edu-document-file').setInputFiles({name:'brosur-psb.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\n%%EOF\n')});
+ await page.locator('#edu-document-upload').click();
  const row=page.locator('.edu-document',{hasText:'brosur-psb.pdf'});await row.waitFor();
  assert.equal(await row.locator('.edu-file-badge').innerText(),'PDF');
  const png=await sharp({create:{width:8,height:8,channels:3,background:'#0f9d6b'}}).png().toBuffer();
@@ -93,7 +92,7 @@ try{
  assert.equal(await page.locator('#edu-document-count').innerText(),'1 dari 20 dokumen');
  await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-dokumen.png'});
  // Kontak: a new row is created once Bagian and Kontak are filled, then updated in place.
- await page.locator('[data-ai-tab=edu_kontak]').click();
+ await page.locator('[data-knowledge-tab=kontak]').click();
  await page.locator('#edu-contact-add').click();
  const contact=page.locator('.edu-contact').last();
  await contact.locator('input').nth(0).fill('Pendaftaran');await contact.locator('input').nth(1).fill('0856-2200-1100');
@@ -108,7 +107,8 @@ try{
  const card=page.locator('.ai-profile-card',{hasText:"Ma'had Darul Ilmi"});await card.waitFor();
  assert.match(await card.innerText(),/1 program[\s\S]*1 dokumen[\s\S]*1 kontak/);
  await card.getByRole('button',{name:'Kelola isi'}).click();await page.locator('#ai-manage-name',{hasText:"Ma'had Darul Ilmi"}).waitFor();
- assert.deepEqual(await page.locator('[data-ai-tab]:visible').allTextContents(),['Knowledge','Program','Jadwal','Dokumen','Kontak','Uji Coba']);
+ assert.deepEqual(await page.locator('[data-ai-tab]:visible').allTextContents(),['Knowledge','Uji Coba']);
+ assert.equal(await page.locator('[data-knowledge-tab=dokumen]').isVisible(),true);
  await page.locator('#ai-manage-back').click();
  await page.locator('#ai-profile-new').click();
  await page.locator('#ai-profile-create-type').selectOption('pendidikan');assert.equal(await page.locator('#ai-profile-create-kind').isVisible(),true);
@@ -117,7 +117,7 @@ try{
  await page.locator('#ai-profile-create-form [name=name]').fill('Kursus Bahasa');
  await page.locator('#ai-profile-create-form').getByRole('button',{name:'Buat data profil'}).click();
  await page.locator('#ai-manage-name',{hasText:'Kursus Bahasa'}).waitFor();
- assert.equal(await page.locator('#ai-form [name=edu_kind]').inputValue(),'kursus');
+ await page.waitForFunction(()=>(document.querySelector('#ai-form [name=edu_kind]') as HTMLSelectElement).value==='kursus',undefined,{timeout:5000});
  assert.deepEqual(errors,[]);await context.close();
 
  // Phone: one-row tabs, program picker instead of the list, no sideways scroll on any education tab.
@@ -125,8 +125,10 @@ try{
   await page.locator('#ai-profile-strip').getByText("Ma'had Darul Ilmi").waitFor();
   const noScroll=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   await noScroll();
-  for(const tab of ['edu_program','edu_jadwal','edu_dokumen','edu_kontak']){await page.locator(`[data-ai-tab=${tab}]`).click();await page.locator('#ai-tab-'+tab).waitFor();await noScroll();await page.screenshot({path:`data/browser-check/edu-mobile-${tab.slice(4)}.png`,fullPage:true});}
-  await page.locator('[data-ai-tab=edu_program]').click();
+  // On phones the Knowledge sections are picked from a dropdown.
+  assert.equal(await page.locator('#ai-knowledge-select').isVisible(),true);
+  for(const tab of ['program','jadwal','dokumen','kontak']){await page.locator('#ai-knowledge-select').selectOption(tab);await page.locator('#ai-knowledge-tab-'+tab).waitFor();await noScroll();await page.screenshot({path:`data/browser-check/edu-mobile-${tab}.png`,fullPage:true});}
+  await page.locator('#ai-knowledge-select').selectOption('program');
   assert.equal(await page.locator('#edu-program-select').isVisible(),true);assert.equal(await page.locator('#edu-programs').isVisible(),false);
   assert.equal(await page.locator('#edu-program-add').isVisible(),true);
   assert.deepEqual(errors,[]);await context.close();}

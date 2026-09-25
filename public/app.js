@@ -159,13 +159,13 @@ form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 
-const aiTabNames=['knowledge','orders','edu_program','edu_jadwal','edu_dokumen','edu_kontak','conversations','usage','trial','integrasi'];
+const aiTabNames=['knowledge','orders','conversations','usage','trial','integrasi'];
 function aiTab(tab){for(const name of aiTabNames){const section=$('ai-tab-'+name);if(section)section.hidden=name!==tab;}document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab(knowledgeTabsFor(aiTargetType())[1]);if(tab==='conversations'&&$('ai-session').value&&aiView==='sessions')void run(loadConversations);}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
-const knowledgeTabNames=['usaha','products','behavior','lembaga','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
+const knowledgeTabNames=['usaha','products','behavior','lembaga','program','jadwal','dokumen','kontak','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
 // Knowledge sections differ per profile: CS Usaha has business fields and products, CS Lembaga Pendidikan its
 // institution profile; Perilaku AI, FAQ and Fallback Tim belong to both.
-const knowledgeTabsFor=type=>type==='pendidikan'?['behavior','lembaga','faq','fallback']:['behavior','usaha','products','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
+const knowledgeTabsFor=type=>type==='pendidikan'?['behavior','lembaga','program','jadwal','dokumen','kontak','faq','fallback']:['behavior','usaha','products','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
 function renderKnowledgeTabs(){const allowed=knowledgeTabsFor(aiTargetType());document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.hidden=!allowed.includes(b.dataset.knowledgeTab));for(const option of $('ai-knowledge-select').options)option.hidden=!allowed.includes(option.value);$('ai-form').elements.profile_faq.maxLength=aiTargetType()==='pendidikan'?4000:2000;{const behavior=$('ai-form').elements.behavior;behavior.dataset.csPlaceholder??=behavior.placeholder;behavior.placeholder=aiTargetType()==='pendidikan'?"Tulis gaya bahasa dan cara menyebut orang. Contoh: Sopan dan ringkas, awali dengan salam Assalamu'alaikum. Sebut peserta didik sebagai santri, orang tua sebagai wali santri, dan pengajar sebagai ustadz/ustadzah. Nama asistennya Admin PSB.":behavior.dataset.csPlaceholder;}if(!allowed.includes($('ai-knowledge-select').value))knowledgeTab(allowed[1]);}
 function knowledgeTab(tab){$('ai-knowledge-select').value=tab;for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
 document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
@@ -679,15 +679,16 @@ $('edu-program-delete').onclick=()=>run(async()=>{const program=edu.programs.fin
 const fileSize=bytes=>bytes>=1048576?(bytes/1048576).toLocaleString('id-ID',{maximumFractionDigits:1})+' MB':Math.max(1,Math.round(bytes/1024))+' KB';
 const fileBadge=d=>d.media_type==='image'?(d.mimetype.split('/')[1]||'img').replace('jpeg','jpg').toUpperCase():/pdf/.test(d.mimetype)?'PDF':/word/.test(d.mimetype)?'DOC':/sheet|excel/.test(d.mimetype)?'XLS':/presentation|powerpoint/.test(d.mimetype)?'PPT':'FILE';
 async function uploadDocument(path,method,file,headers){const response=await fetch(path,{method,headers:{'Content-Type':file.type||'application/octet-stream','X-Filename':encodeURIComponent(file.name),...headers},body:file});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.message||'Gagal mengunggah dokumen.');return data;}
-$('edu-document-form').onsubmit=e=>{e.preventDefault();const f=e.currentTarget,file=f.elements.file.files[0],submit=f.querySelector('button');if(!file)return;
- void run(async()=>{submit.disabled=true;submit.textContent='Mengunggah…';try{const created=await uploadDocument(dataBase()+'/documents','POST',file,{'X-Description':encodeURIComponent(f.elements.description.value.trim())});edu.documents.push(created);f.reset();renderEduDocuments();$('message').textContent='Dokumen '+created.filename+' tersimpan.';}finally{submit.disabled=false;submit.textContent='Unggah dokumen';}});};
+$('edu-document-upload').onclick=()=>{const input=$('edu-document-file'),description=$('edu-document-description'),file=input.files[0],submit=$('edu-document-upload');
+ if(!description.value.trim()){$('message').textContent='Tulis deskripsi dokumen terlebih dahulu.';description.focus();return;}if(!file){$('message').textContent='Pilih file dokumen terlebih dahulu.';return;}
+ void run(async()=>{submit.disabled=true;submit.textContent='Mengunggah…';try{const created=await uploadDocument(dataBase()+'/documents','POST',file,{'X-Description':encodeURIComponent(description.value.trim())});edu.documents.push(created);input.value='';description.value='';renderEduDocuments();$('message').textContent='Dokumen '+created.filename+' tersimpan.';}finally{submit.disabled=false;submit.textContent='Unggah dokumen';}});};
 function renderEduDocuments(){
  $('edu-document-count').textContent=edu.documents.length+' dari 20 dokumen';
  if(!edu.documents.length){$('edu-documents').replaceChildren(element('p','empty','Belum ada dokumen.'));return;}
  $('edu-documents').replaceChildren(...edu.documents.map(d=>{
   const row=element('div','edu-document'),badge=element('span','edu-file-badge '+(d.media_type==='image'?'image':fileBadge(d).toLowerCase()),fileBadge(d)),info=element('div','edu-document-file'),link=element('a','',d.filename);
   link.href=dataBase()+'/documents/'+encodeURIComponent(d.id)+'/file';link.target='_blank';link.rel='noopener';
-  const replace=element('label','edu-replace','Ganti file'),input=document.createElement('input');input.type='file';input.accept=$('edu-document-form').elements.file.accept;input.className='sr-only';
+  const replace=element('label','edu-replace','Ganti file'),input=document.createElement('input');input.type='file';input.accept=$('edu-document-file').accept;input.className='sr-only';
   input.onchange=()=>run(async()=>{const file=input.files[0];if(!file)return;replace.firstChild.textContent='Mengunggah…';try{Object.assign(d,await uploadDocument(dataBase()+'/documents/'+encodeURIComponent(d.id)+'/file','PUT',file,{}));renderEduDocuments();$('message').textContent='File dokumen diganti.';}finally{replace.firstChild.textContent='Ganti file';}});
   replace.append(input);info.append(link,element('small','',fileSize(d.size_bytes)),replace);
   const description=document.createElement('textarea');description.maxLength=300;description.rows=2;description.value=d.description;description.setAttribute('aria-label','Deskripsi '+d.filename);

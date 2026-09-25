@@ -69,7 +69,7 @@ test('CS Lembaga Pendidikan starts switched off; once on, clients create data pr
  await t.api('post','/ai/data-profiles').send({profile_type:'pendidikan',name:'Sekolah A'}).expect(409);
  await setProfileEnabled(owner,'pendidikan',true);
  const types=(await t.api('get','/ai/profile-types').expect(200)).body;
- assert.deepEqual(types.find((p:any)=>p.id==='pendidikan').tabs,['knowledge','edu_program','edu_jadwal','edu_dokumen','edu_kontak','usage','trial']);
+ assert.deepEqual(types.find((p:any)=>p.id==='pendidikan').tabs,['knowledge','usage','trial']);
  await t.api('post','/ai/data-profiles').send({profile_type:'pendidikan',name:'X',edu_kind:'universitas'}).expect(400);
  const created=(await t.api('post','/ai/data-profiles').send({profile_type:'pendidikan',name:"Ma'had Darul Ilmi",edu_kind:'pesantren'}).expect(201)).body;
  assert.deepEqual([created.profile_type,created.knowledge,created.edu.kind,created.edu.kind_label],['pendidikan','','pesantren','Pesantren']);
