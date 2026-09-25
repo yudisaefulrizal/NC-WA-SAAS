@@ -1,0 +1,151 @@
+/* Pembelian kredit AI di halaman Paket. */
+.ai-credit-card .package-icon {
+  background: #e3f5eb;
+  color: #07845a;
+}
+.ai-credit-card .package-features {
+  margin-bottom: 20px;
+}
+#ai-credit-modal label {
+  margin-bottom: 6px;
+}
+#ai-credit-modal input {
+  max-width: 160px;
+}
+#ai-credit-summary {
+  font-weight: 650;
+  margin: 14px 0;
+}
+.trace-event {
+  border: 1px solid #e0eae5;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 0 0 12px;
+}
+.trace-event p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.trace-event pre {
+  margin: 8px 0 0;
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
+}
+.trace-error {
+  color: #b84444;
+}
+.ai-product-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+#ai-product-image-preview {
+  object-fit: cover;
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+#share-template-form .field-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #718394;
+  margin: -2px 0 10px;
+}
+#share-header-group {
+  border: 1px solid #e1e9e8;
+  border-radius: 11px;
+  padding: 16px 18px;
+  margin: 12px 0;
+}
+#share-header-group legend {
+  font-size: 12px;
+  font-weight: 650;
+  color: #395665;
+  padding: 0 6px;
+}
+#share-header-rows .header-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+#share-header-rows .header-row input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+#share-header-rows .header-row button {
+  flex: none;
+  padding: 8px 12px;
+  line-height: 1;
+}
+#share-source-vars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#share-source-vars button {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+#share-source-result pre {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 780px) {
+  #share-header-rows .header-row {
+    flex-wrap: wrap;
+  }
+  #share-header-rows .header-row input {
+    flex: 1 1 100%;
+  }
+}
+@media (max-width: 520px) {
+  #share-template-dialog {
+    width: calc(100vw - 16px);
+  }
+  #share-template-dialog .modal-heading {
+    top: 0;
+    padding: 18px 18px 14px;
+  }
+  #share-template-dialog form {
+    padding: 0 18px 20px;
+  }
+  .template-steps {
+    gap: 4px;
+    margin-bottom: 18px;
+  }
+  .template-steps li {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px;
+  }
+  .template-steps li span {
+    width: 23px;
+    height: 23px;
+    font-size: 10px;
+  }
+  .template-steps small {
+    display: none;
+  }
+  .template-step {
+    min-height: 300px;
+  }
+  .template-step-heading {
+    padding: 0;
+  }
+  .template-wizard-actions button {
+    flex: 1;
+    min-width: 0;
+  }
+  .template-wizard-actions #share-template-back {
+    margin-right: 0;
+  }
+}

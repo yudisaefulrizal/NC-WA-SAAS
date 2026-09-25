@@ -1,5 +1,7 @@
+// Antrean kirim per sesi: satu pesan per interval supaya nomor tidak dianggap spam, maksimal 256 pesan
+// menunggu.
 import { setTimeout } from 'node:timers/promises';
-import {ApiError} from '../../../libraries/errors.js';
+import { ApiError } from '../../../libraries/errors.js';
 
 export class SendQueue {
   private tail = Promise.resolve();
@@ -14,11 +16,23 @@ export class SendQueue {
       const remaining = this.nextAt - Date.now();
       if (remaining > 0) await setTimeout(remaining, undefined, { signal: this.abort.signal }).catch(() => {});
       if (this.abort.signal.aborted) throw new ApiError(409, 'session_not_connected', 'Session sudah ditutup');
-      try { return await action(); }
-      finally { this.nextAt = Date.now() + this.intervalMs; }
+      try {
+        return await action();
+      } finally {
+        this.nextAt = Date.now() + this.intervalMs;
+      }
     });
-    this.tail = job.then(() => {}, () => {}).finally(() => { this.pending--; });
+    this.tail = job
+      .then(
+        () => {},
+        () => {},
+      )
+      .finally(() => {
+        this.pending--;
+      });
     return job;
   }
-  close() { this.abort.abort(); }
+  close() {
+    this.abort.abort();
+  }
 }

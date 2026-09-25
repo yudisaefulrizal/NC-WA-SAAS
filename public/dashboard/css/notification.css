@@ -1,0 +1,11 @@
+/* Notifikasi #message dibuka sebagai popover agar naik ke top layer, sejajar dialog showModal(); tanpa ini
+   notifikasi tertutup dialog berapa pun z-index-nya. */
+/* Dibuka sebagai popover agar naik ke top layer, sejajar dialog showModal(); tanpa ini notifikasi
+   tertutup dialog berapa pun z-index-nya. */
+#message {
+  border-width: 1px;
+  margin: 0;
+}
+#message:popover-open {
+  display: block;
+}

@@ -1,6 +1,6 @@
-// Screenshots of the browser checks, for a person to look at afterwards. Kept outside the project, in the system
-// temporary directory, and replaced by each run.
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+// Screenshot pemeriksaan browser, untuk dilihat orang setelahnya. Disimpan di luar proyek, di folder temporary
+// sistem, dan diganti setiap kali pemeriksaan dijalankan.
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-export const screenshots=join(tmpdir(),'ncwa-browser-check');
+export const screenshots = join(tmpdir(), 'ncwa-browser-check');

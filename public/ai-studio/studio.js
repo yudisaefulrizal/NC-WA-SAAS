@@ -1,111 +1,756 @@
-const $=id=>document.getElementById(id);
-// Each profile has its own fixed pipeline, drawn from these layouts (node names, positions, edges, tools).
-const common={input:'Pesan masuk',router:'Router',context:'Context Agent',output:'Jawaban',fallback:'Fallback Tim',memory:'Shared Memory',router_memory:'Router Context',models:'Model provider'};
-function layout(specialists,tools,toolEdges,extra={}){
- const top=specialists.length>5?55:70,step=specialists.length>5?84:91;
- const positions={input:[35,368],router:[285,368],...Object.fromEntries(specialists.map((id,i)=>[id,[570,top+i*step]])),context:[1060,368],output:[1290,368],fallback:[1060,690],memory:[565,870],router_memory:[1040,870],models:[55,870],...Object.fromEntries(tools.map((id,i)=>[id,[(tools.length>5?130:360)+i*(tools.length>5?230:235),1010]])),...extra.positions};
- const edges=[['input','router'],...specialists.flatMap(id=>[['router',id],[id,'context'],[id,'fallback']]),['context','output'],['fallback','output'],...specialists.map(id=>['memory',id]),['router_memory','router'],['context','router_memory'],['models','router'],['models','context'],...specialists.map(id=>['models',id]),...toolEdges];
- return {specialists,tools,positions,edges};
-}
-const layouts={
- cs:{...layout(['pembuka','profil_perusahaan','layanan','penutup','lainnya'],['get_knowledge','get_products','check_order','pesanan','create_order'],[['profil_perusahaan','get_knowledge'],['layanan','get_knowledge'],['layanan','get_products'],['layanan','check_order'],['layanan','pesanan'],['pesanan','create_order'],['models','pesanan'],['lainnya','get_knowledge'],['lainnya','get_products'],['lainnya','check_order']],{positions:{get_knowledge:[360,1010],get_products:[595,1010],check_order:[830,1010],pesanan:[1065,1010],create_order:[1290,1010]}}),
-  names:{...common,pembuka:'Pembuka',profil_perusahaan:'Profil Perusahaan',layanan:'Layanan',penutup:'Penutup',lainnya:'Lainnya',get_knowledge:'Knowledge',get_products:'Produk',check_order:'Cek pesanan',create_order:'Buat pesanan',pesanan:'Pesanan terstruktur'},
-  describe:{get_knowledge:'Membaca Knowledge simulasi di bagian Data bisnis untuk pengujian.',get_products:'Mencari produk dari katalog simulasi.',check_order:'Membaca pesanan SIM yang dibuat dalam percakapan uji ini.',create_order:'Membuat pesanan SIM di memori sesi uji. Tidak membuat pesanan client.',pesanan:'Mengubah permintaan pesanan dari Layanan menjadi JSON sebelum create_order bila parser kode tidak dapat memastikannya. Nama produk selalu dicocokkan ke katalog.'},
-  placeholder:'Tulis pesan pelanggan, misalnya: Saya mau pesan…',sandbox:'SANDBOX · Tools dan pesanan simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.'},
- pendidikan:{...layout(['pembuka','profil_lembaga','program','jadwal','kontak','penutup','lainnya'],['get_profil_lembaga','get_program','get_jadwal','get_kontak','get_dokumen','kirim_dokumen'],[['profil_lembaga','get_profil_lembaga'],['profil_lembaga','get_dokumen'],['profil_lembaga','kirim_dokumen'],['program','get_program'],['program','get_dokumen'],['program','kirim_dokumen'],['jadwal','get_jadwal'],['jadwal','get_dokumen'],['jadwal','kirim_dokumen'],['kontak','get_kontak'],['lainnya','get_profil_lembaga'],['lainnya','get_program'],['lainnya','get_jadwal'],['lainnya','get_kontak']]),
-  names:{...common,pembuka:'Pembuka',profil_lembaga:'Profil Lembaga',program:'Program',jadwal:'Jadwal',kontak:'Kontak',penutup:'Penutup',lainnya:'Lainnya',get_profil_lembaga:'Profil & FAQ',get_program:'Baca program',get_jadwal:'Baca jadwal',get_kontak:'Baca kontak',get_dokumen:'Daftar dokumen',kirim_dokumen:'Kirim dokumen'},
-  describe:{get_profil_lembaga:'Membaca profil lembaga dan FAQ simulasi.',get_program:'Membaca daftar program atau deskripsi satu program dari data simulasi.',get_jadwal:'Membaca jadwal simulasi beserta tanggal hari ini.',get_kontak:'Membaca daftar bagian, kontak, dan deskripsinya.',get_dokumen:'Membaca daftar dokumen (nama file, jenis, deskripsi, sudah dikirim).',kirim_dokumen:'Memilih dokumen untuk dikirim sebelum jawaban. Di sandbox hanya dicatat; tidak mengirim WhatsApp.'},
-  placeholder:'Tulis pesan penanya, misalnya: Kapan pendaftaran dibuka?',sandbox:'SANDBOX · Tools dan dokumen simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.'},
+// Halaman AI Studio pemilik: kanvas alur per profil, sunting node, simpan draft, simulasi dengan jejak langsung, dan terbit.
+// Tata letak setiap profil ada di `layouts` di bawah (nama node, posisi, garis, tool).
+
+const $ = id => document.getElementById(id);
+const common = {
+  input: 'Pesan masuk',
+  router: 'Router',
+  context: 'Context Agent',
+  output: 'Jawaban',
+  fallback: 'Fallback Tim',
+  memory: 'Shared Memory',
+  router_memory: 'Router Context',
+  models: 'Model provider',
 };
-let names,specialists,positions,edges,toolNodes;
-function useLayout(id){const l=layouts[id]??layouts.cs;({names,specialists,positions,edges}=l);toolNodes=l.tools;describe=l.describe&&{...baseDescribe,...l.describe};$('chat-input').placeholder=l.placeholder;document.querySelector('.sandbox-note').textContent=l.sandbox;for(const [key,block] of [['cs','cs-sandbox'],['pendidikan','edu-sandbox']])$(block).hidden=key!==(layouts[id]?id:'cs');}
-let state,selected='router',dirty=false,running=false,session=null,zoom=.7,controller,trace=[],nodeEvents={},selectedAgent=null,models={};
-const profileFields=['usaha','cara_pemesanan','pembayaran','kebijakan','faq'];
-const path='/api/admin/ai/studio';
-// Each profile has its own workflow; ?profile= picks the one being edited (CS Usaha by default).
-let profile=new URLSearchParams(location.search).get('profile')||'cs';
-const studioUrl=(suffix='')=>path+suffix+'?profile='+encodeURIComponent(profile);
-const tierLabels={cheap:'Model murah',medium:'Model sedang',smart:'Model cerdas',structured:'Model terstruktur'};
-// On the Terstruktur tier the schema is always sent, so the box shows checked and locked; the stored flag is
-// left untouched so moving the node back to another tier restores the admin's own choice.
-function syncStructuredToggle(){const node=state?.draft.nodes[selected],box=$('node-structured-output');if(!node||!['router','pesanan'].includes(selected))return;const forced=node.tier==='structured';box.checked=forced||node.structured_output===true;box.disabled=running||forced;}
-const baseDescribe={input:'Pesan pelanggan dari chat uji.',context:'Memperbarui konteks S-P-O setelah specialist menjawab.',router:'Memilih satu specialist dari pesan terbaru dan konteks sebelumnya.',fallback:'Membuat tiket dan mengirim pertanyaan ke nomor fallback. AI tetap menjawab topik lain sambil menunggu jawaban tim.',memory:'Riwayat pelanggan dan jawaban digunakan bersama oleh semua specialist. Dikelola otomatis, mengikuti batas memori global.',router_memory:'Ringkasan S-P-O terakhir. Dibaca router untuk memahami pesan lanjutan.',models:'Nama model mengikuti Pengaturan AI. Setiap agent dapat memilih tingkat atau model khusus.',output:'Jawaban specialist untuk pelanggan. Dalam sandbox, jawaban hanya tampil di chat uji.'};
-let describe=baseDescribe;
-const statusNames={running:'Berjalan',responded:'Respons model',done:'Selesai',routed:'Agent dipilih',retry:'Retry / koreksi',error:'Gagal',invalid:'Output tidak valid'};
-function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);}
-async function api(url,method='GET',body){const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const data=await res.json().catch(()=>({message:'Respons server tidak dapat dibaca.'}));if(!res.ok)throw Error(data.message||data.error||'Permintaan gagal.');return data;}
-function pretty(value){return JSON.stringify(value,null,2);}
-function clearConversation(){session=null;$('chat-log').replaceChildren();$('context-value').textContent='Belum ada konteks';}
-function versions(){if(!state)return;$('version').textContent=`Draft r${state.revision}${dirty?' · belum disimpan':''} / Aktif v${state.active_version}`;$('save').disabled=running||!dirty;$('publish').disabled=running||dirty||state.revision===state.published_revision;$('send').disabled=running||dirty;}
-function markDirty(){dirty=true;clearConversation();versions();notice('Ada perubahan lokal. Simpan draft sebelum menguji.');}
-function nodeButton(id){return document.querySelector(`[data-node="${id}"]`);}
-function draw(){
- const svg=$('connections');svg.replaceChildren();
- for(const [from,to] of edges){const [x,y]=positions[from],[tx,ty]=positions[to],p=document.createElementNS('http://www.w3.org/2000/svg','path');const support=['memory','router_memory','models'].includes(from)||to==='router_memory'||(toolNodes.includes(to)&&!state.draft.nodes[to]);p.setAttribute('d',`M ${x+186} ${y+37} C ${x+230} ${y+37}, ${tx-50} ${ty+37}, ${tx} ${ty+37}`);p.setAttribute('class','edge'+(support?' support':''));p.dataset.from=from;p.dataset.to=to;svg.append(p);}
- $('nodes').replaceChildren();
- for(const [id,[x,y]] of Object.entries(positions)){
-  const b=document.createElement('button');b.type='button';b.className='flow-node'+(['memory','router_memory','models'].includes(id)?' support-node':toolNodes.includes(id)&&!state.draft.nodes[id]?' tool-node':'');b.style.left=x+'px';b.style.top=y+'px';b.dataset.node=id;b.setAttribute('aria-label','Node '+names[id]);
-  const icon=document.createElement('span');icon.className='node-icon';icon.textContent=id==='pesanan'?'{}':id==='router'?'⑂':id==='context'?'◈':state.draft.nodes[id]?'✦':id==='input'?'↗':id==='output'?'✓':id==='kirim_dokumen'?'⇪':'◇';
-  const text=document.createElement('span'),title=document.createElement('strong'),subtitle=document.createElement('small');title.textContent=names[id];subtitle.textContent=state.draft.nodes[id]?tierLabels[state.draft.nodes[id].tier]:['memory','router_memory'].includes(id)?'Memori bersama':id==='models'?'Konfigurasi pemilik':id==='input'||id==='output'?'Percakapan uji':'Tool simulasi';text.append(title,subtitle);b.append(icon,text);b.onclick=()=>selectNode(id);$('nodes').append(b);
- }
- for(const [text,x,y] of [['01 / MASUK & ROUTING',35,26],['02 / SATU SPECIALIST',570,26],['03 / KONTEKS & JAWABAN',1060,26],['MODEL & MEMORI',55,825],['TOOLS / SIMULASI',Math.min(...toolNodes.map(t=>positions[t][0])),977]]){const label=document.createElement('span');label.className='canvas-label';label.textContent=text;label.style.left=x+'px';label.style.top=y+'px';$('nodes').append(label);}
- // Phones get the workflow nodes as a tappable list instead of the scaled-down canvas.
- $('node-list').replaceChildren(...Object.keys(positions).filter(id=>state.draft.nodes[id]).map(id=>{const b=document.createElement('button');b.type='button';b.dataset.node=id;const title=document.createElement('strong'),tier=document.createElement('small');title.textContent=names[id];tier.textContent=tierLabels[state.draft.nodes[id].tier];b.append(title,tier);b.onclick=()=>selectNode(id);return b;}));
- selectNode(selected);setZoom(zoom);
+function layout(specialists, tools, toolEdges, extra = {}) {
+  const top = specialists.length > 5 ? 55 : 70,
+    step = specialists.length > 5 ? 84 : 91;
+  const positions = {
+    input: [35, 368],
+    router: [285, 368],
+    ...Object.fromEntries(specialists.map((id, i) => [id, [570, top + i * step]])),
+    context: [1060, 368],
+    output: [1290, 368],
+    fallback: [1060, 690],
+    memory: [565, 870],
+    router_memory: [1040, 870],
+    models: [55, 870],
+    ...Object.fromEntries(
+      tools.map((id, i) => [id, [(tools.length > 5 ? 130 : 360) + i * (tools.length > 5 ? 230 : 235), 1010]]),
+    ),
+    ...extra.positions,
+  };
+  const edges = [
+    ['input', 'router'],
+    ...specialists.flatMap(id => [
+      ['router', id],
+      [id, 'context'],
+      [id, 'fallback'],
+    ]),
+    ['context', 'output'],
+    ['fallback', 'output'],
+    ...specialists.map(id => ['memory', id]),
+    ['router_memory', 'router'],
+    ['context', 'router_memory'],
+    ['models', 'router'],
+    ['models', 'context'],
+    ...specialists.map(id => ['models', id]),
+    ...toolEdges,
+  ];
+  return { specialists, tools, positions, edges };
 }
-function setZoom(value){zoom=Math.max(.25,Math.min(1.25,value));$('canvas').style.transform=`scale(${zoom})`;$('canvas-size').style.width=1500*zoom+'px';$('canvas-size').style.height=1080*zoom+'px';$('zoom-value').textContent=Math.round(zoom*100)+'%';}
-function selectNode(id){selected=id;document.querySelectorAll('[data-node]').forEach(b=>{b.classList.toggle('selected',b.dataset.node===id);b.setAttribute('aria-pressed',String(b.dataset.node===id));});$('node-id').textContent=id.toUpperCase();$('node-title').textContent=names[id];$('node-description').textContent=describe[id]||'Pengaturan instruksi, model, dan tools untuk agent '+names[id]+'.';const node=state.draft.nodes[id];$('node-form').hidden=!node;$('node-readonly').hidden=Boolean(node);$('node-kind').textContent=node?'Agent':'Komponen tetap';
- $('structured-settings').hidden=!['router','pesanan'].includes(id);$('structured-hint').textContent='Selalu aktif bila node memakai tingkat Terstruktur. Di tingkat lain, centang hanya jika modelnya mendukung JSON Schema strict.'+(id==='pesanan'?' Bila provider menolak schema, node otomatis mencoba ulang dengan schema di prompt.':' Validasi enum aplikasi selalu aktif.');$('router-settings').hidden=id!=='router';$('order-settings').hidden=id!=='pesanan';$('order-schema').textContent=pretty(state.orderSchema);$('router-schema').textContent=pretty(state.routerSchema);
- if(node){$('node-prompt').value=node.prompt;$('node-tier').value=node.tier;$('node-model').value=node.model;$('node-tools').replaceChildren();const allowed=state.allowedTools[id]||[];for(const tool of allowed){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=tool;input.checked=node.tools.includes(tool);input.disabled=running;input.onchange=()=>updateNode();label.append(input,document.createTextNode(tool));$('node-tools').append(label);}if(!allowed.length)$('node-tools').textContent='Node ini tidak menggunakan tools bisnis.';syncStructuredToggle();resolvedModel();}
- else $('node-readonly').textContent=id==='models'?`Murah: ${models.model_cheap} · Sedang: ${models.model_medium} · Cerdas: ${models.model_smart} · Terstruktur: ${models.model_structured}`:'Komponen dikelola otomatis oleh NC-WA.';
- $('node-output').textContent=nodeEvents[id]?pretty(nodeEvents[id]):'Belum dijalankan.';
-}
-function resolvedModel(){const node=state.draft.nodes[selected];if(node)$('resolved-model').textContent='Model yang digunakan: '+(node.model||models['model_'+node.tier]||models.model||'Belum dikonfigurasi');}
-function updateNode(){if(running)return;const node=state.draft.nodes[selected];if(!node)return;if((selected==='router'||selected==='pesanan')&&node.tier!=='structured'&&$('node-tier').value!=='structured')node.structured_output=$('node-structured-output').checked;node.prompt=$('node-prompt').value;node.tier=$('node-tier').value;node.model=$('node-model').value;node.tools=[...$('node-tools').querySelectorAll('input:checked')].map(i=>i.value);nodeButton(selected).querySelector('small').textContent=tierLabels[node.tier];syncStructuredToggle();resolvedModel();markDirty();}
-function bubble(content,kind){const p=document.createElement('p');p.className='bubble '+kind;p.textContent=content;$('chat-log').append(p);$('chat-log').scrollTop=$('chat-log').scrollHeight;}
-function onEvent(event){trace.push(event);nodeEvents[event.node]=event;if(event.session)session=event.session;const b=nodeButton(event.node);if(b)b.dataset.state=event.state;
- if(event.node==='input')$('context-value').textContent=event.context||'Belum ada konteks';
- if(event.node==='router'&&event.state==='routed'){selectedAgent=event.output.sub_agent;document.querySelectorAll('.edge').forEach(p=>{if(p.dataset.from==='router')p.classList.toggle('active',p.dataset.to===selectedAgent);});}
- if(event.state==='running'||event.state==='done')document.querySelectorAll('.edge').forEach(p=>{if(p.dataset.to===event.node&&(!specialists.includes(p.dataset.from)||p.dataset.from===selectedAgent))p.classList.add('active');});
- if(event.node===selected)$('node-output').textContent=pretty(event);
- const row=document.createElement('button');row.type='button';const left=document.createElement('span'),right=document.createElement('span');left.textContent=`${String(trace.length).padStart(2,'0')} · ${names[event.node]||event.node} · ${statusNames[event.state]||event.state}`;right.textContent=event.duration_ms===undefined?'':event.duration_ms+' ms';row.append(left,right);row.onclick=()=>{$('trace-detail').textContent=pretty(event);if(positions[event.node])selectNode(event.node);};$('trace-list').append(row);$('trace-list').scrollTop=$('trace-list').scrollHeight;$('trace-detail').textContent=pretty(event);
- if(event.node==='output'){
-  $('run-status').textContent=event.state==='done'?'Selesai · '+event.duration_ms+' ms':'Pengujian gagal';
-  if(event.state==='done'){for(const file of event.output.documents??[])bubble('Dokumen dikirim: '+file,'document');bubble(event.output.answer,'assistant');$('context-value').textContent=event.output.context||'Konteks belum berhasil diperbarui';}
-  else bubble('Pengujian gagal: '+event.error+'. Periksa jejak eksekusi.','error');
- }
-}
-function busy(value){running=value;$('stop').hidden=!value;$('reload').disabled=value;$('reset').disabled=value;for(const id of ['node-prompt','node-tier','node-model','node-structured-output','chat-input'])$(id).disabled=value;document.querySelectorAll('.sandbox-data textarea,.sandbox-data input,.sandbox-data select').forEach(el=>el.disabled=value);$('node-tools').querySelectorAll('input').forEach(i=>i.disabled=value);syncStructuredToggle();versions();}
-async function loadProfiles(){const profiles=await api('/api/admin/ai/profiles');$('profile-select').replaceChildren(...profiles.map(p=>new Option(p.name.toUpperCase(),p.id,false,p.id===profile)));}
-$('profile-select').onchange=async e=>{if((dirty||running)&&!confirm('Perubahan draft yang belum disimpan akan hilang. Pindah profil?')){e.target.value=profile;return;}profile=e.target.value;history.replaceState(null,'','?profile='+encodeURIComponent(profile));busy(true);try{await load();}catch(error){notice(error.message,true);}finally{busy(false);}};
-async function load(){const result=await api(studioUrl());state=result;useLayout(result.profile);if(!state.draft.nodes[selected]&&!positions[selected])selected='router';$('profile-name').textContent=$('canvas-profile').textContent=result.profile_name;$('profile-status').textContent=result.enabled?'Aktif untuk klien':'Nonaktif untuk klien';$('profile-status').classList.toggle('off',!result.enabled);models=result.models;dirty=false;clearConversation();trace=[];nodeEvents={};$('trace-list').replaceChildren();$('trace-detail').textContent='Belum ada proses.';draw();versions();notice('Draft siap. Konfigurasi aktif tetap dipakai layanan sampai Anda mengaktifkan draft.');}
-$('node-form').onsubmit=e=>e.preventDefault();for(const id of ['node-prompt','node-tier','node-model','node-structured-output'])$(id).addEventListener('input',updateNode);
-$('zoom-in').onclick=()=>setZoom(zoom+.1);$('zoom-out').onclick=()=>setZoom(zoom-.1);$('fit').onclick=()=>setZoom(($('canvas-viewport').clientWidth-20)/1500);
-$('reload').onclick=async()=>{if(dirty&&!confirm('Buang perubahan lokal dan muat draft tersimpan?'))return;try{await load();}catch(e){notice(e.message,true);}};
-$('save').onclick=async()=>{busy(true);try{state=await api(studioUrl(),'PUT',{revision:state.revision,draft:state.draft});dirty=false;clearConversation();notice('Draft tersimpan. Jalankan pengujian sebelum mengaktifkan.');}catch(e){notice(e.message,true);}finally{busy(false);}};
-$('publish').onclick=()=>{$('publish-summary').textContent=`Draft r${state.revision} akan menjadi versi aktif v${state.active_version+1} untuk seluruh layanan.`;$('publish-dialog').showModal();};
-$('cancel-publish').onclick=()=>$('publish-dialog').close();
-$('confirm-publish').onclick=async()=>{const button=$('confirm-publish');button.disabled=true;try{state=await api(studioUrl('/publish'),'POST',{revision:state.revision});$('publish-dialog').close();versions();notice('Versi aktif diperbarui. Pesan baru menggunakan konfigurasi ini.');}catch(e){notice(e.message,true);$('publish-dialog').close();}finally{button.disabled=false;}};
-$('reset').onclick=()=>{clearConversation();notice('Percakapan uji baru. Riwayat dan pesanan simulasi dimulai ulang.');};
-document.querySelectorAll('.sandbox-data textarea,.sandbox-data input,.sandbox-data select').forEach(el=>el.addEventListener('input',()=>{clearConversation();notice('Data uji berubah. Pengujian berikutnya memakai percakapan baru.');}));
-$('stop').onclick=()=>controller?.abort();
-$('chat-form').onsubmit=async e=>{
- e.preventDefault();if(running||dirty)return;const message=$('chat-input').value.trim();if(!message)return;
- let data;try{data=profile==='pendidikan'?{edu:{name:$('edu-test-name').value,lembaga:$('edu-test-lembaga').value,jadwal:$('edu-test-jadwal').value,faq:$('edu-test-faq').value,programs:JSON.parse($('edu-test-programs').value),contacts:JSON.parse($('edu-test-contacts').value),documents:JSON.parse($('edu-test-documents').value)},behavior:$('edu-test-behavior').value}:{profile:Object.fromEntries(profileFields.map(f=>[f,$('test-profile-'+f).value])),behavior:$('test-behavior').value,products:JSON.parse($('test-products').value)};}catch{notice('JSON data simulasi tidak valid. Periksa program, kontak, dokumen, atau produk.',true);return;}
- controller=new AbortController();busy(true);notice('Pengujian berjalan…');$('run-status').textContent='Sedang berjalan';trace=[];nodeEvents={};selectedAgent=null;$('trace-list').replaceChildren();document.querySelectorAll('[data-node]').forEach(b=>delete b.dataset.state);document.querySelectorAll('.edge').forEach(p=>p.classList.remove('active'));document.querySelector('.empty-chat')?.remove();bubble(message,'user');$('chat-input').value='';
- try{
-  const res=await fetch(studioUrl('/run'),{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message,session,revision:state.revision,profile_type:profile,...data})});
-  if(!res.ok){const error=await res.json();throw Error(error.message||error.error);}
-  const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';
-  while(true){const {done,value}=await reader.read();if(done){buffer+=decoder.decode();break;}buffer+=decoder.decode(value,{stream:true});let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(line.trim())onEvent(JSON.parse(line));}}
-  if(buffer.trim())onEvent(JSON.parse(buffer));
-  if(!trace.some(t=>t.node==='output'))throw Error('Koneksi pengujian terputus sebelum selesai.');notice('Pengujian selesai. Pilih langkah pada jejak eksekusi untuk memeriksa hasil.');
- }catch(error){notice(error.name==='AbortError'?'Pengujian dihentikan.':error.message,true);$('run-status').textContent='Terhenti';session=null;document.querySelectorAll('[data-state="running"]').forEach(b=>b.dataset.state='error');}
- finally{busy(false);}
+const layouts = {
+  cs: {
+    ...layout(
+      ['pembuka', 'profil_perusahaan', 'layanan', 'penutup', 'lainnya'],
+      ['get_knowledge', 'get_products', 'check_order', 'pesanan', 'create_order'],
+      [
+        ['profil_perusahaan', 'get_knowledge'],
+        ['layanan', 'get_knowledge'],
+        ['layanan', 'get_products'],
+        ['layanan', 'check_order'],
+        ['layanan', 'pesanan'],
+        ['pesanan', 'create_order'],
+        ['models', 'pesanan'],
+        ['lainnya', 'get_knowledge'],
+        ['lainnya', 'get_products'],
+        ['lainnya', 'check_order'],
+      ],
+      {
+        positions: {
+          get_knowledge: [360, 1010],
+          get_products: [595, 1010],
+          check_order: [830, 1010],
+          pesanan: [1065, 1010],
+          create_order: [1290, 1010],
+        },
+      },
+    ),
+    names: {
+      ...common,
+      pembuka: 'Pembuka',
+      profil_perusahaan: 'Profil Perusahaan',
+      layanan: 'Layanan',
+      penutup: 'Penutup',
+      lainnya: 'Lainnya',
+      get_knowledge: 'Knowledge',
+      get_products: 'Produk',
+      check_order: 'Cek pesanan',
+      create_order: 'Buat pesanan',
+      pesanan: 'Pesanan terstruktur',
+    },
+    describe: {
+      get_knowledge: 'Membaca Knowledge simulasi di bagian Data bisnis untuk pengujian.',
+      get_products: 'Mencari produk dari katalog simulasi.',
+      check_order: 'Membaca pesanan SIM yang dibuat dalam percakapan uji ini.',
+      create_order: 'Membuat pesanan SIM di memori sesi uji. Tidak membuat pesanan client.',
+      pesanan:
+        'Mengubah permintaan pesanan dari Layanan menjadi JSON sebelum create_order bila parser kode tidak dapat memastikannya. Nama produk selalu dicocokkan ke katalog.',
+    },
+    placeholder: 'Tulis pesan pelanggan, misalnya: Saya mau pesan…',
+    sandbox:
+      'SANDBOX · Tools dan pesanan simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.',
+  },
+  pendidikan: {
+    ...layout(
+      ['pembuka', 'profil_lembaga', 'program', 'jadwal', 'kontak', 'penutup', 'lainnya'],
+      ['get_profil_lembaga', 'get_program', 'get_jadwal', 'get_kontak', 'get_dokumen', 'kirim_dokumen'],
+      [
+        ['profil_lembaga', 'get_profil_lembaga'],
+        ['profil_lembaga', 'get_dokumen'],
+        ['profil_lembaga', 'kirim_dokumen'],
+        ['program', 'get_program'],
+        ['program', 'get_dokumen'],
+        ['program', 'kirim_dokumen'],
+        ['jadwal', 'get_jadwal'],
+        ['jadwal', 'get_dokumen'],
+        ['jadwal', 'kirim_dokumen'],
+        ['kontak', 'get_kontak'],
+        ['lainnya', 'get_profil_lembaga'],
+        ['lainnya', 'get_program'],
+        ['lainnya', 'get_jadwal'],
+        ['lainnya', 'get_kontak'],
+      ],
+    ),
+    names: {
+      ...common,
+      pembuka: 'Pembuka',
+      profil_lembaga: 'Profil Lembaga',
+      program: 'Program',
+      jadwal: 'Jadwal',
+      kontak: 'Kontak',
+      penutup: 'Penutup',
+      lainnya: 'Lainnya',
+      get_profil_lembaga: 'Profil & FAQ',
+      get_program: 'Baca program',
+      get_jadwal: 'Baca jadwal',
+      get_kontak: 'Baca kontak',
+      get_dokumen: 'Daftar dokumen',
+      kirim_dokumen: 'Kirim dokumen',
+    },
+    describe: {
+      get_profil_lembaga: 'Membaca profil lembaga dan FAQ simulasi.',
+      get_program: 'Membaca daftar program atau deskripsi satu program dari data simulasi.',
+      get_jadwal: 'Membaca jadwal simulasi beserta tanggal hari ini.',
+      get_kontak: 'Membaca daftar bagian, kontak, dan deskripsinya.',
+      get_dokumen: 'Membaca daftar dokumen (nama file, jenis, deskripsi, sudah dikirim).',
+      kirim_dokumen:
+        'Memilih dokumen untuk dikirim sebelum jawaban. Di sandbox hanya dicatat; tidak mengirim WhatsApp.',
+    },
+    placeholder: 'Tulis pesan penanya, misalnya: Kapan pendaftaran dibuka?',
+    sandbox:
+      'SANDBOX · Tools dan dokumen simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.',
+  },
 };
-window.addEventListener('beforeunload',e=>{if(dirty||running){e.preventDefault();e.returnValue='';}});
-$('edu-test-programs').value=pretty([{name:'Tahfidz Mukim Putra',description:'Program tahfidz berasrama untuk lulusan SD/MI, setara SMP. Lama studi 3 tahun, target 10 juz.\nBiaya pendaftaran Rp 350.000, biaya bulanan Rp 1.250.000.\nCara daftar: isi formulir di [ALAMAT FORMULIR], lalu bawa berkas saat tes.'},{name:"I'dad Lughawi",description:'Bahasa Arab intensif satu tahun. Biaya bulanan Rp 800.000.'}]);
-$('edu-test-contacts').value=pretty([{bagian:'Pendaftaran',kontak:'0856-0000-1100',deskripsi:'Kendala pendaftaran: formulir, berkas, jadwal tes.'},{bagian:'Keuangan',kontak:'0812-0000-5566',deskripsi:'Pembayaran biaya pendaftaran, SPP, keringanan biaya.'}]);
-$('edu-test-documents').value=pretty([{nama_file:'brosur-psb.pdf',jenis:'dokumen',deskripsi:'Brosur umum penerimaan santri baru.'},{nama_file:'formulir-pendaftaran.docx',jenis:'dokumen',deskripsi:'Template formulir pendaftaran untuk dicetak.'},{nama_file:'denah-lokasi.png',jenis:'gambar',deskripsi:'Denah dan rute ke pesantren.'}]);
-$('test-products').value=pretty([{name:'Produk Basic',type:'product',description:'Produk harian, satuan pcs',price:150000,stock:10,active:true},{name:'Produk Premium',type:'product',description:'Pilihan premium, satuan pcs',price:350000,stock:5,active:true}]);
-(async()=>{try{const me=await api('/api/me');if(me.role!=='owner')throw Error('Halaman ini hanya tersedia untuk pemilik layanan.');await loadProfiles();await load();$('access').hidden=true;$('studio').hidden=false;setZoom(($('canvas-viewport').clientWidth-20)/1500);}catch(error){$('access').textContent=error.message+' Buka dashboard untuk masuk.';const a=document.createElement('a');a.href='/dashboard';a.textContent=' Kembali ke dashboard';$('access').append(a);}})();
+let names, specialists, positions, edges, toolNodes;
+function useLayout(id) {
+  const l = layouts[id] ?? layouts.cs;
+  ({ names, specialists, positions, edges } = l);
+  toolNodes = l.tools;
+  describe = l.describe && { ...baseDescribe, ...l.describe };
+  $('chat-input').placeholder = l.placeholder;
+  document.querySelector('.sandbox-note').textContent = l.sandbox;
+  for (const [key, block] of [
+    ['cs', 'cs-sandbox'],
+    ['pendidikan', 'edu-sandbox'],
+  ])
+    $(block).hidden = key !== (layouts[id] ? id : 'cs');
+}
+let state,
+  selected = 'router',
+  dirty = false,
+  running = false,
+  session = null,
+  zoom = 0.7,
+  controller,
+  trace = [],
+  nodeEvents = {},
+  selectedAgent = null,
+  models = {};
+const profileFields = ['usaha', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq'];
+const path = '/api/admin/ai/studio';
+// Setiap profil punya alurnya sendiri; ?profile= memilih yang sedang disunting (CS Usaha bila kosong).
+let profile = new URLSearchParams(location.search).get('profile') || 'cs';
+const studioUrl = (suffix = '') => path + suffix + '?profile=' + encodeURIComponent(profile);
+const tierLabels = {
+  cheap: 'Model murah',
+  medium: 'Model sedang',
+  smart: 'Model cerdas',
+  structured: 'Model terstruktur',
+};
+// Di tier Terstruktur skema selalu dikirim, jadi kotaknya tampil tercentang dan terkunci; nilai yang tersimpan tidak
+// diubah supaya saat node dipindah ke tier lain, pilihan pemilik kembali seperti semula.
+function syncStructuredToggle() {
+  const node = state?.draft.nodes[selected],
+    box = $('node-structured-output');
+  if (!node || !['router', 'pesanan'].includes(selected)) return;
+  const forced = node.tier === 'structured';
+  box.checked = forced || node.structured_output === true;
+  box.disabled = running || forced;
+}
+const baseDescribe = {
+  input: 'Pesan pelanggan dari chat uji.',
+  context: 'Memperbarui konteks S-P-O setelah specialist menjawab.',
+  router: 'Memilih satu specialist dari pesan terbaru dan konteks sebelumnya.',
+  fallback:
+    'Membuat tiket dan mengirim pertanyaan ke nomor fallback. AI tetap menjawab topik lain sambil menunggu jawaban tim.',
+  memory:
+    'Riwayat pelanggan dan jawaban digunakan bersama oleh semua specialist. Dikelola otomatis, mengikuti batas memori global.',
+  router_memory: 'Ringkasan S-P-O terakhir. Dibaca router untuk memahami pesan lanjutan.',
+  models: 'Nama model mengikuti Pengaturan AI. Setiap agent dapat memilih tingkat atau model khusus.',
+  output: 'Jawaban specialist untuk pelanggan. Dalam sandbox, jawaban hanya tampil di chat uji.',
+};
+let describe = baseDescribe;
+const statusNames = {
+  running: 'Berjalan',
+  responded: 'Respons model',
+  done: 'Selesai',
+  routed: 'Agent dipilih',
+  retry: 'Retry / koreksi',
+  error: 'Gagal',
+  invalid: 'Output tidak valid',
+};
+function notice(message, error = false) {
+  $('notice').textContent = message;
+  $('notice').classList.toggle('error', error);
+}
+async function api(url, method = 'GET', body) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({ message: 'Respons server tidak dapat dibaca.' }));
+  if (!res.ok) throw Error(data.message || data.error || 'Permintaan gagal.');
+  return data;
+}
+function pretty(value) {
+  return JSON.stringify(value, null, 2);
+}
+function clearConversation() {
+  session = null;
+  $('chat-log').replaceChildren();
+  $('context-value').textContent = 'Belum ada konteks';
+}
+function versions() {
+  if (!state) return;
+  $('version').textContent =
+    `Draft r${state.revision}${dirty ? ' · belum disimpan' : ''} / Aktif v${state.active_version}`;
+  $('save').disabled = running || !dirty;
+  $('publish').disabled = running || dirty || state.revision === state.published_revision;
+  $('send').disabled = running || dirty;
+}
+function markDirty() {
+  dirty = true;
+  clearConversation();
+  versions();
+  notice('Ada perubahan lokal. Simpan draft sebelum menguji.');
+}
+function nodeButton(id) {
+  return document.querySelector(`[data-node="${id}"]`);
+}
+function draw() {
+  const svg = $('connections');
+  svg.replaceChildren();
+  for (const [from, to] of edges) {
+    const [x, y] = positions[from],
+      [tx, ty] = positions[to],
+      p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const support =
+      ['memory', 'router_memory', 'models'].includes(from) ||
+      to === 'router_memory' ||
+      (toolNodes.includes(to) && !state.draft.nodes[to]);
+    p.setAttribute('d', `M ${x + 186} ${y + 37} C ${x + 230} ${y + 37}, ${tx - 50} ${ty + 37}, ${tx} ${ty + 37}`);
+    p.setAttribute('class', 'edge' + (support ? ' support' : ''));
+    p.dataset.from = from;
+    p.dataset.to = to;
+    svg.append(p);
+  }
+  $('nodes').replaceChildren();
+  for (const [id, [x, y]] of Object.entries(positions)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className =
+      'flow-node' +
+      (['memory', 'router_memory', 'models'].includes(id)
+        ? ' support-node'
+        : toolNodes.includes(id) && !state.draft.nodes[id]
+          ? ' tool-node'
+          : '');
+    b.style.left = x + 'px';
+    b.style.top = y + 'px';
+    b.dataset.node = id;
+    b.setAttribute('aria-label', 'Node ' + names[id]);
+    const icon = document.createElement('span');
+    icon.className = 'node-icon';
+    icon.textContent =
+      id === 'pesanan'
+        ? '{}'
+        : id === 'router'
+          ? '⑂'
+          : id === 'context'
+            ? '◈'
+            : state.draft.nodes[id]
+              ? '✦'
+              : id === 'input'
+                ? '↗'
+                : id === 'output'
+                  ? '✓'
+                  : id === 'kirim_dokumen'
+                    ? '⇪'
+                    : '◇';
+    const text = document.createElement('span'),
+      title = document.createElement('strong'),
+      subtitle = document.createElement('small');
+    title.textContent = names[id];
+    subtitle.textContent = state.draft.nodes[id]
+      ? tierLabels[state.draft.nodes[id].tier]
+      : ['memory', 'router_memory'].includes(id)
+        ? 'Memori bersama'
+        : id === 'models'
+          ? 'Konfigurasi pemilik'
+          : id === 'input' || id === 'output'
+            ? 'Percakapan uji'
+            : 'Tool simulasi';
+    text.append(title, subtitle);
+    b.append(icon, text);
+    b.onclick = () => selectNode(id);
+    $('nodes').append(b);
+  }
+  for (const [text, x, y] of [
+    ['01 / MASUK & ROUTING', 35, 26],
+    ['02 / SATU SPECIALIST', 570, 26],
+    ['03 / KONTEKS & JAWABAN', 1060, 26],
+    ['MODEL & MEMORI', 55, 825],
+    ['TOOLS / SIMULASI', Math.min(...toolNodes.map(t => positions[t][0])), 977],
+  ]) {
+    const label = document.createElement('span');
+    label.className = 'canvas-label';
+    label.textContent = text;
+    label.style.left = x + 'px';
+    label.style.top = y + 'px';
+    $('nodes').append(label);
+  }
+  // Di ponsel node alur tampil sebagai daftar yang bisa diketuk, bukan kanvas yang diperkecil.
+  $('node-list').replaceChildren(
+    ...Object.keys(positions)
+      .filter(id => state.draft.nodes[id])
+      .map(id => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.node = id;
+        const title = document.createElement('strong'),
+          tier = document.createElement('small');
+        title.textContent = names[id];
+        tier.textContent = tierLabels[state.draft.nodes[id].tier];
+        b.append(title, tier);
+        b.onclick = () => selectNode(id);
+        return b;
+      }),
+  );
+  selectNode(selected);
+  setZoom(zoom);
+}
+function setZoom(value) {
+  zoom = Math.max(0.25, Math.min(1.25, value));
+  $('canvas').style.transform = `scale(${zoom})`;
+  $('canvas-size').style.width = 1500 * zoom + 'px';
+  $('canvas-size').style.height = 1080 * zoom + 'px';
+  $('zoom-value').textContent = Math.round(zoom * 100) + '%';
+}
+function selectNode(id) {
+  selected = id;
+  document.querySelectorAll('[data-node]').forEach(b => {
+    b.classList.toggle('selected', b.dataset.node === id);
+    b.setAttribute('aria-pressed', String(b.dataset.node === id));
+  });
+  $('node-id').textContent = id.toUpperCase();
+  $('node-title').textContent = names[id];
+  $('node-description').textContent =
+    describe[id] || 'Pengaturan instruksi, model, dan tools untuk agent ' + names[id] + '.';
+  const node = state.draft.nodes[id];
+  $('node-form').hidden = !node;
+  $('node-readonly').hidden = Boolean(node);
+  $('node-kind').textContent = node ? 'Agent' : 'Komponen tetap';
+  $('structured-settings').hidden = !['router', 'pesanan'].includes(id);
+  $('structured-hint').textContent =
+    'Selalu aktif bila node memakai tingkat Terstruktur. Di tingkat lain, centang hanya jika modelnya mendukung JSON Schema strict.' +
+    (id === 'pesanan'
+      ? ' Bila provider menolak schema, node otomatis mencoba ulang dengan schema di prompt.'
+      : ' Validasi enum aplikasi selalu aktif.');
+  $('router-settings').hidden = id !== 'router';
+  $('order-settings').hidden = id !== 'pesanan';
+  $('order-schema').textContent = pretty(state.orderSchema);
+  $('router-schema').textContent = pretty(state.routerSchema);
+  if (node) {
+    $('node-prompt').value = node.prompt;
+    $('node-tier').value = node.tier;
+    $('node-model').value = node.model;
+    $('node-tools').replaceChildren();
+    const allowed = state.allowedTools[id] || [];
+    for (const tool of allowed) {
+      const label = document.createElement('label'),
+        input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = tool;
+      input.checked = node.tools.includes(tool);
+      input.disabled = running;
+      input.onchange = () => updateNode();
+      label.append(input, document.createTextNode(tool));
+      $('node-tools').append(label);
+    }
+    if (!allowed.length) $('node-tools').textContent = 'Node ini tidak menggunakan tools bisnis.';
+    syncStructuredToggle();
+    resolvedModel();
+  } else
+    $('node-readonly').textContent =
+      id === 'models'
+        ? `Murah: ${models.model_cheap} · Sedang: ${models.model_medium} · Cerdas: ${models.model_smart} · Terstruktur: ${models.model_structured}`
+        : 'Komponen dikelola otomatis oleh NC-WA.';
+  $('node-output').textContent = nodeEvents[id] ? pretty(nodeEvents[id]) : 'Belum dijalankan.';
+}
+function resolvedModel() {
+  const node = state.draft.nodes[selected];
+  if (node)
+    $('resolved-model').textContent =
+      'Model yang digunakan: ' + (node.model || models['model_' + node.tier] || models.model || 'Belum dikonfigurasi');
+}
+function updateNode() {
+  if (running) return;
+  const node = state.draft.nodes[selected];
+  if (!node) return;
+  if (
+    (selected === 'router' || selected === 'pesanan') &&
+    node.tier !== 'structured' &&
+    $('node-tier').value !== 'structured'
+  )
+    node.structured_output = $('node-structured-output').checked;
+  node.prompt = $('node-prompt').value;
+  node.tier = $('node-tier').value;
+  node.model = $('node-model').value;
+  node.tools = [...$('node-tools').querySelectorAll('input:checked')].map(i => i.value);
+  nodeButton(selected).querySelector('small').textContent = tierLabels[node.tier];
+  syncStructuredToggle();
+  resolvedModel();
+  markDirty();
+}
+function bubble(content, kind) {
+  const p = document.createElement('p');
+  p.className = 'bubble ' + kind;
+  p.textContent = content;
+  $('chat-log').append(p);
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+}
+function onEvent(event) {
+  trace.push(event);
+  nodeEvents[event.node] = event;
+  if (event.session) session = event.session;
+  const b = nodeButton(event.node);
+  if (b) b.dataset.state = event.state;
+  if (event.node === 'input') $('context-value').textContent = event.context || 'Belum ada konteks';
+  if (event.node === 'router' && event.state === 'routed') {
+    selectedAgent = event.output.sub_agent;
+    document.querySelectorAll('.edge').forEach(p => {
+      if (p.dataset.from === 'router') p.classList.toggle('active', p.dataset.to === selectedAgent);
+    });
+  }
+  if (event.state === 'running' || event.state === 'done')
+    document.querySelectorAll('.edge').forEach(p => {
+      if (p.dataset.to === event.node && (!specialists.includes(p.dataset.from) || p.dataset.from === selectedAgent))
+        p.classList.add('active');
+    });
+  if (event.node === selected) $('node-output').textContent = pretty(event);
+  const row = document.createElement('button');
+  row.type = 'button';
+  const left = document.createElement('span'),
+    right = document.createElement('span');
+  left.textContent = `${String(trace.length).padStart(2, '0')} · ${names[event.node] || event.node} · ${statusNames[event.state] || event.state}`;
+  right.textContent = event.duration_ms === undefined ? '' : event.duration_ms + ' ms';
+  row.append(left, right);
+  row.onclick = () => {
+    $('trace-detail').textContent = pretty(event);
+    if (positions[event.node]) selectNode(event.node);
+  };
+  $('trace-list').append(row);
+  $('trace-list').scrollTop = $('trace-list').scrollHeight;
+  $('trace-detail').textContent = pretty(event);
+  if (event.node === 'output') {
+    $('run-status').textContent = event.state === 'done' ? 'Selesai · ' + event.duration_ms + ' ms' : 'Pengujian gagal';
+    if (event.state === 'done') {
+      for (const file of event.output.documents ?? []) bubble('Dokumen dikirim: ' + file, 'document');
+      bubble(event.output.answer, 'assistant');
+      $('context-value').textContent = event.output.context || 'Konteks belum berhasil diperbarui';
+    } else bubble('Pengujian gagal: ' + event.error + '. Periksa jejak eksekusi.', 'error');
+  }
+}
+function busy(value) {
+  running = value;
+  $('stop').hidden = !value;
+  $('reload').disabled = value;
+  $('reset').disabled = value;
+  for (const id of ['node-prompt', 'node-tier', 'node-model', 'node-structured-output', 'chat-input'])
+    $(id).disabled = value;
+  document
+    .querySelectorAll('.sandbox-data textarea,.sandbox-data input,.sandbox-data select')
+    .forEach(el => (el.disabled = value));
+  $('node-tools')
+    .querySelectorAll('input')
+    .forEach(i => (i.disabled = value));
+  syncStructuredToggle();
+  versions();
+}
+async function loadProfiles() {
+  const profiles = await api('/api/admin/ai/profiles');
+  $('profile-select').replaceChildren(
+    ...profiles.map(p => new Option(p.name.toUpperCase(), p.id, false, p.id === profile)),
+  );
+}
+$('profile-select').onchange = async e => {
+  if ((dirty || running) && !confirm('Perubahan draft yang belum disimpan akan hilang. Pindah profil?')) {
+    e.target.value = profile;
+    return;
+  }
+  profile = e.target.value;
+  history.replaceState(null, '', '?profile=' + encodeURIComponent(profile));
+  busy(true);
+  try {
+    await load();
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    busy(false);
+  }
+};
+async function load() {
+  const result = await api(studioUrl());
+  state = result;
+  useLayout(result.profile);
+  if (!state.draft.nodes[selected] && !positions[selected]) selected = 'router';
+  $('profile-name').textContent = $('canvas-profile').textContent = result.profile_name;
+  $('profile-status').textContent = result.enabled ? 'Aktif untuk klien' : 'Nonaktif untuk klien';
+  $('profile-status').classList.toggle('off', !result.enabled);
+  models = result.models;
+  dirty = false;
+  clearConversation();
+  trace = [];
+  nodeEvents = {};
+  $('trace-list').replaceChildren();
+  $('trace-detail').textContent = 'Belum ada proses.';
+  draw();
+  versions();
+  notice('Draft siap. Konfigurasi aktif tetap dipakai layanan sampai Anda mengaktifkan draft.');
+}
+$('node-form').onsubmit = e => e.preventDefault();
+for (const id of ['node-prompt', 'node-tier', 'node-model', 'node-structured-output'])
+  $(id).addEventListener('input', updateNode);
+$('zoom-in').onclick = () => setZoom(zoom + 0.1);
+$('zoom-out').onclick = () => setZoom(zoom - 0.1);
+$('fit').onclick = () => setZoom(($('canvas-viewport').clientWidth - 20) / 1500);
+$('reload').onclick = async () => {
+  if (dirty && !confirm('Buang perubahan lokal dan muat draft tersimpan?')) return;
+  try {
+    await load();
+  } catch (e) {
+    notice(e.message, true);
+  }
+};
+$('save').onclick = async () => {
+  busy(true);
+  try {
+    state = await api(studioUrl(), 'PUT', { revision: state.revision, draft: state.draft });
+    dirty = false;
+    clearConversation();
+    notice('Draft tersimpan. Jalankan pengujian sebelum mengaktifkan.');
+  } catch (e) {
+    notice(e.message, true);
+  } finally {
+    busy(false);
+  }
+};
+$('publish').onclick = () => {
+  $('publish-summary').textContent =
+    `Draft r${state.revision} akan menjadi versi aktif v${state.active_version + 1} untuk seluruh layanan.`;
+  $('publish-dialog').showModal();
+};
+$('cancel-publish').onclick = () => $('publish-dialog').close();
+$('confirm-publish').onclick = async () => {
+  const button = $('confirm-publish');
+  button.disabled = true;
+  try {
+    state = await api(studioUrl('/publish'), 'POST', { revision: state.revision });
+    $('publish-dialog').close();
+    versions();
+    notice('Versi aktif diperbarui. Pesan baru menggunakan konfigurasi ini.');
+  } catch (e) {
+    notice(e.message, true);
+    $('publish-dialog').close();
+  } finally {
+    button.disabled = false;
+  }
+};
+$('reset').onclick = () => {
+  clearConversation();
+  notice('Percakapan uji baru. Riwayat dan pesanan simulasi dimulai ulang.');
+};
+document.querySelectorAll('.sandbox-data textarea,.sandbox-data input,.sandbox-data select').forEach(el =>
+  el.addEventListener('input', () => {
+    clearConversation();
+    notice('Data uji berubah. Pengujian berikutnya memakai percakapan baru.');
+  }),
+);
+$('stop').onclick = () => controller?.abort();
+$('chat-form').onsubmit = async e => {
+  e.preventDefault();
+  if (running || dirty) return;
+  const message = $('chat-input').value.trim();
+  if (!message) return;
+  let data;
+  try {
+    data =
+      profile === 'pendidikan'
+        ? {
+            edu: {
+              name: $('edu-test-name').value,
+              lembaga: $('edu-test-lembaga').value,
+              jadwal: $('edu-test-jadwal').value,
+              faq: $('edu-test-faq').value,
+              programs: JSON.parse($('edu-test-programs').value),
+              contacts: JSON.parse($('edu-test-contacts').value),
+              documents: JSON.parse($('edu-test-documents').value),
+            },
+            behavior: $('edu-test-behavior').value,
+          }
+        : {
+            profile: Object.fromEntries(profileFields.map(f => [f, $('test-profile-' + f).value])),
+            behavior: $('test-behavior').value,
+            products: JSON.parse($('test-products').value),
+          };
+  } catch {
+    notice('JSON data simulasi tidak valid. Periksa program, kontak, dokumen, atau produk.', true);
+    return;
+  }
+  controller = new AbortController();
+  busy(true);
+  notice('Pengujian berjalan…');
+  $('run-status').textContent = 'Sedang berjalan';
+  trace = [];
+  nodeEvents = {};
+  selectedAgent = null;
+  $('trace-list').replaceChildren();
+  document.querySelectorAll('[data-node]').forEach(b => delete b.dataset.state);
+  document.querySelectorAll('.edge').forEach(p => p.classList.remove('active'));
+  document.querySelector('.empty-chat')?.remove();
+  bubble(message, 'user');
+  $('chat-input').value = '';
+  try {
+    const res = await fetch(studioUrl('/run'), {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, session, revision: state.revision, profile_type: profile, ...data }),
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw Error(error.message || error.error);
+    }
+    const reader = res.body.getReader(),
+      decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let i;
+      while ((i = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, i);
+        buffer = buffer.slice(i + 1);
+        if (line.trim()) onEvent(JSON.parse(line));
+      }
+    }
+    if (buffer.trim()) onEvent(JSON.parse(buffer));
+    if (!trace.some(t => t.node === 'output')) throw Error('Koneksi pengujian terputus sebelum selesai.');
+    notice('Pengujian selesai. Pilih langkah pada jejak eksekusi untuk memeriksa hasil.');
+  } catch (error) {
+    notice(error.name === 'AbortError' ? 'Pengujian dihentikan.' : error.message, true);
+    $('run-status').textContent = 'Terhenti';
+    session = null;
+    document.querySelectorAll('[data-state="running"]').forEach(b => (b.dataset.state = 'error'));
+  } finally {
+    busy(false);
+  }
+};
+window.addEventListener('beforeunload', e => {
+  if (dirty || running) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+$('edu-test-programs').value = pretty([
+  {
+    name: 'Tahfidz Mukim Putra',
+    description:
+      'Program tahfidz berasrama untuk lulusan SD/MI, setara SMP. Lama studi 3 tahun, target 10 juz.\nBiaya pendaftaran Rp 350.000, biaya bulanan Rp 1.250.000.\nCara daftar: isi formulir di [ALAMAT FORMULIR], lalu bawa berkas saat tes.',
+  },
+  { name: "I'dad Lughawi", description: 'Bahasa Arab intensif satu tahun. Biaya bulanan Rp 800.000.' },
+]);
+$('edu-test-contacts').value = pretty([
+  { bagian: 'Pendaftaran', kontak: '0856-0000-1100', deskripsi: 'Kendala pendaftaran: formulir, berkas, jadwal tes.' },
+  { bagian: 'Keuangan', kontak: '0812-0000-5566', deskripsi: 'Pembayaran biaya pendaftaran, SPP, keringanan biaya.' },
+]);
+$('edu-test-documents').value = pretty([
+  { nama_file: 'brosur-psb.pdf', jenis: 'dokumen', deskripsi: 'Brosur umum penerimaan santri baru.' },
+  {
+    nama_file: 'formulir-pendaftaran.docx',
+    jenis: 'dokumen',
+    deskripsi: 'Template formulir pendaftaran untuk dicetak.',
+  },
+  { nama_file: 'denah-lokasi.png', jenis: 'gambar', deskripsi: 'Denah dan rute ke pesantren.' },
+]);
+$('test-products').value = pretty([
+  {
+    name: 'Produk Basic',
+    type: 'product',
+    description: 'Produk harian, satuan pcs',
+    price: 150000,
+    stock: 10,
+    active: true,
+  },
+  {
+    name: 'Produk Premium',
+    type: 'product',
+    description: 'Pilihan premium, satuan pcs',
+    price: 350000,
+    stock: 5,
+    active: true,
+  },
+]);
+(async () => {
+  try {
+    const me = await api('/api/me');
+    if (me.role !== 'owner') throw Error('Halaman ini hanya tersedia untuk pemilik layanan.');
+    await loadProfiles();
+    await load();
+    $('access').hidden = true;
+    $('studio').hidden = false;
+    setZoom(($('canvas-viewport').clientWidth - 20) / 1500);
+  } catch (error) {
+    $('access').textContent = error.message + ' Buka dashboard untuk masuk.';
+    const a = document.createElement('a');
+    a.href = '/dashboard';
+    a.textContent = ' Kembali ke dashboard';
+    $('access').append(a);
+  }
+})();

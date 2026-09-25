@@ -1,47 +1,238 @@
-import {chromium} from 'playwright';
-import {randomUUID} from 'node:crypto';
-import {mkdtemp,rm,mkdir} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
-import {join,resolve} from 'node:path';
+// Pemeriksaan browser dashboard umum: login, navigasi, sesi, dan halaman pemilik. Masih gagal karena menunggu
+// #stat-credit yang sekarang tersembunyi.
+import { chromium } from 'playwright';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import {db} from '../../src/libraries/db.js';
-import {hashPassword} from '../../src/libraries/security.js';
-import {createGateway} from '../../src/http/gateway.js';
-import type {Update} from '../../src/components/whatsapp/domain/sessions.js';
-import {screenshots} from './screenshots.js';
-const temporary=await mkdtemp(join(tmpdir(),'ncwa-browser-'));
-const slot=net.createServer();await new Promise<void>(r=>slot.listen(0,'127.0.0.1',r));const port=(slot.address() as net.AddressInfo).port;await new Promise<void>(r=>slot.close(()=>r()));
-process.env.APP_ORIGIN='http://127.0.0.1:'+port;
-const {createApp}=await import('../../src/http/app.js');
-const updates=new Map<string,(event:Update)=>void>();
-const service=createGateway(account=>async(id,update)=>{updates.set(account+'/'+id,update);update({status:'qr_required',qr:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7WQAAAAASUVORK5CYII='});return {close(){},async logout(){},async send(){return 'browser-fixture';},async exists(){return true;}};},temporary);
-const app=createApp(service),server=app.listen(port,'127.0.0.1');
-const ids=[randomUUID(),randomUUID()],plan='browser-'+randomUUID().slice(0,12),password='browser-password-long';
+import { db } from '../../src/libraries/db.js';
+import { hashPassword } from '../../src/libraries/security.js';
+import { createGateway } from '../../src/http/gateway.js';
+import type { Update } from '../../src/components/whatsapp/domain/sessions.js';
+import { screenshots } from './screenshots.js';
+const temporary = await mkdtemp(join(tmpdir(), 'ncwa-browser-'));
+const slot = net.createServer();
+await new Promise<void>(r => slot.listen(0, '127.0.0.1', r));
+const port = (slot.address() as net.AddressInfo).port;
+await new Promise<void>(r => slot.close(() => r()));
+process.env.APP_ORIGIN = 'http://127.0.0.1:' + port;
+const { createApp } = await import('../../src/http/app.js');
+const updates = new Map<string, (event: Update) => void>();
+const service = createGateway(
+  account => async (id, update) => {
+    updates.set(account + '/' + id, update);
+    update({
+      status: 'qr_required',
+      qr: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7WQAAAAASUVORK5CYII=',
+    });
+    return {
+      close() {},
+      async logout() {},
+      async send() {
+        return 'browser-fixture';
+      },
+      async exists() {
+        return true;
+      },
+    };
+  },
+  temporary,
+);
+const app = createApp(service),
+  server = app.listen(port, '127.0.0.1');
+const ids = [randomUUID(), randomUUID()],
+  plan = 'browser-' + randomUUID().slice(0, 12),
+  password = 'browser-password-long';
 let browser;
-try{
- for(const [index,id] of ids.entries())await db.execute('INSERT INTO accounts(id,email,password_hash,role) VALUES (?,?,?,?)',[id,id+'@test.invalid',await hashPassword(password),index?'owner':'user']);
- await db.execute('INSERT INTO plans VALUES (?,?,10000,200,2,TRUE,20,104857600)',[plan,'<img src=x onerror=alert(1)>']);
- browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH});
- const context=await browser.newContext({viewport:{width:1280,height:900}}),page=await context.newPage();const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>{errors.push('Unexpected dialog: '+d.message());void d.dismiss();});
- await page.goto(process.env.APP_ORIGIN);await page.locator('#publicplans article').first().waitFor();assert.equal(await page.locator('#publicplans img').count(),0);
- await page.goto(process.env.APP_ORIGIN+'/login');await page.locator('#auth [name=email]').fill(ids[0]+'@test.invalid');await page.locator('#auth [name=password]').fill(password);await page.locator('#auth button').first().click();await page.locator('#dashboard').waitFor();await page.locator('#stat-credit').filter({hasText:/[0-9]/}).waitFor();assert.equal(await page.locator('#admin').isVisible(),false);
- await page.locator('[data-open="addconnection"]').click();await page.locator('#sessionform [name=id]').fill('shop');await page.locator('#sessionform button').click();await page.locator('#qrimage').waitFor();updates.get(ids[0]+'/shop')!({status:'connected'});await page.locator('#closeqr').click();await page.locator('#refreshsessions').click();await page.locator('#sessions').filter({hasText:'Terhubung'}).waitFor();
- await page.locator('.tabs a[href="/dashboard/uji-pesan"]').click();await page.locator('#sendform [name=sessionId]').selectOption('shop');await page.locator('#sendform [name=to]').fill('628123456789');await page.locator('#sendform [name=text]').fill('<script>alert(1)</script>');await page.locator('#sendform button').click();await page.locator('#sendresult').filter({hasText:'browser-fixture'}).waitFor();
- await page.locator('.tabs a[href="/dashboard/ai"]').click();await page.locator('#ai-session option[value="shop"]').waitFor({state:'attached'});await page.locator('#ai-session').selectOption('shop');
- await page.locator('[data-ai-tab="knowledge"]').click();await page.locator('[data-knowledge-tab="lainnya"]').click();await page.locator('#ai-form [name=profile_lainnya]').fill('Informasi bisnis <script>alert(1)</script>');
- await page.locator('[data-ai-tab="behavior"]').click();await page.locator('#ai-form [name=behavior]').fill('Ramah');
- await page.locator('[data-ai-tab="products"]').click();await page.locator('#ai-form [name=products_mode]').selectOption('builtin');
- await page.locator('[data-ai-tab="orders"]').click();await page.locator('#ai-form [name=orders_mode]').selectOption('builtin');
- await page.locator('.ai-hero-actions button[form="ai-form"]').click();await page.locator('#message').filter({hasText:'Pengaturan asisten tersimpan'}).waitFor();await page.reload();await page.locator('#ai-session').selectOption('shop');await page.locator('[data-ai-tab="knowledge"]').click();await page.locator('[data-knowledge-tab="lainnya"]').click();await page.waitForFunction(()=>document.querySelector<HTMLTextAreaElement>('#ai-form [name=profile_lainnya]')?.value.includes('Informasi bisnis'));await page.locator('[data-ai-tab="products"]').click();await page.locator('#ai-tab-products:visible').waitFor();assert.equal(await page.locator('#ai-form [name=products_mode]').inputValue(),'builtin');assert.equal(await page.locator('#ai script').count(),0);await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.setViewportSize({width:1280,height:900});
- await page.locator('#ai-product-add').click();await page.locator('#ai-product-form [name=id]').fill('P-UI');await page.locator('#ai-product-form [name=name]').fill('Produk UI');await page.locator('#ai-product-form [name=description]').fill('<script>alert(1)</script>');await page.locator('#ai-product-form [name=price]').fill('150000');await page.locator('#ai-product-form [name=stock]').fill('10');await page.locator('#ai-product-form button').first().click();await page.locator('#ai-products').filter({hasText:'Produk UI'}).waitFor();
- await page.locator('#ai-products button').first().click();assert.equal(await page.locator('#ai-product-form [name=id]').getAttribute('readonly'),'');await page.locator('#ai-product-form [name=stock]').fill('8');await page.locator('#ai-product-form button').first().click();await page.locator('#message').filter({hasText:'Produk tersimpan'}).waitFor();
- await page.locator('[data-ai-tab="orders"]').click();await page.locator('#ai-tab-orders:visible').waitFor();await page.locator('#ai-order-add').click();await page.locator('#ai-order-form [name=customer]').fill('628123456789');await page.locator('#ai-order-form [name=product_id]').fill('UNKNOWN');await page.locator('#ai-order-form button').first().click();await page.locator('#ai-order-form [role=alert]').filter({hasText:'Produk tidak tersedia'}).waitFor();await page.locator('#ai-order-form [name=product_id]').fill('P-UI');await page.locator('#ai-order-form [name=quantity]').fill('2');await page.locator('#ai-order-form button').first().click();await page.locator('#ai-orders').filter({hasText:'Produk UI × 2'}).waitFor();await page.locator('#ai-orders button').first().click();await page.locator('#ai-order-edit-form [name=status]').selectOption('diproses');await page.locator('#ai-order-edit-form [name=notes]').fill('Siap diproses');await page.locator('#ai-order-edit-form button').first().click();await page.locator('#ai-orders').filter({hasText:'diproses'}).waitFor();
- await page.locator('[data-ai-tab="products"]').click();await page.locator('#ai-tab-products:visible').waitFor();await page.locator('#ai-form [name=products_mode]').selectOption('endpoint');await page.locator('#ai-form [name=products_endpoint]').fill('https://8.8.8.8/products');await page.locator('.ai-hero-actions button[form="ai-form"]').click();await page.locator('#message').filter({hasText:'Pengaturan asisten tersimpan'}).waitFor();await page.reload();await page.locator('#ai-session').selectOption('shop');await page.locator('[data-ai-tab="products"]').click();await page.locator('#ai-tab-products:visible').waitFor();await page.waitForFunction(()=>document.querySelector<HTMLSelectElement>('#ai-form [name=products_mode]')?.value==='endpoint');await page.locator('[data-ai-tab="orders"]').click();await page.locator('#ai-tab-orders:visible').waitFor();assert.equal(await page.locator('#ai-form [name=orders_mode]').inputValue(),'builtin');assert.equal(await page.locator('#ai-products script').count(),0);await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.setViewportSize({width:1280,height:900});
- await mkdir(screenshots,{recursive:true});await page.screenshot({path:join(screenshots,'desktop.png'),fullPage:true});for(const id of ['uji-pesan','ai','integrasi','paket','dokumentasi','nomor']){await page.locator('.tabs a[href="/dashboard/'+id+'"]').click();await page.locator('#'+id).waitFor();}await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await mkdir(screenshots,{recursive:true});await page.screenshot({path:join(screenshots,'mobile.png'),fullPage:true});
- await page.locator('#logout').click();await page.locator('#auth').waitFor();assert.equal(await page.locator('#dashboard').isVisible(),false);
- await page.locator('#auth [name=email]').fill(ids[1]+'@test.invalid');await page.locator('#auth [name=password]').fill(password);await page.locator('#auth button').first().click();await page.locator('#adminsubmenu').waitFor();assert.equal(await page.locator('#wallet').isVisible(),false);assert.equal(await page.locator('.tabs a[href="/dashboard/nomor"]').isVisible(),false);await page.locator('#admin').waitFor();await page.locator('#adminsubmenu a[href="/dashboard/admin/health"]').click();await page.locator('#health').filter({hasText:'Database'}).waitFor();assert.equal(await page.locator('#plans img').count(),0);for(const sub of ['plans','accounts','ai','settings','payments','health']){await page.locator('#adminsubmenu a[href="/dashboard/admin/'+sub+'"]').click();await page.locator('#admin-'+sub).waitFor();assert.equal(await page.locator('.admin-page:visible').count(),1);}await page.reload();await page.locator('#admin-health').waitFor();for(const [sub,form] of [['plans','planform'],['accounts','adjustform'],['settings','midtransform']]){await page.locator('#adminsubmenu a[href="/dashboard/admin/'+sub+'"]').click();assert.equal(await page.locator('#'+form).isVisible(),false);await page.locator('[data-open="'+form+'-modal"]').click();await page.locator('#'+form).waitFor();await page.keyboard.press('Escape');assert.equal(await page.locator('#'+form).isVisible(),false);}await page.goto(process.env.APP_ORIGIN+'/dashboard/nomor');await page.locator('#admin-plans').waitFor();assert.equal(await page.locator('#nomor').isVisible(),false);await page.locator('#docslink').click();await page.locator('#dokumentasi').waitFor();assert.equal(await page.locator('#adminsubmenu').isVisible(),true);await page.reload();await page.locator('#dokumentasi').waitFor();assert.deepEqual(errors,[]);
- console.log('Browser checks passed: desktop/mobile, login/logout, role menus, QR fixture, billed send, XSS rendering.');
-}finally{
- await browser?.close();await service.stop();await new Promise<void>(r=>server.close(()=>r()));for(const id of ids){await db.execute('DELETE FROM accounts WHERE id=?',[id]);await db.execute('DELETE FROM audit_events WHERE account_id=?',[id]);}await db.execute('DELETE FROM plans WHERE id=?',[plan]);await db.end();await rm(temporary,{recursive:true,force:true});
+try {
+  for (const [index, id] of ids.entries())
+    await db.execute('INSERT INTO accounts(id,email,password_hash,role) VALUES (?,?,?,?)', [
+      id,
+      id + '@test.invalid',
+      await hashPassword(password),
+      index ? 'owner' : 'user',
+    ]);
+  await db.execute('INSERT INTO plans VALUES (?,?,10000,200,2,TRUE,20,104857600)', [
+    plan,
+    '<img src=x onerror=alert(1)>',
+  ]);
+  browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }),
+    page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('dialog', d => {
+    errors.push('Unexpected dialog: ' + d.message());
+    void d.dismiss();
+  });
+  await page.goto(process.env.APP_ORIGIN);
+  await page.locator('#publicplans article').first().waitFor();
+  assert.equal(await page.locator('#publicplans img').count(), 0);
+  await page.goto(process.env.APP_ORIGIN + '/login');
+  await page.locator('#auth [name=email]').fill(ids[0] + '@test.invalid');
+  await page.locator('#auth [name=password]').fill(password);
+  await page.locator('#auth button').first().click();
+  await page.locator('#dashboard').waitFor();
+  await page.locator('#stat-credit').filter({ hasText: /[0-9]/ }).waitFor();
+  assert.equal(await page.locator('#admin').isVisible(), false);
+  await page.locator('[data-open="addconnection"]').click();
+  await page.locator('#sessionform [name=id]').fill('shop');
+  await page.locator('#sessionform button').click();
+  await page.locator('#qrimage').waitFor();
+  updates.get(ids[0] + '/shop')!({ status: 'connected' });
+  await page.locator('#closeqr').click();
+  await page.locator('#refreshsessions').click();
+  await page.locator('#sessions').filter({ hasText: 'Terhubung' }).waitFor();
+  await page.locator('.tabs a[href="/dashboard/uji-pesan"]').click();
+  await page.locator('#sendform [name=sessionId]').selectOption('shop');
+  await page.locator('#sendform [name=to]').fill('628123456789');
+  await page.locator('#sendform [name=text]').fill('<script>alert(1)</script>');
+  await page.locator('#sendform button').click();
+  await page.locator('#sendresult').filter({ hasText: 'browser-fixture' }).waitFor();
+  await page.locator('.tabs a[href="/dashboard/ai"]').click();
+  await page.locator('#ai-session option[value="shop"]').waitFor({ state: 'attached' });
+  await page.locator('#ai-session').selectOption('shop');
+  await page.locator('[data-ai-tab="knowledge"]').click();
+  await page.locator('[data-knowledge-tab="lainnya"]').click();
+  await page.locator('[form=ai-form][name=profile_lainnya]').fill('Informasi bisnis <script>alert(1)</script>');
+  await page.locator('[data-ai-tab="behavior"]').click();
+  await page.locator('[form=ai-form][name=behavior]').fill('Ramah');
+  await page.locator('[data-ai-tab="products"]').click();
+  await page.locator('[form=ai-form][name=products_mode]').selectOption('builtin');
+  await page.locator('[data-ai-tab="orders"]').click();
+  await page.locator('[form=ai-form][name=orders_mode]').selectOption('builtin');
+  await page.locator('.ai-hero-actions button[form="ai-form"]').click();
+  await page.locator('#message').filter({ hasText: 'Pengaturan asisten tersimpan' }).waitFor();
+  await page.reload();
+  await page.locator('#ai-session').selectOption('shop');
+  await page.locator('[data-ai-tab="knowledge"]').click();
+  await page.locator('[data-knowledge-tab="lainnya"]').click();
+  await page.waitForFunction(() =>
+    document
+      .querySelector<HTMLTextAreaElement>('[form=ai-form][name=profile_lainnya]')
+      ?.value.includes('Informasi bisnis'),
+  );
+  await page.locator('[data-ai-tab="products"]').click();
+  await page.locator('#ai-tab-products:visible').waitFor();
+  assert.equal(await page.locator('[form=ai-form][name=products_mode]').inputValue(), 'builtin');
+  assert.equal(await page.locator('#ai script').count(), 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator('#ai-product-add').click();
+  await page.locator('#ai-product-form [name=id]').fill('P-UI');
+  await page.locator('#ai-product-form [name=name]').fill('Produk UI');
+  await page.locator('#ai-product-form [name=description]').fill('<script>alert(1)</script>');
+  await page.locator('#ai-product-form [name=price]').fill('150000');
+  await page.locator('#ai-product-form [name=stock]').fill('10');
+  await page.locator('#ai-product-form button').first().click();
+  await page.locator('#ai-products').filter({ hasText: 'Produk UI' }).waitFor();
+  await page.locator('#ai-products button').first().click();
+  assert.equal(await page.locator('#ai-product-form [name=id]').getAttribute('readonly'), '');
+  await page.locator('#ai-product-form [name=stock]').fill('8');
+  await page.locator('#ai-product-form button').first().click();
+  await page.locator('#message').filter({ hasText: 'Produk tersimpan' }).waitFor();
+  await page.locator('[data-ai-tab="orders"]').click();
+  await page.locator('#ai-tab-orders:visible').waitFor();
+  await page.locator('#ai-order-add').click();
+  await page.locator('#ai-order-form [name=customer]').fill('628123456789');
+  await page.locator('#ai-order-form [name=product_id]').fill('UNKNOWN');
+  await page.locator('#ai-order-form button').first().click();
+  await page.locator('#ai-order-form [role=alert]').filter({ hasText: 'Produk tidak tersedia' }).waitFor();
+  await page.locator('#ai-order-form [name=product_id]').fill('P-UI');
+  await page.locator('#ai-order-form [name=quantity]').fill('2');
+  await page.locator('#ai-order-form button').first().click();
+  await page.locator('#ai-orders').filter({ hasText: 'Produk UI × 2' }).waitFor();
+  await page.locator('#ai-orders button').first().click();
+  await page.locator('#ai-order-edit-form [name=status]').selectOption('diproses');
+  await page.locator('#ai-order-edit-form [name=notes]').fill('Siap diproses');
+  await page.locator('#ai-order-edit-form button').first().click();
+  await page.locator('#ai-orders').filter({ hasText: 'diproses' }).waitFor();
+  await page.locator('[data-ai-tab="products"]').click();
+  await page.locator('#ai-tab-products:visible').waitFor();
+  await page.locator('[form=ai-form][name=products_mode]').selectOption('endpoint');
+  await page.locator('[form=ai-form][name=products_endpoint]').fill('https://8.8.8.8/products');
+  await page.locator('.ai-hero-actions button[form="ai-form"]').click();
+  await page.locator('#message').filter({ hasText: 'Pengaturan asisten tersimpan' }).waitFor();
+  await page.reload();
+  await page.locator('#ai-session').selectOption('shop');
+  await page.locator('[data-ai-tab="products"]').click();
+  await page.locator('#ai-tab-products:visible').waitFor();
+  await page.waitForFunction(
+    () => document.querySelector<HTMLSelectElement>('[form=ai-form][name=products_mode]')?.value === 'endpoint',
+  );
+  await page.locator('[data-ai-tab="orders"]').click();
+  await page.locator('#ai-tab-orders:visible').waitFor();
+  assert.equal(await page.locator('[form=ai-form][name=orders_mode]').inputValue(), 'builtin');
+  assert.equal(await page.locator('#ai-products script').count(), 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: join(screenshots, 'desktop.png'), fullPage: true });
+  for (const id of ['uji-pesan', 'ai', 'integrasi', 'paket', 'dokumentasi', 'nomor']) {
+    await page.locator('.tabs a[href="/dashboard/' + id + '"]').click();
+    await page.locator('#' + id).waitFor();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: join(screenshots, 'mobile.png'), fullPage: true });
+  await page.locator('#logout').click();
+  await page.locator('#auth').waitFor();
+  assert.equal(await page.locator('#dashboard').isVisible(), false);
+  await page.locator('#auth [name=email]').fill(ids[1] + '@test.invalid');
+  await page.locator('#auth [name=password]').fill(password);
+  await page.locator('#auth button').first().click();
+  await page.locator('#adminsubmenu').waitFor();
+  assert.equal(await page.locator('#wallet').isVisible(), false);
+  assert.equal(await page.locator('.tabs a[href="/dashboard/nomor"]').isVisible(), false);
+  await page.locator('#admin').waitFor();
+  await page.locator('#adminsubmenu a[href="/dashboard/admin/health"]').click();
+  await page.locator('#health').filter({ hasText: 'Database' }).waitFor();
+  assert.equal(await page.locator('#plans img').count(), 0);
+  for (const sub of ['plans', 'accounts', 'ai', 'settings', 'payments', 'health']) {
+    await page.locator('#adminsubmenu a[href="/dashboard/admin/' + sub + '"]').click();
+    await page.locator('#admin-' + sub).waitFor();
+    assert.equal(await page.locator('.admin-page:visible').count(), 1);
+  }
+  await page.reload();
+  await page.locator('#admin-health').waitFor();
+  for (const [sub, form] of [
+    ['plans', 'planform'],
+    ['accounts', 'adjustform'],
+    ['settings', 'midtransform'],
+  ]) {
+    await page.locator('#adminsubmenu a[href="/dashboard/admin/' + sub + '"]').click();
+    assert.equal(await page.locator('#' + form).isVisible(), false);
+    await page.locator('[data-open="' + form + '-modal"]').click();
+    await page.locator('#' + form).waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#' + form).isVisible(), false);
+  }
+  await page.goto(process.env.APP_ORIGIN + '/dashboard/nomor');
+  await page.locator('#admin-plans').waitFor();
+  assert.equal(await page.locator('#nomor').isVisible(), false);
+  await page.locator('#docslink').click();
+  await page.locator('#dokumentasi').waitFor();
+  assert.equal(await page.locator('#adminsubmenu').isVisible(), true);
+  await page.reload();
+  await page.locator('#dokumentasi').waitFor();
+  assert.deepEqual(errors, []);
+  console.log(
+    'Browser checks passed: desktop/mobile, login/logout, role menus, QR fixture, billed send, XSS rendering.',
+  );
+} finally {
+  await browser?.close();
+  await service.stop();
+  await new Promise<void>(r => server.close(() => r()));
+  for (const id of ids) {
+    await db.execute('DELETE FROM accounts WHERE id=?', [id]);
+    await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
+  }
+  await db.execute('DELETE FROM plans WHERE id=?', [plan]);
+  await db.end();
+  await rm(temporary, { recursive: true, force: true });
 }

@@ -1,0 +1,25 @@
+/* Paket aktif yang menyatu dengan ikon robot di header Asisten AI. */
+.ai-hero-plan {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 11px 6px 6px;
+  border: 1px solid #d8ebe0;
+  border-radius: 15px;
+  background: #f4fbf7;
+}
+.ai-hero-plan .ai-hero-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+}
+.ai-hero-plan .ai-hero-icon svg {
+  width: 25px;
+  height: 25px;
+}
+.ai-active-plan {
+  font-size: 12px;
+  font-weight: 750;
+  color: #087a56;
+  white-space: nowrap;
+}

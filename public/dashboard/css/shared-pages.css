@@ -1,0 +1,479 @@
+/* Gaya visual bersama untuk halaman akun dan administrasi. */
+:root {
+  --green: #087f59;
+  --line: #e0e9e8;
+  --muted: #687e8d;
+}
+body {
+  background: #f5f9f8;
+  color: #13313c;
+}
+.workspace {
+  background: radial-gradient(ellipse at 88% 0%, #e3f5eb80, transparent 45%), #f5f9f8;
+  color: #13313c;
+}
+.workspace .heading {
+  border: 0;
+  padding-bottom: 0;
+  margin-bottom: 26px;
+}
+.workspace .heading h1,
+.client-workspace .heading h1 {
+  font-size: 38px;
+  letter-spacing: -1.3px;
+  font-weight: 750;
+  color: #092b38;
+  margin-bottom: 10px;
+}
+.page-intro {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #687e8d;
+  margin: 0 0 12px;
+  max-width: 730px;
+}
+.page-intro:empty {
+  display: none;
+}
+.workspace #dashboard > section:not(#userstats):not(#paket) {
+  background: #fff;
+  border: 1px solid #e0e9e8;
+  border-radius: 14px;
+  box-shadow: 0 7px 24px #163d3208;
+  padding: 26px;
+}
+.section-lead {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.section-lead h3 {
+  font-size: 20px;
+  letter-spacing: -0.5px;
+  margin: 0 0 4px;
+  color: #15333f;
+}
+.section-lead p {
+  font-size: 13px;
+  margin: 0;
+  color: #687e8d;
+}
+.section-mark {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #e1f5ea;
+  color: #087954;
+  font-size: 25px;
+}
+.workspace button,
+#auth button {
+  background: linear-gradient(110deg, #118b63, #087b54);
+  border: 1px solid #0b8e61;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  box-shadow: 0 2px 4px #0d6c4410;
+}
+.workspace button:hover,
+#auth button:hover {
+  background: #086c4d;
+}
+.workspace button.secondary,
+#auth button.secondary {
+  background: #fff;
+  border-color: #dbe5e7;
+  color: #355c5d;
+  box-shadow: none;
+}
+.workspace button.secondary:hover {
+  background: #f1f8f4;
+}
+.workspace button:disabled {
+  opacity: 0.55;
+}
+.workspace label {
+  font-size: 12px;
+  color: #395665;
+  font-weight: 600;
+}
+.workspace input,
+.workspace select,
+.workspace textarea,
+#auth input {
+  border: 1px solid #dce6e8;
+  border-radius: 9px;
+  background: #fcfefd;
+  padding: 12px;
+  color: #183d46;
+}
+.workspace input:focus,
+.workspace select:focus,
+.workspace textarea:focus,
+#auth input:focus {
+  border-color: #35aa7d;
+  box-shadow: 0 0 0 3px #14a66d12;
+  outline: 0;
+}
+.workspace .table-wrap {
+  border: 1px solid #e4eceb;
+  border-radius: 10px;
+  overflow: auto;
+  background: #fff;
+}
+.workspace th,
+.client-workspace th {
+  background: #f5f8fa;
+  color: #718493;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 12px 16px;
+  border-color: #e8eff0;
+}
+.workspace td,
+.client-workspace td {
+  font-size: 12px;
+  color: #5e7486;
+  padding: 15px 16px;
+  border-color: #eaf0f2;
+}
+.workspace tbody tr:hover {
+  background: #f9fcfa;
+}
+.workspace .row-actions {
+  gap: 8px;
+}
+.workspace .row-actions button {
+  padding: 6px 10px;
+  font-size: 11px;
+  background: #eff9f4;
+  border: 1px solid #d4e9df;
+  color: #086849;
+  box-shadow: none;
+}
+.workspace .badge {
+  background: #e7f4ed;
+  color: #248260;
+  border-radius: 20px;
+  font-size: 10px;
+  padding: 4px 11px;
+}
+.workspace .badge.connected {
+  background: #dcf5e8;
+  color: #078451;
+}
+.workspace .badge.logged_out,
+.workspace .badge.inactive {
+  background: #ffe8e8;
+  color: #b84444;
+}
+.workspace .empty {
+  background: #f9fcfa;
+  border: 1px dashed #dce9e3;
+  color: #7a8f96;
+  text-align: center;
+  border-radius: 10px;
+  padding: 30px !important;
+}
+.user-stats {
+  gap: 18px;
+}
+.user-stats article {
+  position: relative;
+  border: 1px solid #e0e9e8;
+  border-radius: 13px;
+  padding: 22px;
+  background: #fff;
+  box-shadow: 0 6px 18px #143f3206;
+}
+.user-stats article:after {
+  content: '◉';
+  position: absolute;
+  right: 20px;
+  top: 17px;
+  background: #e5f6ec;
+  color: #13956b;
+  border-radius: 10px;
+  padding: 4px 9px;
+}
+.user-stats strong {
+  font-size: 32px;
+  color: #123843;
+  margin: 12px 0 7px;
+}
+.user-stats span,
+.user-stats small {
+  font-size: 12px;
+  color: #718591;
+}
+.workspace #nomor .page-actions {
+  margin-top: 0;
+}
+.client-workspace #sessions {
+  margin: 22px -26px -26px;
+  width: calc(100% + 52px);
+  border-top: 1px solid #e6eeeb;
+  border-radius: 0 0 14px 14px;
+}
+.workspace #pemakaian {
+  margin-top: 30px;
+  padding-top: 24px;
+  border-top: 1px solid #e4ece9;
+}
+.workspace #pemakaian h3 {
+  font-size: 20px;
+  margin: 0 0 15px;
+  letter-spacing: -0.4px;
+}
+.workspace #usage li {
+  font-size: 12px;
+  padding: 13px 0;
+  color: #687e8d;
+}
+.workspace .integration-heading {
+  margin-top: 28px;
+  margin-bottom: 16px;
+}
+.workspace .integration-heading h3 {
+  font-size: 18px;
+  color: #163a44;
+}
+.workspace #secret:empty {
+  display: none;
+}
+.workspace #dokumentasi details {
+  border: 1px solid #e2ece7;
+  border-radius: 11px;
+  padding: 18px 20px;
+  margin: 14px 0;
+  background: #fff;
+}
+.workspace #dokumentasi details[open] {
+  border-color: #a9d9c1;
+  background: #fbfefc;
+}
+.workspace #dokumentasi summary {
+  font-size: 14px;
+  color: #234f50;
+}
+.workspace #dokumentasi details p {
+  font-size: 13px;
+  line-height: 1.85;
+}
+.workspace pre {
+  background: #f0f6f3;
+  border: 1px solid #e0eae5;
+  border-radius: 9px;
+  padding: 18px;
+}
+.workspace code {
+  font-size: 12px;
+  color: #245e53;
+  background: #edf5f0;
+}
+.workspace dialog,
+dialog#purchase-modal {
+  border: 1px solid #dce8e1;
+  border-radius: 16px;
+  padding: 26px;
+  box-shadow: 0 24px 90px #103b3633;
+  max-width: min(680px, calc(100vw - 32px));
+}
+.workspace dialog::backdrop {
+  background: #102e3c66;
+  backdrop-filter: blur(3px);
+}
+.workspace .modal-heading {
+  border-bottom: 1px solid #e8eeeb;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+}
+.workspace .modal-heading h2 {
+  font-size: 22px;
+  color: #143a43;
+  letter-spacing: -0.5px;
+}
+.workspace #admin > .admin-page > .table-wrap {
+  margin: 16px 0 20px;
+}
+.workspace #admin-settings #midtransstatus {
+  padding: 20px;
+  border: 1px solid #dbede2;
+  border-radius: 10px;
+  background: #f1faf5;
+  font-size: 13px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.workspace:not(.client-workspace) .tabs {
+  border-right: 1px solid #e1eae6;
+  background: #fff;
+  padding-top: 24px;
+}
+.workspace:not(.client-workspace) #adminsubmenu a {
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  color: #677f88;
+}
+.workspace:not(.client-workspace) #adminsubmenu a[aria-current='page'] {
+  background: #e4f5eb;
+  color: #087956;
+  box-shadow: inset 3px 0 #08a567;
+}
+.workspace:not(.client-workspace) .sidebar-brand {
+  margin-bottom: 28px;
+}
+.workspace #message {
+  border: 1px solid #b9e6d1;
+  background: #f4fcf7;
+  color: #22554b;
+  border-radius: 11px;
+  box-shadow: 0 10px 35px #127e5315;
+}
+.workspace footer {
+  color: #8397a0;
+  font-size: 11px;
+}
+#autharea {
+  border: 1px solid #e0e9e5;
+  border-radius: 18px;
+  background: linear-gradient(150deg, #fff, #f9fefb);
+  box-shadow: 0 15px 55px #143e3010;
+  padding: 36px;
+}
+#autharea h1 {
+  color: #11343f;
+  font-size: 30px;
+  letter-spacing: -1px;
+}
+#autharea .auth-mark {
+  background: linear-gradient(120deg, #c4f3da, #e8f8ed);
+  color: #087751;
+  border-radius: 13px;
+}
+#autharea #authintro {
+  color: #728791;
+}
+#siteheader .button {
+  background: #0a8059;
+  border-radius: 8px;
+}
+.client-workspace .tabs a[aria-current='page'] {
+  color: #008957;
+  border-bottom-color: #008957;
+}
+@media (min-width: 1100px) {
+  .client-workspace .heading {
+    margin-bottom: 22px;
+  }
+  .client-workspace .tabs {
+    position: fixed;
+    z-index: 20;
+  }
+  .client-workspace #welcome {
+    font-weight: 650;
+    color: #183742;
+  }
+  .client-workspace #role {
+    background: none;
+    padding: 0;
+    color: #738694;
+    font-weight: 400;
+  }
+}
+@media (max-width: 780px) {
+  .workspace .heading h1,
+  .client-workspace .heading h1 {
+    font-size: 29px;
+  }
+  .page-intro {
+    font-size: 13px;
+  }
+  .workspace #dashboard > section:not(#userstats):not(#paket) {
+    padding: 20px;
+  }
+  .section-lead {
+    gap: 12px;
+  }
+  .section-lead h3 {
+    font-size: 18px;
+  }
+  .section-lead p {
+    font-size: 12px;
+  }
+  .user-stats {
+    gap: 12px;
+  }
+  .user-stats article {
+    padding: 17px;
+  }
+  .user-stats article:after {
+    right: 12px;
+    top: 12px;
+    font-size: 11px;
+  }
+  .user-stats strong {
+    font-size: 27px;
+  }
+  .client-workspace #sessions {
+    margin: 20px -20px -20px;
+    width: calc(100% + 40px);
+  }
+  .workspace td,
+  .client-workspace td {
+    padding: 12px;
+  }
+  .workspace:not(.client-workspace) .tabs {
+    padding: 10px;
+    border-top: 1px solid #dfe9e4;
+  }
+  .workspace:not(.client-workspace) #adminsubmenu a {
+    font-size: 11px;
+    padding: 10px 8px;
+  }
+  .workspace:not(.client-workspace) .sidebar-brand {
+    margin-bottom: 0;
+  }
+  .workspace dialog {
+    padding: 20px;
+  }
+  .workspace .modal-heading h2 {
+    font-size: 20px;
+  }
+}
+.workspace button:not(.secondary):not(.payment-detail),
+#auth button:not(.secondary) {
+  background-color: #087f59;
+  color: #fff;
+}
+.workspace .row-actions button:not(.secondary) {
+  background: #eff9f4;
+  color: #086849;
+}
+.workspace td.empty {
+  display: table-cell;
+  border: 0;
+  border-radius: 0;
+}
+.workspace:not(.client-workspace) .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.workspace:not(.client-workspace) .sidebar-brand > span {
+  font-size: 20px;
+  font-weight: 750;
+  color: #133b43;
+}
+.workspace:not(.client-workspace) .sidebar-brand small {
+  font-size: 8px;
+  letter-spacing: 1px;
+  font-weight: 600;
+}

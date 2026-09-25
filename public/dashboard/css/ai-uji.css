@@ -1,0 +1,176 @@
+/* Asisten AI, Uji Pesan dan Uji AI Asisten: tampilan ringkas yang mengikuti desain dashboard AI. */
+#ai-tab-trial.ai-management {
+  padding: 24px 30px;
+  min-height: 0;
+}
+#ai-trial-tabs {
+  display: inline-flex;
+  gap: 7px;
+  padding: 0;
+  margin: 0 0 22px;
+  background: transparent;
+}
+#ai-trial-tabs button {
+  min-height: 38px;
+  padding: 8px 15px;
+  border: 1px solid #d7e9e1;
+  border-radius: 10px;
+  background: #edf8f3;
+  color: #147253;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: none;
+}
+#ai-trial-tabs button:hover {
+  background: #e1f3ea;
+}
+#ai-trial-tabs [aria-pressed='true'] {
+  border-color: #07845a;
+  background: linear-gradient(135deg, #0b9265, #087b59);
+  color: #fff;
+  box-shadow: 0 5px 12px #087b5926;
+}
+#ai-trial-message #sendform {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 18px 22px;
+  max-width: none;
+  margin: 0;
+}
+#ai-trial-message #sendform label {
+  margin: 0;
+  color: #173b55;
+  font-size: 13px;
+  font-weight: 700;
+}
+#ai-trial-message #sendform label:has(textarea) {
+  grid-column: 1/-1;
+}
+#ai-trial-message #sendform label:not(:has(textarea)):not(:has(#sendconnection)) {
+  order: 2;
+  grid-column: 1;
+}
+#ai-trial-message #sendform input,
+#ai-trial-message #sendform textarea {
+  margin-top: 8px;
+  border: 1px solid #d8e3eb;
+  border-radius: 12px;
+  background: #fcfefd;
+  color: #173b55;
+  box-shadow: inset 0 1px 2px #173b5505;
+}
+#ai-trial-message #sendform input {
+  height: 56px;
+  padding: 14px 16px;
+  font-weight: 600;
+}
+#ai-trial-message #sendform textarea {
+  min-height: 120px;
+  padding: 15px 16px;
+  resize: vertical;
+}
+#ai-trial-message #sendform input:focus,
+#ai-trial-message #sendform textarea:focus {
+  border-color: #1ba876;
+  box-shadow: 0 0 0 4px #1ba87616;
+}
+#ai-trial-message #sendform button {
+  order: 2;
+  grid-column: 2;
+  justify-self: start;
+  align-self: end;
+  min-height: 42px;
+  padding: 9px 17px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0b9667, #087b59);
+  font-size: 13px;
+  box-shadow: 0 7px 16px #087b5926;
+}
+#ai-trial-message #sendform button:hover {
+  background: linear-gradient(135deg, #087d57, #066e4e);
+}
+#ai-trial-message #sendresult {
+  display: none;
+}
+#ai-trial-message #ai-received-list {
+  margin-top: 24px;
+}
+#ai-received-head {
+  display: none;
+}
+.ai-received-message {
+  width: fit-content;
+  max-width: min(78%, 680px);
+  padding: 12px 14px;
+  margin: 8px 0;
+  border: 1px solid #dfe9e5;
+  border-radius: 4px 12px 12px;
+  background: #fbfefd;
+}
+.ai-received-message.incoming {
+  margin-right: auto;
+  border-top-left-radius: 12px;
+}
+.ai-received-message.outgoing {
+  margin-left: auto;
+  border-color: #bfe4d0;
+  border-top-right-radius: 4px;
+  background: #eaf8f0;
+}
+.ai-received-message > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.ai-received-message strong {
+  color: #173b55;
+}
+.ai-received-message time {
+  margin-left: auto;
+  color: #758a91;
+}
+.ai-received-message span {
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: #e6f5ec;
+  color: #087a56;
+  font-weight: 700;
+}
+.ai-received-message.outgoing span {
+  background: #d3efdf;
+  color: #087a56;
+}
+.ai-received-message p {
+  margin: 6px 0 0;
+  color: #4e6874;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-received-empty {
+  margin: 0;
+  padding: 22px 14px;
+  border: 1px dashed #d8e5df;
+  border-radius: 10px;
+  color: #78908a;
+  font-size: 12px;
+  text-align: center;
+}
+@media (max-width: 760px) {
+  #ai-tab-trial.ai-management {
+    padding: 20px 17px;
+    min-height: 0;
+  }
+  #ai-trial-tabs {
+    margin-bottom: 26px;
+  }
+  #ai-trial-message #sendform {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+  #ai-trial-message #sendform button {
+    grid-column: 1;
+    width: 100%;
+  }
+}

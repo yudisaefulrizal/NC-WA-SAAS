@@ -1,0 +1,92 @@
+/* Halaman AI pemilik: panel provider, rute model, dan tab pengaturan. */
+.ai-provider-panel {
+  margin: 1.5rem 0;
+  padding: 1.1rem;
+  border: 1px solid #dbe7e2;
+  border-radius: 14px;
+  background: #fbfefd;
+}
+.ai-provider-panel h3 {
+  margin: 0;
+}
+.ai-provider-routes {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+.ai-provider-routes > label {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+}
+.ai-provider-routes > p {
+  margin: 0;
+  color: #60736c;
+}
+.ai-provider-routes > button {
+  justify-self: start;
+}
+.ai-provider-list {
+  display: grid;
+  gap: 0.55rem;
+}
+.ai-provider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.8rem;
+  border: 1px solid #dbe7e2;
+  border-radius: 10px;
+  background: white;
+}
+.ai-provider-row span {
+  color: #60736c;
+  font-size: 0.88rem;
+}
+@media (max-width: 640px) {
+  .ai-provider-routes > label,
+  .ai-provider-row {
+    grid-template-columns: 1fr;
+  }
+  .ai-provider-row .row-actions {
+    justify-content: flex-start;
+  }
+}
+.ai-admin-tabs {
+  display: flex;
+  gap: 0.45rem;
+  margin: 1.25rem 0;
+  padding: 0.35rem;
+  border: 1px solid #dbe7e2;
+  border-radius: 12px;
+  background: #f6faf8;
+  overflow: auto;
+}
+.workspace .ai-admin-tabs button:not(.secondary) {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #49645b;
+  padding: 0.58rem 0.8rem;
+  font-weight: 650;
+  box-shadow: none;
+}
+.workspace .ai-admin-tabs button[aria-pressed='true']:not(.secondary) {
+  background: #07865e;
+  color: white;
+  box-shadow: 0 3px 9px #07865e2b;
+}
+.ai-admin-panel {
+  padding: 0.25rem 0;
+}
+.ai-admin-panel .ai-provider-panel {
+  margin-top: 0;
+}
+.workspace .row-actions.table-actions {
+  flex-wrap: nowrap;
+  margin-bottom: 0;
+  gap: 6px;
+}

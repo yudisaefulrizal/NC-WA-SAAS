@@ -1,0 +1,242 @@
+/* Auto Share, form pengiriman/jadwal: kelompok bidang, daftar kontak yang bisa dicari, dan ringkasan tujuan. */
+#share-job-form .job-group {
+  border: 1px solid #e1e9e8;
+  border-radius: 11px;
+  padding: 16px 18px;
+  margin: 14px 0;
+}
+#share-job-form .job-group legend {
+  font-size: 12px;
+  font-weight: 650;
+  color: #395665;
+  padding: 0 6px;
+}
+#share-job-form .job-picker-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#share-job-form .job-picker-row select {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+#share-job-form .job-picker-row button {
+  flex: none;
+}
+#share-job-form .job-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+#share-job-form .check-list {
+  max-height: 210px;
+  overflow: auto;
+  border: 1px solid #dce6e8;
+  border-radius: 9px;
+  background: #fcfefd;
+  padding: 6px;
+}
+#share-job-form .check-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-weight: 400;
+  font-size: 13px;
+  cursor: pointer;
+}
+#share-job-form .check-row:hover {
+  background: #f1f8f4;
+}
+#share-job-form .check-row input {
+  flex: none;
+  margin: 0;
+  width: 16px;
+  height: 16px;
+}
+#share-job-form .field-summary {
+  font-size: 12px;
+  font-weight: 650;
+  color: #086849;
+  background: #eff9f4;
+  border: 1px solid #d4e9df;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0 0;
+}
+#share-job-form .field-summary.is-empty {
+  color: #8a6d3b;
+  background: #fff8e8;
+  border-color: #eadfc2;
+}
+#share-job-form .field-warning {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #8a4b43;
+  background: #fdf1f0;
+  border: 1px solid #f0d6d3;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+#share-job-form #share-schedule-fields.is-off {
+  opacity: 0.5;
+}
+#share-job-form #share-schedule-fields.is-off input,
+#share-job-form #share-schedule-fields.is-off select {
+  pointer-events: none;
+  background: #f4f7f6;
+}
+#share-job-form #share-order li {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.asset-file-picker {
+  display: block !important;
+  border: 1px solid #d9e6e1;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.asset-file-picker input[type='file'] {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 5px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #647d79;
+  font-size: 12px;
+  cursor: pointer;
+}
+.asset-file-picker input[type='file']::file-selector-button {
+  margin: -5px 11px -5px -5px;
+  padding: 10px 13px;
+  border: 0;
+  border-right: 1px solid #d9e6e1;
+  background: #edf8f2;
+  color: #087a56;
+  font:
+    700 12px/1.4 Inter,
+    ui-sans-serif,
+    sans-serif;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.asset-file-picker input[type='file']:hover::file-selector-button {
+  background: #ddf1e5;
+}
+.asset-file-picker input[type='file']:focus-visible {
+  outline: 3px solid #73bda4;
+  outline-offset: -3px;
+}
+.asset-upload-panel .asset-upload-submit {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  padding: 0;
+  border-radius: 10px;
+}
+.share-contact-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.share-contact-actions #share-auto-add {
+  margin: 0;
+}
+.workspace .share-add-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  color: #079b68 !important;
+  border: 0;
+  box-shadow: none;
+}
+.workspace .share-add-icon:hover {
+  background: #e6f7ee !important;
+  color: #057a51 !important;
+}
+.workspace .share-add-icon:focus-visible {
+  outline: 2px solid #73bda4;
+  outline-offset: 2px;
+}
+@media (max-width: 780px) {
+  #share-job-dialog {
+    width: calc(100vw - 16px);
+  }
+  #share-job-form {
+    padding: 0 18px 20px;
+  }
+  #share-job-dialog > h3 {
+    padding: 18px 18px 14px;
+  }
+  #share-job-form .job-picker-row {
+    flex-wrap: wrap;
+  }
+  #share-job-form .job-picker-row select {
+    flex: 1 1 100%;
+  }
+  #share-job-form .check-list {
+    max-height: 170px;
+  }
+  .share-asset-overview {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 18px;
+  }
+  .asset-quota-card {
+    width: 100%;
+    min-width: 0;
+  }
+  .asset-upload-panel {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .asset-upload-panel input[type='file'] {
+    max-width: 100%;
+    width: 100%;
+  }
+  .asset-upload-panel button {
+    width: 100%;
+  }
+}
+.share-template-actions,
+.share-job-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: 0 0 14px;
+}
+
+#ai-trial-tabs {
+  margin: 0 0 20px;
+}
+#ai-trial-tabs [aria-pressed='true'] {
+  background: #087b5a;
+  color: #fff;
+  border-color: #087b5a;
+}
+#ai-trial-message label:has(#sendconnection) {
+  display: none;
+}
+#ai-trial-message > h2,
+#ai-trial-message > .section-lead,
+#ai-trial-message > #pemakaian {
+  display: none;
+}
+#ai-trial-assistant > p:first-child {
+  display: none;
+}

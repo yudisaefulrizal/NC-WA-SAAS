@@ -1,30 +1,109 @@
-// SQL of this component, one named query per statement. Domain code passes the executor: the pool,
-// or the connection of a transaction it has opened.
-import type {ResultSetHeader,RowDataPacket} from 'mysql2/promise';
-import type {Executor,SqlValue} from '../../../libraries/db.js';
-export function insertSystemMessageOrigin(c:Executor,params:SqlValue[]){return c.execute("INSERT INTO ai_message_origins(account_id,session_id,message_id,origin) VALUES (?,?,?,'system')",params);}
-export function selectAssistantsFallbackNumberByAccountIdSessionIdFallbackNumber(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT p.fallback_number FROM ai_assistants a JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=? AND a.session_id=? AND p.fallback_number=? AND p.fallback_notify=TRUE',params);}
-export function lockFallbacksByAccountIdSessionIdNotificationMessageId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>(`SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=? AND status='waiting' AND (notification_message_id=? OR id=?) FOR UPDATE`,params);}
-export function markFallbackAnswered(c:Executor,params:SqlValue[]){return c.execute("UPDATE ai_fallbacks SET status='answered',staff_answer=?,answered_at=UTC_TIMESTAMP() WHERE id=?",params);}
-export function updateFallbackResolution(c:Executor,params:SqlValue[]){return c.execute('UPDATE ai_fallbacks SET status=?,resolved_at=IF(?,UTC_TIMESTAMP(),NULL) WHERE id=?',params);}
-export function lockConversationsMessagesByAccountIdSessionIdCustomer(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',params);}
-export function updateConversationMemoryRevision(c:Executor,params:SqlValue[]){return c.execute('UPDATE ai_conversations SET messages=?,revision=revision+1 WHERE account_id=? AND session_id=? AND customer=?',params);}
-export function lockFallbacksByIdAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>("SELECT * FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=? AND status='waiting' FOR UPDATE",params);}
-export function selectMessageOriginsOriginByAccountIdSessionIdMessageId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT origin FROM ai_message_origins WHERE account_id=? AND session_id=? AND message_id=?',params);}
-export function insertManualMessageOrigin(c:Executor,params:SqlValue[]){return c.execute("INSERT INTO ai_message_origins(account_id,session_id,message_id,origin) VALUES (?,?,?,'manual')",params);}
-export function selectAssistantsEnabledByAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT enabled FROM ai_assistants WHERE account_id=? AND session_id=?',params);}
-export function lockConversationForReply(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT messages,paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',params);}
-export function updateConversationsPausedByAccountIdSessionIdCustomer(c:Executor,params:SqlValue[]){return c.execute('UPDATE ai_conversations SET paused=IF(full_auto,FALSE,TRUE),revision=revision+1,router_context=NULL,messages=? WHERE account_id=? AND session_id=? AND customer=?',params);}
-export function selectChatMessagesOriginByAccountIdSessionIdMessageId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>("SELECT origin FROM ai_chat_messages WHERE account_id=? AND session_id=? AND message_id=? AND origin='manual'",params);}
-export function deleteWHEREByAccountIdSessionId(c:Executor,params:SqlValue[],table:string){return c.execute('DELETE FROM '+table+' WHERE account_id=? AND session_id=?',params);}
-export function deleteAssistantsByAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?',params);}
-export function deleteConversationsByAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?',params);}
-export function selectConversationsByAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute('SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',params);}
-export function countFallbacksByAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT COUNT(*) AS total FROM ai_fallbacks WHERE account_id=? AND session_id=?',params);}
-export function selectFallbacksByAccountIdSessionId(c:Executor,params:SqlValue[],size:number,page:number){return c.execute('SELECT id,customer,status,agent,reason,question,staff_answer,created_at,answered_at,resolved_at FROM ai_fallbacks WHERE account_id=? AND session_id=? ORDER BY created_at DESC,id DESC LIMIT '+size+' OFFSET '+((page-1)*size),params);}
-export function deleteFallbacksByIdAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute<ResultSetHeader>('DELETE FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=?',params);}
-export function lockFallbacksStatusByIdAccountIdSessionId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>("SELECT status FROM ai_fallbacks WHERE id=? AND account_id=? AND session_id=? FOR UPDATE",params);}
-export function lockDataProfilesProfilFaqProfileTypeByIdAccountId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT profil_faq,profile_type FROM ai_data_profiles WHERE id=? AND account_id=? FOR UPDATE',params);}
-export function lockConversationsPausedFullAutoByAccountIdSessionIdCustomer(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',params);}
-export function upsertConversations(c:Executor,params:SqlValue[]){return c.execute("INSERT INTO ai_conversations(account_id,session_id,customer,paused,full_auto,messages) VALUES (?,?,?,?,?,'[]') ON DUPLICATE KEY UPDATE paused=VALUES(paused),full_auto=IF(?,VALUES(full_auto),full_auto),router_context=IF(?,NULL,router_context),messages=IF(?,JSON_ARRAY(),messages),revision=revision+1",params);}
-export function selectConversationsPausedFullAutoByAccountIdSessionIdCustomer(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',params);}
+// Query tabel ai_conversations untuk komponen ai. Dipanggil lewat namespace, misalnya
+// `conversationsSql.lockMessages(db, [...])`; argumen pertama adalah pool atau koneksi transaksi.
+import type { RowDataPacket } from 'mysql2/promise';
+import type { Executor, SqlValue } from '../../../libraries/db.js';
+export function lockMessages(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',
+    params,
+  );
+}
+export function updateMessagesAndRevision(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    'UPDATE ai_conversations SET messages=?,revision=revision+1 WHERE account_id=? AND session_id=? AND customer=?',
+    params,
+  );
+}
+export function lockForReply(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT messages,paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',
+    params,
+  );
+}
+export function pauseForManualReply(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    'UPDATE ai_conversations SET paused=IF(full_auto,FALSE,TRUE),revision=revision+1,router_context=NULL,messages=? WHERE account_id=? AND session_id=? AND customer=?',
+    params,
+  );
+}
+export function deleteBySession(c: Executor, params: SqlValue[]) {
+  return c.execute('DELETE FROM ai_conversations WHERE account_id=? AND session_id=?', params);
+}
+export function listAllBySession(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    'SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=? ORDER BY customer LIMIT 200',
+    params,
+  );
+}
+export function lockControls(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',
+    params,
+  );
+}
+export function upsertControls(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    "INSERT INTO ai_conversations(account_id,session_id,customer,paused,full_auto,messages) VALUES (?,?,?,?,?,'[]') ON DUPLICATE KEY UPDATE paused=VALUES(paused),full_auto=IF(?,VALUES(full_auto),full_auto),router_context=IF(?,NULL,router_context),messages=IF(?,JSON_ARRAY(),messages),revision=revision+1",
+    params,
+  );
+}
+export function findControls(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT paused,full_auto FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',
+    params,
+  );
+}
+export function updateMessages(c: Executor, params: SqlValue[]) {
+  return c.execute('UPDATE ai_conversations SET messages=? WHERE account_id=? AND session_id=? AND customer=?', params);
+}
+export function ensure(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    "INSERT IGNORE INTO ai_conversations(account_id,session_id,customer,paused,messages) VALUES (?,?,?,FALSE,'[]')",
+    params,
+  );
+}
+export function lockForMessage(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT paused,messages,revision,router_context FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',
+    params,
+  );
+}
+export function findPausedRevision(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT paused,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',
+    params,
+  );
+}
+export function lockMessagesRevision(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT messages,revision FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=? FOR UPDATE',
+    params,
+  );
+}
+export function updateMessagesAndContext(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    'UPDATE ai_conversations SET messages=?,router_context=? WHERE account_id=? AND session_id=? AND customer=?',
+    params,
+  );
+}
+export function lockCustomersOfSession(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT customer FROM ai_conversations WHERE account_id=? AND session_id=? FOR UPDATE',
+    params,
+  );
+}
+export function clearMemoryOfSession(c: Executor, params: SqlValue[]) {
+  return c.execute(
+    'UPDATE ai_conversations SET messages=JSON_ARRAY(),router_context=NULL,revision=revision+1 WHERE account_id=? AND session_id=?',
+    params,
+  );
+}
+export function listFirst200BySession(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT customer,paused,full_auto,JSON_LENGTH(messages) AS message_count,router_context FROM ai_conversations WHERE account_id=? AND session_id=?',
+    params,
+  );
+}
+export function lockAll(c: Executor) {
+  return c.query<RowDataPacket[]>('SELECT account_id,session_id,customer,messages FROM ai_conversations FOR UPDATE');
+}

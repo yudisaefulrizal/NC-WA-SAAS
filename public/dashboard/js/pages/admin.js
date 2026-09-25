@@ -1,38 +1,251 @@
-// Owner pages: plans, accounts, audit log, payments, Midtrans and credit adjustments.
-async function plans(){table('plans',['Nama paket','Harga / bulan','Kredit','Batas nomor','Batas asset','Status','Tindakan'],await api('/api/admin/plans'),p=>{
- const actions=document.createElement('div');actions.className='row-actions';
- actions.append(button('Edit',async()=>{for(const name of ['id','name','price','credits','session_limit','max_share_assets'])$('planform').elements.namedItem(name).value=p[name];$('planform').elements.namedItem('max_share_storage_mb').value=Math.round(p.max_share_storage_bytes/1048576);$('planform').elements.namedItem('active').checked=Boolean(p.active);$('planform-modal').showModal();}));
- if(p.id!=='basic')actions.append(button('Hapus',async()=>{if(!confirm(`Hapus paket "${p.name}" dari katalog? Kredit pelanggan dan riwayat pembayaran tetap tersimpan.`))return;await api('/api/admin/plans/'+encodeURIComponent(p.id),'DELETE');await plans();$('message').textContent='Paket berhasil dihapus.';}));
- return [p.name,money(p.price),p.credits,p.session_limit,`${p.max_share_assets} asset · ${Math.round(p.max_share_storage_bytes/1048576)} MB`,p.active?'Aktif':'Nonaktif',actions];
-});}
-form('planform',async p=>{await api('/api/admin/plans/'+encodeURIComponent(p.id),'PUT',{name:p.name,price:Number(p.price),credits:Number(p.credits),session_limit:Number(p.session_limit),max_share_assets:Number(p.max_share_assets),max_share_storage_bytes:Number(p.max_share_storage_mb)*1048576,active:p.active==='on'});await plans();$('planform-modal').close();$('message').textContent='Paket tersimpan.';});
-const passwordModal=document.createElement('dialog'),passwordForm=document.createElement('form'),passwordTitle=document.createElement('h2'),passwordInput=document.createElement('input'),passwordClose=document.createElement('button');passwordModal.append(passwordTitle,passwordForm);passwordForm.method='dialog';passwordForm.append(document.createElement('label'));passwordForm.firstChild.textContent='Password baru ';passwordInput.type='password';passwordInput.minLength=6;passwordInput.maxLength=128;passwordInput.autocomplete='new-password';passwordInput.required=true;passwordForm.firstChild.append(passwordInput);const passwordSave=document.createElement('button');passwordSave.textContent='Ganti password';passwordClose.type='button';passwordClose.className='secondary';passwordClose.textContent='Tutup';passwordForm.append(passwordSave,passwordClose);document.body.append(passwordModal);passwordClose.onclick=()=>passwordModal.close();let passwordAccount;function changePassword(account){passwordAccount=account;passwordTitle.textContent='Ganti password · '+account.email;passwordInput.value='';passwordModal.showModal();passwordInput.focus();}passwordForm.onsubmit=e=>{e.preventDefault();void run(async()=>{passwordSave.disabled=true;try{await api('/api/admin/accounts/'+encodeURIComponent(passwordAccount.id)+'/password','PUT',{password:passwordInput.value});passwordModal.close();$('message').textContent='Password berhasil diganti; semua sesi login akun tersebut telah dicabut.';}finally{passwordSave.disabled=false;}});};
-async function admin(){await plans();await loadAIConfig();await loadAdminProfiles();await loadModelUsage();await loadFailures();await loadTraceRequests();const accounts=await api('/api/admin/accounts');$('ai-adjust-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));const selected=$('adjustaccount').value;$('adjustaccount').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));$('adjustaccount').value=selected;$('referral-agent-account').replaceChildren(new Option('Pilih akun',''),...accounts.map(u=>new Option(u.email,u.id)));table('accounts',['Email','Peran','Status','Paket aktif','Sisa kredit','Tindakan'],accounts,u=>{if(u.role==='owner')return [u.email,'Pemilik',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),'—'];const actions=document.createElement('div');actions.className='row-actions';actions.append(button(u.suspended?'Aktifkan':'Nonaktifkan',async()=>{await api('/api/admin/accounts/'+u.id+'/status','PUT',{suspended:!u.suspended});await admin();}),button('Ganti password',async()=>changePassword(u)));return [u.email,'Pengguna',u.suspended?'Nonaktif':'Aktif',u.plan_name,new Intl.NumberFormat('id-ID').format(u.balance),actions];});const config=await api('/api/admin/midtrans');$('midtransstatus').textContent=`${config.configured?'Terkonfigurasi: '+config.environment+' · '+config.serverKey:'Belum dikonfigurasi'} · URL notifikasi: ${config.notificationUrl}`;await loadAudit();await loadAdminPayments();const health=await api('/api/admin/health');table('health',['Komponen','Status'],Object.entries(health),([key,value])=>[({database:'Database',engine:'WhatsApp',uptime:'Waktu aktif'})[key]||key,typeof value==='object'?JSON.stringify(value):key==='uptime'?Math.floor(value)+' detik':String(value)]);await loadAdminReferral();}
-let auditPage=1,auditLoading=false;
-async function loadAudit(page=auditPage){
- if(auditLoading)return;auditLoading=true;$('audit-prev').disabled=$('audit-next').disabled=true;
- try{const result=await api('/api/admin/audit?page='+page);auditPage=result.page;
- table('audit',['Waktu','Aktivitas','Email'],result.items,a=>[new Date(a.created_at).toLocaleString('id-ID'),a.action,a.account_email]);
- $('audit-page').textContent='Halaman '+result.page+' dari '+result.pages+' · '+result.total+' aktivitas';
- $('audit-prev').disabled=result.page<=1;$('audit-next').disabled=result.page>=result.pages;
- }catch(error){$('audit-prev').disabled=auditPage<=1;$('audit-next').disabled=false;throw error;}finally{auditLoading=false;}
+// Halaman pemilik: paket, akun, log audit, pembayaran, Midtrans, dan penyesuaian kredit.
+async function plans() {
+  table(
+    'plans',
+    ['Nama paket', 'Harga / bulan', 'Kredit', 'Batas nomor', 'Batas asset', 'Status', 'Tindakan'],
+    await api('/api/admin/plans'),
+    p => {
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+      actions.append(
+        button('Edit', async () => {
+          for (const name of ['id', 'name', 'price', 'credits', 'session_limit', 'max_share_assets'])
+            $('planform').elements.namedItem(name).value = p[name];
+          $('planform').elements.namedItem('max_share_storage_mb').value = Math.round(
+            p.max_share_storage_bytes / 1048576,
+          );
+          $('planform').elements.namedItem('active').checked = Boolean(p.active);
+          $('planform-modal').showModal();
+        }),
+      );
+      if (p.id !== 'basic')
+        actions.append(
+          button('Hapus', async () => {
+            if (
+              !confirm(`Hapus paket "${p.name}" dari katalog? Kredit pelanggan dan riwayat pembayaran tetap tersimpan.`)
+            )
+              return;
+            await api('/api/admin/plans/' + encodeURIComponent(p.id), 'DELETE');
+            await plans();
+            $('message').textContent = 'Paket berhasil dihapus.';
+          }),
+        );
+      return [
+        p.name,
+        money(p.price),
+        p.credits,
+        p.session_limit,
+        `${p.max_share_assets} asset · ${Math.round(p.max_share_storage_bytes / 1048576)} MB`,
+        p.active ? 'Aktif' : 'Nonaktif',
+        actions,
+      ];
+    },
+  );
 }
-$('audit-prev').onclick=()=>run(()=>loadAudit(auditPage-1));
-$('audit-next').onclick=()=>run(()=>loadAudit(auditPage+1));
-let adminPaymentsPage=1,adminPaymentsLoading=false;
-async function loadAdminPayments(page=adminPaymentsPage){
- if(adminPaymentsLoading)return;adminPaymentsLoading=true;$('adminpayments-prev').disabled=$('adminpayments-next').disabled=true;
- try{const result=await api('/api/admin/payments?page='+page);adminPaymentsPage=result.page;
- table('adminpayments',['ID pembayaran','Email','Total','Status'],result.items,p=>[p.id,p.account_email,money(p.total),p.status]);
- $('adminpayments-page').textContent='Halaman '+result.page+' dari '+result.pages+' · '+result.total+' pembayaran';
- $('adminpayments-prev').disabled=result.page<=1;$('adminpayments-next').disabled=result.page>=result.pages;
- }catch(error){$('adminpayments-prev').disabled=adminPaymentsPage<=1;$('adminpayments-next').disabled=false;throw error;}finally{adminPaymentsLoading=false;}
+form('planform', async p => {
+  await api('/api/admin/plans/' + encodeURIComponent(p.id), 'PUT', {
+    name: p.name,
+    price: Number(p.price),
+    credits: Number(p.credits),
+    session_limit: Number(p.session_limit),
+    max_share_assets: Number(p.max_share_assets),
+    max_share_storage_bytes: Number(p.max_share_storage_mb) * 1048576,
+    active: p.active === 'on',
+  });
+  await plans();
+  $('planform-modal').close();
+  $('message').textContent = 'Paket tersimpan.';
+});
+const passwordModal = document.createElement('dialog'),
+  passwordForm = document.createElement('form'),
+  passwordTitle = document.createElement('h2'),
+  passwordInput = document.createElement('input'),
+  passwordClose = document.createElement('button');
+passwordModal.append(passwordTitle, passwordForm);
+passwordForm.method = 'dialog';
+passwordForm.append(document.createElement('label'));
+passwordForm.firstChild.textContent = 'Password baru ';
+passwordInput.type = 'password';
+passwordInput.minLength = 6;
+passwordInput.maxLength = 128;
+passwordInput.autocomplete = 'new-password';
+passwordInput.required = true;
+passwordForm.firstChild.append(passwordInput);
+const passwordSave = document.createElement('button');
+passwordSave.textContent = 'Ganti password';
+passwordClose.type = 'button';
+passwordClose.className = 'secondary';
+passwordClose.textContent = 'Tutup';
+passwordForm.append(passwordSave, passwordClose);
+document.body.append(passwordModal);
+passwordClose.onclick = () => passwordModal.close();
+let passwordAccount;
+function changePassword(account) {
+  passwordAccount = account;
+  passwordTitle.textContent = 'Ganti password · ' + account.email;
+  passwordInput.value = '';
+  passwordModal.showModal();
+  passwordInput.focus();
 }
-$('adminpayments-prev').onclick=()=>run(()=>loadAdminPayments(adminPaymentsPage-1));
-$('adminpayments-next').onclick=()=>run(()=>loadAdminPayments(adminPaymentsPage+1));
-form('midtransform',async data=>{await api('/api/admin/midtrans','PUT',data);$('midtransform').reset();$('midtransform-modal').close();await admin();});
-$('testmidtrans').onclick=()=>run(async()=>{$('message').textContent=(await api('/api/admin/midtrans/test','POST')).message;});
+passwordForm.onsubmit = e => {
+  e.preventDefault();
+  void run(async () => {
+    passwordSave.disabled = true;
+    try {
+      await api('/api/admin/accounts/' + encodeURIComponent(passwordAccount.id) + '/password', 'PUT', {
+        password: passwordInput.value,
+      });
+      passwordModal.close();
+      $('message').textContent = 'Password berhasil diganti; semua sesi login akun tersebut telah dicabut.';
+    } finally {
+      passwordSave.disabled = false;
+    }
+  });
+};
+async function admin() {
+  await plans();
+  await loadAIConfig();
+  await loadAdminProfiles();
+  await loadModelUsage();
+  await loadFailures();
+  await loadTraceRequests();
+  const accounts = await api('/api/admin/accounts');
+  $('ai-adjust-account').replaceChildren(new Option('Pilih akun', ''), ...accounts.map(u => new Option(u.email, u.id)));
+  const selected = $('adjustaccount').value;
+  $('adjustaccount').replaceChildren(new Option('Pilih akun', ''), ...accounts.map(u => new Option(u.email, u.id)));
+  $('adjustaccount').value = selected;
+  $('referral-agent-account').replaceChildren(
+    new Option('Pilih akun', ''),
+    ...accounts.map(u => new Option(u.email, u.id)),
+  );
+  table('accounts', ['Email', 'Peran', 'Status', 'Paket aktif', 'Sisa kredit', 'Tindakan'], accounts, u => {
+    if (u.role === 'owner')
+      return [
+        u.email,
+        'Pemilik',
+        u.suspended ? 'Nonaktif' : 'Aktif',
+        u.plan_name,
+        new Intl.NumberFormat('id-ID').format(u.balance),
+        '—',
+      ];
+    const actions = document.createElement('div');
+    actions.className = 'row-actions';
+    actions.append(
+      button(u.suspended ? 'Aktifkan' : 'Nonaktifkan', async () => {
+        await api('/api/admin/accounts/' + u.id + '/status', 'PUT', { suspended: !u.suspended });
+        await admin();
+      }),
+      button('Ganti password', async () => changePassword(u)),
+    );
+    return [
+      u.email,
+      'Pengguna',
+      u.suspended ? 'Nonaktif' : 'Aktif',
+      u.plan_name,
+      new Intl.NumberFormat('id-ID').format(u.balance),
+      actions,
+    ];
+  });
+  const config = await api('/api/admin/midtrans');
+  $('midtransstatus').textContent =
+    `${config.configured ? 'Terkonfigurasi: ' + config.environment + ' · ' + config.serverKey : 'Belum dikonfigurasi'} · URL notifikasi: ${config.notificationUrl}`;
+  await loadAudit();
+  await loadAdminPayments();
+  const health = await api('/api/admin/health');
+  table('health', ['Komponen', 'Status'], Object.entries(health), ([key, value]) => [
+    { database: 'Database', engine: 'WhatsApp', uptime: 'Waktu aktif' }[key] || key,
+    typeof value === 'object' ? JSON.stringify(value) : key === 'uptime' ? Math.floor(value) + ' detik' : String(value),
+  ]);
+  await loadAdminReferral();
+}
+let auditPage = 1,
+  auditLoading = false;
+async function loadAudit(page = auditPage) {
+  if (auditLoading) return;
+  auditLoading = true;
+  $('audit-prev').disabled = $('audit-next').disabled = true;
+  try {
+    const result = await api('/api/admin/audit?page=' + page);
+    auditPage = result.page;
+    table('audit', ['Waktu', 'Aktivitas', 'Email'], result.items, a => [
+      new Date(a.created_at).toLocaleString('id-ID'),
+      a.action,
+      a.account_email,
+    ]);
+    $('audit-page').textContent =
+      'Halaman ' + result.page + ' dari ' + result.pages + ' · ' + result.total + ' aktivitas';
+    $('audit-prev').disabled = result.page <= 1;
+    $('audit-next').disabled = result.page >= result.pages;
+  } catch (error) {
+    $('audit-prev').disabled = auditPage <= 1;
+    $('audit-next').disabled = false;
+    throw error;
+  } finally {
+    auditLoading = false;
+  }
+}
+$('audit-prev').onclick = () => run(() => loadAudit(auditPage - 1));
+$('audit-next').onclick = () => run(() => loadAudit(auditPage + 1));
+let adminPaymentsPage = 1,
+  adminPaymentsLoading = false;
+async function loadAdminPayments(page = adminPaymentsPage) {
+  if (adminPaymentsLoading) return;
+  adminPaymentsLoading = true;
+  $('adminpayments-prev').disabled = $('adminpayments-next').disabled = true;
+  try {
+    const result = await api('/api/admin/payments?page=' + page);
+    adminPaymentsPage = result.page;
+    table('adminpayments', ['ID pembayaran', 'Email', 'Total', 'Status'], result.items, p => [
+      p.id,
+      p.account_email,
+      money(p.total),
+      p.status,
+    ]);
+    $('adminpayments-page').textContent =
+      'Halaman ' + result.page + ' dari ' + result.pages + ' · ' + result.total + ' pembayaran';
+    $('adminpayments-prev').disabled = result.page <= 1;
+    $('adminpayments-next').disabled = result.page >= result.pages;
+  } catch (error) {
+    $('adminpayments-prev').disabled = adminPaymentsPage <= 1;
+    $('adminpayments-next').disabled = false;
+    throw error;
+  } finally {
+    adminPaymentsLoading = false;
+  }
+}
+$('adminpayments-prev').onclick = () => run(() => loadAdminPayments(adminPaymentsPage - 1));
+$('adminpayments-next').onclick = () => run(() => loadAdminPayments(adminPaymentsPage + 1));
+form('midtransform', async data => {
+  await api('/api/admin/midtrans', 'PUT', data);
+  $('midtransform').reset();
+  $('midtransform-modal').close();
+  await admin();
+});
+$('testmidtrans').onclick = () =>
+  run(async () => {
+    $('message').textContent = (await api('/api/admin/midtrans/test', 'POST')).message;
+  });
 let adjustment;
-form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment||adjustment.payload!==payload)adjustment={payload,id:crypto.randomUUID()};await api('/api/admin/accounts/'+encodeURIComponent(data.accountId)+'/credits','POST',{amount:Number(data.amount),reason:data.reason,requestId:adjustment.id});adjustment=undefined;await admin();$('adjustform-modal').close();$('adjustform').reset();$('message').textContent='Penyesuaian tersimpan.';});
-document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
-document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
+form('adjustform', async data => {
+  const payload = JSON.stringify(data);
+  if (!adjustment || adjustment.payload !== payload) adjustment = { payload, id: crypto.randomUUID() };
+  await api('/api/admin/accounts/' + encodeURIComponent(data.accountId) + '/credits', 'POST', {
+    amount: Number(data.amount),
+    reason: data.reason,
+    requestId: adjustment.id,
+  });
+  adjustment = undefined;
+  await admin();
+  $('adjustform-modal').close();
+  $('adjustform').reset();
+  $('message').textContent = 'Penyesuaian tersimpan.';
+});
+document.querySelectorAll('[data-open]').forEach(
+  b =>
+    (b.onclick = () => {
+      const modal = $(b.dataset.open);
+      modal.querySelector('form').reset();
+      modal.showModal();
+    }),
+);
+document.querySelectorAll('[data-close]').forEach(b => (b.onclick = () => $(b.dataset.close).close()));

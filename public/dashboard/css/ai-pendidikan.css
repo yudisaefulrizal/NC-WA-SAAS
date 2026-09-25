@@ -1,20 +1,277 @@
 /* CS Lembaga Pendidikan: Profil Lembaga, Program, Jadwal, Dokumen, Kontak. */
-.edu-lembaga .ai-helper{margin:8px 0 14px}
-.edu-list-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.client-workspace #ai .edu-list-head h3{margin:0}.edu-list-head p{font-size:13px;color:#718394;margin:4px 0 0;line-height:1.5}.edu-list-head>span{font-size:12px;color:#718394;white-space:nowrap}.edu-list-head>button{white-space:nowrap}
-.edu-programs{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px}.edu-program-items{display:flex;flex-direction:column;gap:8px}
-.client-workspace #ai .edu-program-item{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;background:#fff;color:#13313c;border:1px solid #e1e9e8;border-radius:10px;padding:10px 12px;min-height:48px;font-weight:700}
-.edu-program-item small{color:#718394;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.client-workspace #ai .edu-program-item[aria-pressed=true]{border:2px solid #0f9d6b;background:#f6fcf9;padding:9px 11px}
-.client-workspace #ai .edu-add{width:100%;margin-top:10px;border-style:dashed}.client-workspace #ai .edu-program-editor label{display:block;margin:0 0 12px;font-size:13px}.client-workspace #ai .edu-program-editor textarea{min-height:300px}.edu-program-select{display:none!important}
-.edu-editor-foot{display:flex;align-items:center;justify-content:space-between;gap:12px}.edu-editor-foot .ai-helper{margin:0}
-.edu-document-new{display:grid;grid-template-columns:minmax(0,1fr) 230px auto;gap:12px;align-items:end;padding:14px;border:2px dashed #bcd9cb;border-radius:12px;background:#f6fcf9;margin-bottom:14px}.client-workspace #ai .edu-document-new label{margin:0;font-size:13px}.client-workspace #ai .edu-document-new textarea{min-height:64px}.edu-file-pick input{max-width:100%}
-.edu-documents,.edu-contacts{border:1px solid #e4ecea;border-radius:11px;overflow:hidden}.edu-documents>.empty,.edu-contacts>.empty{margin:0;padding:16px}
-.edu-document{display:grid;grid-template-columns:44px 230px minmax(0,1fr) 40px;gap:14px;align-items:center;padding:12px 14px;border-top:1px solid #edf2f1}.edu-document:first-child{border-top:0}
-.edu-file-badge{width:40px;height:46px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:800;background:#fdf0ee;color:#a3261a}.edu-file-badge.doc{background:#eef4fc;color:#1f5fa8}.edu-file-badge.xls{background:#e8f5ec;color:#17693a}.edu-file-badge.ppt{background:#fff1e6;color:#a4480f}.edu-file-badge.image{background:#fff4e2;color:#8a5300}
-.edu-document-file{display:flex;flex-direction:column;gap:2px;min-width:0}.edu-document-file a{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.edu-document-file small{color:#718394;font-size:11px}.client-workspace #ai .edu-replace{font-size:12px;font-weight:700;color:#087b5a;cursor:pointer;margin:2px 0 0;align-self:flex-start}
-.client-workspace #ai .edu-document textarea,.client-workspace #ai .edu-contact textarea{min-height:58px}
-.edu-contact-head,.edu-contact{display:grid;grid-template-columns:190px 210px minmax(0,1fr) 40px;gap:12px;align-items:start;padding:10px 14px}.edu-contact-head{background:#f3f8f6;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#4b6470}.edu-contact{border-top:1px solid #edf2f1}
-.edu-panel .table-icon-button{display:inline-grid;place-items:center;width:40px;height:40px;min-height:0;padding:0}
-@media(max-width:760px){.edu-programs{grid-template-columns:1fr;gap:12px}.edu-program-list .edu-program-items,.edu-program-list .edu-list-head{display:none}.client-workspace #ai .edu-add{margin-top:0;min-height:46px}.edu-program-select{display:block!important}.client-workspace #ai .edu-program-editor textarea{min-height:360px}.edu-list-head{flex-wrap:wrap}
-.edu-document-new{grid-template-columns:1fr}.edu-document{grid-template-columns:44px minmax(0,1fr) 44px;gap:10px}.edu-document textarea{grid-column:1/-1;grid-row:2}.edu-document .table-icon-button{grid-column:3;grid-row:1}
-.edu-contact-head{display:none}.edu-contact{grid-template-columns:minmax(0,1fr) 44px;gap:8px}.edu-contact>input,.edu-contact>textarea{grid-column:1}.client-workspace #ai .edu-contact textarea{min-height:92px}.edu-contact>.table-icon-button{grid-column:2;grid-row:1}
-.edu-panel .table-icon-button{width:44px;height:44px}}
+.edu-lembaga .ai-helper {
+  margin: 8px 0 14px;
+}
+.edu-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.client-workspace #ai .edu-list-head h3 {
+  margin: 0;
+}
+.edu-list-head p {
+  font-size: 13px;
+  color: #718394;
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+.edu-list-head > span {
+  font-size: 12px;
+  color: #718394;
+  white-space: nowrap;
+}
+.edu-list-head > button {
+  white-space: nowrap;
+}
+.edu-programs {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 20px;
+}
+.edu-program-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.client-workspace #ai .edu-program-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  color: #13313c;
+  border: 1px solid #e1e9e8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-height: 48px;
+  font-weight: 700;
+}
+.edu-program-item small {
+  color: #718394;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.client-workspace #ai .edu-program-item[aria-pressed='true'] {
+  border: 2px solid #0f9d6b;
+  background: #f6fcf9;
+  padding: 9px 11px;
+}
+.client-workspace #ai .edu-add {
+  width: 100%;
+  margin-top: 10px;
+  border-style: dashed;
+}
+.client-workspace #ai .edu-program-editor label {
+  display: block;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.client-workspace #ai .edu-program-editor textarea {
+  min-height: 300px;
+}
+.edu-program-select {
+  display: none !important;
+}
+.edu-editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.edu-editor-foot .ai-helper {
+  margin: 0;
+}
+.edu-document-new {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 2px dashed #bcd9cb;
+  border-radius: 12px;
+  background: #f6fcf9;
+  margin-bottom: 14px;
+}
+.client-workspace #ai .edu-document-new label {
+  margin: 0;
+  font-size: 13px;
+}
+.client-workspace #ai .edu-document-new textarea {
+  min-height: 64px;
+}
+.edu-file-pick input {
+  max-width: 100%;
+}
+.edu-documents,
+.edu-contacts {
+  border: 1px solid #e4ecea;
+  border-radius: 11px;
+  overflow: hidden;
+}
+.edu-documents > .empty,
+.edu-contacts > .empty {
+  margin: 0;
+  padding: 16px;
+}
+.edu-document {
+  display: grid;
+  grid-template-columns: 44px 230px minmax(0, 1fr) 40px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-top: 1px solid #edf2f1;
+}
+.edu-document:first-child {
+  border-top: 0;
+}
+.edu-file-badge {
+  width: 40px;
+  height: 46px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  background: #fdf0ee;
+  color: #a3261a;
+}
+.edu-file-badge.doc {
+  background: #eef4fc;
+  color: #1f5fa8;
+}
+.edu-file-badge.xls {
+  background: #e8f5ec;
+  color: #17693a;
+}
+.edu-file-badge.ppt {
+  background: #fff1e6;
+  color: #a4480f;
+}
+.edu-file-badge.image {
+  background: #fff4e2;
+  color: #8a5300;
+}
+.edu-document-file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.edu-document-file a {
+  font-weight: 700;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edu-document-file small {
+  color: #718394;
+  font-size: 11px;
+}
+.client-workspace #ai .edu-replace {
+  font-size: 12px;
+  font-weight: 700;
+  color: #087b5a;
+  cursor: pointer;
+  margin: 2px 0 0;
+  align-self: flex-start;
+}
+.client-workspace #ai .edu-document textarea,
+.client-workspace #ai .edu-contact textarea {
+  min-height: 58px;
+}
+.edu-contact-head,
+.edu-contact {
+  display: grid;
+  grid-template-columns: 190px 210px minmax(0, 1fr) 40px;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 14px;
+}
+.edu-contact-head {
+  background: #f3f8f6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4b6470;
+}
+.edu-contact {
+  border-top: 1px solid #edf2f1;
+}
+.edu-panel .table-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+}
+@media (max-width: 760px) {
+  .edu-programs {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .edu-program-list .edu-program-items,
+  .edu-program-list .edu-list-head {
+    display: none;
+  }
+  .client-workspace #ai .edu-add {
+    margin-top: 0;
+    min-height: 46px;
+  }
+  .edu-program-select {
+    display: block !important;
+  }
+  .client-workspace #ai .edu-program-editor textarea {
+    min-height: 360px;
+  }
+  .edu-list-head {
+    flex-wrap: wrap;
+  }
+  .edu-document-new {
+    grid-template-columns: 1fr;
+  }
+  .edu-document {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    gap: 10px;
+  }
+  .edu-document textarea {
+    grid-column: 1/-1;
+    grid-row: 2;
+  }
+  .edu-document .table-icon-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .edu-contact-head {
+    display: none;
+  }
+  .edu-contact {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+  }
+  .edu-contact > input,
+  .edu-contact > textarea {
+    grid-column: 1;
+  }
+  .client-workspace #ai .edu-contact textarea {
+    min-height: 92px;
+  }
+  .edu-contact > .table-icon-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .edu-panel .table-icon-button {
+    width: 44px;
+    height: 44px;
+  }
+}

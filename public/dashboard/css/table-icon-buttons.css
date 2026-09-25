@@ -1,0 +1,18 @@
+/* Tombol berupa ikon di baris tabel (edit, hapus). */
+.workspace .row-actions .table-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 8px;
+}
+.workspace .row-actions .table-icon-button.danger {
+  background: #fdf0ef;
+  color: #b42318;
+  border: 1px solid #f5c9c4;
+}
+.workspace .row-actions .table-icon-button.danger:hover {
+  background: #fbe1de;
+}

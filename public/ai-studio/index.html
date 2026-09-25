@@ -1,25 +1,260 @@
 <!doctype html>
 <html lang="id">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Studio · NC-WA</title><link rel="stylesheet" href="/ai-studio/studio.css"><script src="/ai-studio/studio.js" defer></script></head>
-<body>
-<div id="access" role="status">Memeriksa akses pemilik…</div>
-<main id="studio" hidden>
- <header class="studio-header"><a class="brand" href="/dashboard/admin/ai"><span>NC</span> NC-WA <small>/ AI Studio</small></a><div class="owner-label">KHUSUS PEMILIK</div><a href="/dashboard/admin/ai">Pengaturan koneksi ↗</a></header>
- <section class="toolbar"><div><div class="profile-picker"><span class="eyebrow">WORKSPACE /</span><label><span class="sr-only">Profil yang diatur</span><select id="profile-select"></select></label><span id="profile-status" class="badge"></span></div><h1>Atur. Uji. Sempurnakan.</h1><p class="muted">Alur tetap profil <span id="profile-name">CS Usaha</span>, dengan konfigurasi yang bisa Anda tuning. Draft dan publish terpisah per profil.</p></div><div class="toolbar-actions"><span id="version" class="badge"></span><button id="reload" class="secondary">Muat ulang</button><button id="save" class="secondary">Simpan draft</button><button id="publish">Aktifkan draft</button></div></section>
- <p id="notice" role="status" aria-live="polite"></p>
- <div class="workspace">
-  <section class="canvas-panel" aria-label="Alur agent"><div class="panel-heading"><div><span class="live-dot"></span><strong id="canvas-profile">CS Usaha</strong><span class="muted"> / Alur tetap</span></div><div class="zoom-controls"><button id="zoom-out" class="icon-button" aria-label="Perkecil">−</button><span id="zoom-value">70%</span><button id="zoom-in" class="icon-button" aria-label="Perbesar">+</button><button id="fit" class="icon-button">Pas</button></div></div>
-   <div id="canvas-viewport"><div id="canvas-size"><div id="canvas"><svg id="connections" viewBox="0 0 1500 1080" aria-hidden="true"></svg><div id="nodes"></div></div></div></div>
-   <nav id="node-list" class="node-list" aria-label="Daftar node"></nav>
-   <div class="canvas-legend"><span>● Menunggu</span><span class="teal">● Berjalan</span><span class="green">● Selesai</span><span class="amber">● Retry</span><span class="red">● Gagal</span><span>Klik node untuk mengatur atau memeriksa proses.</span></div>
-  </section>
-  <aside class="inspector"><div class="panel-heading"><strong>Pengaturan node</strong><span id="node-kind" class="badge">Agent</span></div><div class="inspector-body"><p class="eyebrow" id="node-id"></p><h2 id="node-title">Router</h2><p id="node-description" class="muted"></p><form id="node-form"><label>Prompt<textarea id="node-prompt" rows="10" maxlength="8000" required></textarea></label><label>Tingkat model<select id="node-tier"><option value="cheap">Murah</option><option value="medium">Sedang</option><option value="smart">Cerdas</option><option value="structured">Terstruktur</option></select></label><label>Model khusus <small>Opsional, kosongkan untuk mengikuti tingkat</small><input id="node-model" maxlength="100" placeholder="Ikuti pengaturan tingkat"></label><p id="resolved-model" class="muted"></p><div id="structured-settings" hidden><label><input type="checkbox" id="node-structured-output"> Gunakan Structured Outputs provider</label><p class="muted" id="structured-hint"></p></div><div id="router-settings" hidden><details><summary>Schema output router (tetap)</summary><pre id="router-schema"></pre></details></div><div id="order-settings" hidden><p class="muted">Pesanan dari Agent Layanan diurai dulu oleh parser kode (format <code>2 x Produk; catatan: ...</code>). Node AI ini hanya dipanggil bila parser tidak dapat memastikan isinya, lalu hasilnya divalidasi terhadap katalog.</p><details><summary>Schema output pesanan (tetap)</summary><pre id="order-schema"></pre></details></div><fieldset><legend>Tools yang diizinkan</legend><div id="node-tools"></div></fieldset><p class="muted">Perubahan masuk draft. Simpan sebelum menguji.</p></form><div id="node-readonly" hidden></div><details open><summary>Proses node terakhir</summary><pre id="node-output">Belum dijalankan.</pre></details></div></aside>
- </div>
- <div class="testing-grid">
-  <section class="chat-panel"><div class="panel-heading"><strong>Playground</strong><button id="reset" class="secondary small">Percakapan baru</button></div><p class="sandbox-note">SANDBOX · Tools dan pesanan simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.</p><div id="chat-log" role="log" aria-label="Percakapan pengujian"><p class="empty-chat">Mulai percakapan untuk melihat agent mengambil keputusan.</p></div><div class="context-strip"><span>KONTEKS S-P-O</span><code id="context-value">Belum ada konteks</code></div><form id="chat-form"><label class="sr-only" for="chat-input">Pesan pelanggan uji</label><textarea id="chat-input" rows="2" maxlength="4000" placeholder="Tulis pesan pelanggan, misalnya: Saya mau pesan…" required></textarea><button id="send" type="submit">Jalankan ↗</button><button id="stop" class="secondary" type="button" hidden>Hentikan</button></form></section>
-  <section class="trace-panel"><div class="panel-heading"><strong>Jejak eksekusi</strong><span id="run-status" class="badge">Belum ada pengujian</span></div><div id="trace-list"><p class="muted">Input, output, durasi, dan retry muncul saat proses berjalan. Pilih langkah untuk melihat detail.</p></div><pre id="trace-detail">Detail langkah akan tampil di sini.</pre></section>
- </div>
- <details class="sandbox-data"><summary>Data untuk pengujian <span class="muted">/ terpisah dari data client</span></summary><div class="data-grid" id="cs-sandbox"><label>Profil usaha<textarea id="test-profile-usaha" rows="4" maxlength="2000" placeholder="nama, deskripsi, alamat, kontak dan jam operasional">Senin–Sabtu pukul 09.00–17.00.</textarea></label><label>Cara pemesanan<textarea id="test-profile-cara_pemesanan" rows="3" maxlength="2000" placeholder="Cara membeli/mendaftar/menggunakan layanan"></textarea></label><label>Metode pembayaran<textarea id="test-profile-pembayaran" rows="3" maxlength="2000" placeholder="Metode pembayaran yang tersedia"></textarea></label><label>Kebijakan<textarea id="test-profile-kebijakan" rows="3" maxlength="2000">Pesanan diproses setelah dikonfirmasi admin.</textarea></label><label>FAQ<textarea id="test-profile-faq" rows="3" maxlength="2000" placeholder="Pertanyaan umum dan jawabannya, atau informasi tambahan lain"></textarea></label><label>Perilaku AI<textarea id="test-behavior" rows="5" maxlength="2000">Gunakan bahasa Indonesia yang ramah dan ringkas.</textarea></label><label class="products-field">Produk simulasi (JSON)<textarea id="test-products" rows="8" spellcheck="false"></textarea></label></div><div class="data-grid" id="edu-sandbox" hidden><label>Nama lembaga<input id="edu-test-name" maxlength="100" value="Pesantren Simulasi"></label><label>Profil lembaga<textarea id="edu-test-lembaga" rows="4" maxlength="4000">Pesantren (lembaga pendidikan Islam) berasrama di Bandung Barat. Fasilitas: asrama, masjid, perpustakaan. Kantor PSB buka Senin–Sabtu 08.00–15.00.</textarea></label><label>Jadwal<textarea id="edu-test-jadwal" rows="4" maxlength="8000">Pendaftaran gelombang 1: 1 November – 31 Desember. Tes masuk setiap Sabtu pukul 08.00. Kunjungan Kamis dan Minggu 09.00–11.00.</textarea></label><label>FAQ<textarea id="edu-test-faq" rows="3" maxlength="4000" placeholder="Pertanyaan umum dan jawabannya"></textarea></label><label>Perilaku AI<textarea id="edu-test-behavior" rows="3" maxlength="2000">Gunakan bahasa Indonesia yang santun dan ringkas. Sebut peserta didik sebagai santri, orang tua sebagai wali santri, dan pengajar sebagai ustadz/ustadzah.</textarea></label><label class="products-field">Program simulasi (JSON: name, description)<textarea id="edu-test-programs" rows="7" spellcheck="false"></textarea></label><label class="products-field">Kontak simulasi (JSON: bagian, kontak, deskripsi)<textarea id="edu-test-contacts" rows="5" spellcheck="false"></textarea></label><label class="products-field">Dokumen simulasi (JSON: nama_file, jenis dokumen/gambar, deskripsi)<textarea id="edu-test-documents" rows="5" spellcheck="false"></textarea></label></div><p class="muted">Mengubah data uji atau draft memulai sesi uji baru. Data uji tidak ikut diaktifkan ke layanan.</p></details>
-</main>
-<dialog id="publish-dialog"><h2>Aktifkan draft untuk layanan?</h2><p id="publish-summary"></p><p>Pesan pelanggan berikutnya memakai konfigurasi ini. Percakapan yang sedang diproses menyelesaikan versinya saat ini.</p><div class="dialog-actions"><button id="cancel-publish" class="secondary">Batal</button><button id="confirm-publish">Aktifkan sekarang</button></div></dialog>
-</body></html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AI Studio · NC-WA</title>
+    <link rel="stylesheet" href="/ai-studio/studio.css" />
+    <script src="/ai-studio/studio.js" defer></script>
+  </head>
+  <body>
+    <div id="access" role="status">Memeriksa akses pemilik…</div>
+    <main id="studio" hidden>
+      <header class="studio-header">
+        <a class="brand" href="/dashboard/admin/ai"><span>NC</span> NC-WA <small>/ AI Studio</small></a>
+        <div class="owner-label">KHUSUS PEMILIK</div>
+        <a href="/dashboard/admin/ai">Pengaturan koneksi ↗</a>
+      </header>
+      <section class="toolbar">
+        <div>
+          <div class="profile-picker">
+            <span class="eyebrow">WORKSPACE /</span
+            ><label
+              ><span class="sr-only">Profil yang diatur</span
+              ><select id="profile-select"></select></label
+            ><span id="profile-status" class="badge"></span>
+          </div>
+          <h1>Atur. Uji. Sempurnakan.</h1>
+          <p class="muted">
+            Alur tetap profil <span id="profile-name">CS Usaha</span>, dengan konfigurasi yang bisa Anda tuning. Draft
+            dan publish terpisah per profil.
+          </p>
+        </div>
+        <div class="toolbar-actions">
+          <span id="version" class="badge"></span><button id="reload" class="secondary">Muat ulang</button
+          ><button id="save" class="secondary">Simpan draft</button><button id="publish">Aktifkan draft</button>
+        </div>
+      </section>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <div class="workspace">
+        <section class="canvas-panel" aria-label="Alur agent">
+          <div class="panel-heading">
+            <div>
+              <span class="live-dot"></span><strong id="canvas-profile">CS Usaha</strong
+              ><span class="muted"> / Alur tetap</span>
+            </div>
+            <div class="zoom-controls">
+              <button id="zoom-out" class="icon-button" aria-label="Perkecil">−</button><span id="zoom-value">70%</span
+              ><button id="zoom-in" class="icon-button" aria-label="Perbesar">+</button
+              ><button id="fit" class="icon-button">Pas</button>
+            </div>
+          </div>
+          <div id="canvas-viewport">
+            <div id="canvas-size">
+              <div id="canvas">
+                <svg id="connections" viewBox="0 0 1500 1080" aria-hidden="true"></svg>
+                <div id="nodes"></div>
+              </div>
+            </div>
+          </div>
+          <nav id="node-list" class="node-list" aria-label="Daftar node"></nav>
+          <div class="canvas-legend">
+            <span>● Menunggu</span><span class="teal">● Berjalan</span><span class="green">● Selesai</span
+            ><span class="amber">● Retry</span><span class="red">● Gagal</span
+            ><span>Klik node untuk mengatur atau memeriksa proses.</span>
+          </div>
+        </section>
+        <aside class="inspector">
+          <div class="panel-heading">
+            <strong>Pengaturan node</strong><span id="node-kind" class="badge">Agent</span>
+          </div>
+          <div class="inspector-body">
+            <p class="eyebrow" id="node-id"></p>
+            <h2 id="node-title">Router</h2>
+            <p id="node-description" class="muted"></p>
+            <form id="node-form">
+              <label>Prompt<textarea id="node-prompt" rows="10" maxlength="8000" required></textarea></label
+              ><label
+                >Tingkat model<select id="node-tier">
+                  <option value="cheap">Murah</option>
+                  <option value="medium">Sedang</option>
+                  <option value="smart">Cerdas</option>
+                  <option value="structured">Terstruktur</option>
+                </select></label
+              ><label
+                >Model khusus <small>Opsional, kosongkan untuk mengikuti tingkat</small
+                ><input id="node-model" maxlength="100" placeholder="Ikuti pengaturan tingkat"
+              /></label>
+              <p id="resolved-model" class="muted"></p>
+              <div id="structured-settings" hidden>
+                <label><input type="checkbox" id="node-structured-output" /> Gunakan Structured Outputs provider</label>
+                <p class="muted" id="structured-hint"></p>
+              </div>
+              <div id="router-settings" hidden>
+                <details>
+                  <summary>Schema output router (tetap)</summary>
+                  <pre id="router-schema"></pre>
+                </details>
+              </div>
+              <div id="order-settings" hidden>
+                <p class="muted">
+                  Pesanan dari Agent Layanan diurai dulu oleh parser kode (format
+                  <code>2 x Produk; catatan: ...</code>). Node AI ini hanya dipanggil bila parser tidak dapat memastikan
+                  isinya, lalu hasilnya divalidasi terhadap katalog.
+                </p>
+                <details>
+                  <summary>Schema output pesanan (tetap)</summary>
+                  <pre id="order-schema"></pre>
+                </details>
+              </div>
+              <fieldset>
+                <legend>Tools yang diizinkan</legend>
+                <div id="node-tools"></div>
+              </fieldset>
+              <p class="muted">Perubahan masuk draft. Simpan sebelum menguji.</p>
+            </form>
+            <div id="node-readonly" hidden></div>
+            <details open>
+              <summary>Proses node terakhir</summary>
+              <pre id="node-output">Belum dijalankan.</pre>
+            </details>
+          </div>
+        </aside>
+      </div>
+      <div class="testing-grid">
+        <section class="chat-panel">
+          <div class="panel-heading">
+            <strong>Playground</strong><button id="reset" class="secondary small">Percakapan baru</button>
+          </div>
+          <p class="sandbox-note">
+            SANDBOX · Tools dan pesanan simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan
+            dapat dikenai biaya provider.
+          </p>
+          <div id="chat-log" role="log" aria-label="Percakapan pengujian">
+            <p class="empty-chat">Mulai percakapan untuk melihat agent mengambil keputusan.</p>
+          </div>
+          <div class="context-strip"><span>KONTEKS S-P-O</span><code id="context-value">Belum ada konteks</code></div>
+          <form id="chat-form">
+            <label class="sr-only" for="chat-input">Pesan pelanggan uji</label
+            ><textarea
+              id="chat-input"
+              rows="2"
+              maxlength="4000"
+              placeholder="Tulis pesan pelanggan, misalnya: Saya mau pesan…"
+              required
+            ></textarea
+            ><button id="send" type="submit">Jalankan ↗</button
+            ><button id="stop" class="secondary" type="button" hidden>Hentikan</button>
+          </form>
+        </section>
+        <section class="trace-panel">
+          <div class="panel-heading">
+            <strong>Jejak eksekusi</strong><span id="run-status" class="badge">Belum ada pengujian</span>
+          </div>
+          <div id="trace-list">
+            <p class="muted">
+              Input, output, durasi, dan retry muncul saat proses berjalan. Pilih langkah untuk melihat detail.
+            </p>
+          </div>
+          <pre id="trace-detail">Detail langkah akan tampil di sini.</pre>
+        </section>
+      </div>
+      <details class="sandbox-data">
+        <summary>Data untuk pengujian <span class="muted">/ terpisah dari data client</span></summary>
+        <div class="data-grid" id="cs-sandbox">
+          <label
+            >Profil usaha<textarea
+              id="test-profile-usaha"
+              rows="4"
+              maxlength="2000"
+              placeholder="nama, deskripsi, alamat, kontak dan jam operasional"
+            >
+Senin–Sabtu pukul 09.00–17.00.</textarea></label
+          ><label
+            >Cara pemesanan<textarea
+              id="test-profile-cara_pemesanan"
+              rows="3"
+              maxlength="2000"
+              placeholder="Cara membeli/mendaftar/menggunakan layanan"
+            ></textarea></label
+          ><label
+            >Metode pembayaran<textarea
+              id="test-profile-pembayaran"
+              rows="3"
+              maxlength="2000"
+              placeholder="Metode pembayaran yang tersedia"
+            ></textarea></label
+          ><label
+            >Kebijakan<textarea id="test-profile-kebijakan" rows="3" maxlength="2000">
+Pesanan diproses setelah dikonfirmasi admin.</textarea></label
+          ><label
+            >FAQ<textarea
+              id="test-profile-faq"
+              rows="3"
+              maxlength="2000"
+              placeholder="Pertanyaan umum dan jawabannya, atau informasi tambahan lain"
+            ></textarea></label
+          ><label
+            >Perilaku AI<textarea id="test-behavior" rows="5" maxlength="2000">
+Gunakan bahasa Indonesia yang ramah dan ringkas.</textarea></label
+          ><label class="products-field"
+            >Produk simulasi (JSON)<textarea id="test-products" rows="8" spellcheck="false"></textarea>
+          </label>
+        </div>
+        <div class="data-grid" id="edu-sandbox" hidden>
+          <label>Nama lembaga<input id="edu-test-name" maxlength="100" value="Pesantren Simulasi" /></label
+          ><label
+            >Profil lembaga<textarea id="edu-test-lembaga" rows="4" maxlength="4000">
+Pesantren (lembaga pendidikan Islam) berasrama di Bandung Barat. Fasilitas: asrama, masjid, perpustakaan. Kantor PSB buka Senin–Sabtu 08.00–15.00.</textarea></label
+          ><label
+            >Jadwal<textarea id="edu-test-jadwal" rows="4" maxlength="8000">
+Pendaftaran gelombang 1: 1 November – 31 Desember. Tes masuk setiap Sabtu pukul 08.00. Kunjungan Kamis dan Minggu 09.00–11.00.</textarea></label
+          ><label
+            >FAQ<textarea
+              id="edu-test-faq"
+              rows="3"
+              maxlength="4000"
+              placeholder="Pertanyaan umum dan jawabannya"
+            ></textarea></label
+          ><label
+            >Perilaku AI<textarea id="edu-test-behavior" rows="3" maxlength="2000">
+Gunakan bahasa Indonesia yang santun dan ringkas. Sebut peserta didik sebagai santri, orang tua sebagai wali santri, dan pengajar sebagai ustadz/ustadzah.</textarea></label
+          ><label class="products-field"
+            >Program simulasi (JSON: name, description)<textarea
+              id="edu-test-programs"
+              rows="7"
+              spellcheck="false"
+            ></textarea></label
+          ><label class="products-field"
+            >Kontak simulasi (JSON: bagian, kontak, deskripsi)<textarea
+              id="edu-test-contacts"
+              rows="5"
+              spellcheck="false"
+            ></textarea></label
+          ><label class="products-field"
+            >Dokumen simulasi (JSON: nama_file, jenis dokumen/gambar, deskripsi)<textarea
+              id="edu-test-documents"
+              rows="5"
+              spellcheck="false"
+            ></textarea>
+          </label>
+        </div>
+        <p class="muted">
+          Mengubah data uji atau draft memulai sesi uji baru. Data uji tidak ikut diaktifkan ke layanan.
+        </p>
+      </details>
+    </main>
+    <dialog id="publish-dialog">
+      <h2>Aktifkan draft untuk layanan?</h2>
+      <p id="publish-summary"></p>
+      <p>
+        Pesan pelanggan berikutnya memakai konfigurasi ini. Percakapan yang sedang diproses menyelesaikan versinya saat
+        ini.
+      </p>
+      <div class="dialog-actions">
+        <button id="cancel-publish" class="secondary">Batal</button
+        ><button id="confirm-publish">Aktifkan sekarang</button>
+      </div>
+    </dialog>
+  </body>
+</html>

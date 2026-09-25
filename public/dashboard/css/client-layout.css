@@ -1,0 +1,229 @@
+/* Tata letak halaman klien, mengikuti dashboard NC-WA yang asli. */
+.client-workspace {
+  background: #f5f7f6;
+  color: #17362f;
+  --green: #087f5b;
+  --line: #e1e8e4;
+  --muted: #6b7d75;
+}
+.client-workspace main {
+  max-width: 1260px;
+  margin: 82px auto 0;
+  padding: 48px 40px 24px;
+}
+.client-workspace .tabs {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 100%;
+  min-height: 82px;
+  height: 82px;
+  background: white;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 28px;
+  padding: 0 5%;
+  overflow: visible;
+}
+.client-workspace .tabs .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  margin: 0 24px 0 0;
+  color: #15382f;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.client-workspace .sidebar-brand > span {
+  font-size: 21px;
+  color: #15382f;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+.sidebar-brand img {
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.sidebar-brand small {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.client-workspace .tabs > a:not(.sidebar-brand) {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.client-workspace .tabs > a[aria-current='page'] {
+  background: none;
+  color: var(--green);
+  border-bottom-color: var(--green);
+  font-weight: 600;
+}
+.client-workspace .heading {
+  border: 0;
+  padding: 0;
+  margin-bottom: 32px;
+  align-items: center;
+}
+.client-workspace .heading h1 {
+  font-size: 34px;
+  letter-spacing: -0.04em;
+  margin-bottom: 10px;
+}
+.client-workspace .identity {
+  font-size: 12px;
+}
+.client-workspace #wallet {
+  display: none;
+}
+.user-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  margin-bottom: 24px;
+}
+.user-stats article {
+  padding: 22px;
+  border-radius: 12px;
+}
+.user-stats span,
+.user-stats small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+.user-stats strong {
+  display: block;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  margin: 12px 0 6px;
+  overflow-wrap: anywhere;
+}
+.client-workspace #dashboard > section:not(#userstats) {
+  border-radius: 12px;
+  padding: 24px;
+}
+.client-workspace #dashboard > #userstats {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.client-workspace #nomor > p {
+  display: none;
+}
+.client-workspace #sessions {
+  margin: 24px -24px -24px;
+  width: calc(100% + 48px);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+}
+.client-workspace th {
+  font-size: 11px;
+  padding: 12px 24px;
+  background: #fafcfb;
+}
+.client-workspace td {
+  padding: 20px 24px;
+}
+.client-workspace #sessions table {
+  min-width: 740px;
+}
+.client-workspace footer {
+  display: block;
+  max-width: 1260px;
+  margin: 0 auto;
+  padding: 4px 40px 24px;
+  text-align: left;
+}
+.client-workspace button {
+  border-radius: 8px;
+}
+.client-workspace #sendform {
+  max-width: none;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 16px 20px;
+}
+.client-workspace #sendform textarea {
+  min-height: 96px;
+}
+@media (max-width: 780px) {
+  .client-workspace .tabs {
+    height: auto;
+    min-height: 100px;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 14px 20px;
+  }
+  .client-workspace .tabs .sidebar-brand {
+    width: 100%;
+    margin: 0;
+  }
+  .client-workspace .tabs > a:not(.sidebar-brand) {
+    font-size: 13px;
+    padding-bottom: 8px;
+  }
+  .client-workspace main {
+    margin-top: 135px;
+    padding: 28px 18px 24px;
+  }
+  .client-workspace .heading h1 {
+    font-size: 26px;
+  }
+  .user-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .user-stats article {
+    padding: 18px;
+  }
+  .client-workspace td,
+  .client-workspace th {
+    padding: 14px 18px;
+  }
+  .client-workspace #sendform {
+    grid-template-columns: 1fr;
+  }
+  .client-workspace footer {
+    padding: 16px 18px;
+  }
+  .client-workspace #message {
+    bottom: 16px;
+  }
+}
+
+.integration-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.integration-heading h3 {
+  margin: 0;
+}
+#webhook-error {
+  color: #b24840;
+}
+#webhook-error:empty {
+  display: none;
+}

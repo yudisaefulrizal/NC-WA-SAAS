@@ -46,14 +46,45 @@ Komponen: `account` (akun, login, API key), `billing` (paket, kredit WhatsApp, p
 - Kode di luar sebuah komponen (komponen lain dan `src/http`) hanya mengimpor dari `index.ts` komponen itu. Kalau butuh nama baru, ekspor dulu dari `index.ts`.
 - Tes dan skrip boleh mengimpor bagian dalam komponen untuk menyiapkan data.
 - Kalau dua komponen saling membutuhkan, pakai interface dan sambungkan instansnya di `src/http/services.ts` (contoh: `Payments` menerima `PurchaseCommissions` dari referral).
+- Aturan di atas diperiksa otomatis oleh `scripts/checks/structure.ts` (bagian dari `npm run check`). Import yang hanya tipe (`import type`) boleh ke mana saja karena hilang saat dijalankan. Satu pengecualian: `data-access/schema.ts` (migrasi) boleh memakai konstanta domain seperti alur bawaan dan daftar profil. ESLint tidak dipakai karena typescript-eslint butuh compiler API TypeScript, yang tidak ada di TypeScript 7.
 - `tsconfig.json` sengaja memakai `lib: ["ES2022"]` tanpa DOM, supaya variabel yang lupa dideklarasikan (misalnya `origin`) langsung gagal di `tsc`, bukan jatuh ke global browser.
 
 **Menaruh kode baru**
 - Rute baru masuk ke `entry-points/routes.ts` komponennya. Bila fungsi pendaftarnya baru, daftarkan di `src/http/app.ts` atau `gateway.ts`.
-- Query baru ditulis sebagai fungsi di `data-access/<modul>-queries.ts` dengan pola `nama(c:Executor,params,...)`. Domain memberi `db` atau koneksi transaksi yang sedang dibuka.
+- Query baru ditulis sebagai fungsi di `data-access/<tabel>-queries.ts` dengan pola `nama(c:Executor,params,...)`. Domain memberi `db` atau koneksi transaksi yang sedang dibuka. Lihat aturan nama query di bawah.
 - `AIService` (`ai/domain/service.ts`) hanya berisi delegasi. Isinya ada di modul per tugas: `settings`, `logs`, `wallet`, `trial`, `data-profiles`, `conversations`, dan `runtime`.
 - Dashboard memakai skrip klasik `defer` yang berbagi satu scope global dan dijalankan sesuai urutan `<script>` di `index.html`. Kode yang langsung jalan saat dimuat hanya boleh memakai nama dari file sebelumnya; handler event boleh memakai nama dari file mana pun. Urutan `<link>` CSS juga menentukan cascade.
 - Halaman diberi hash isi otomatis oleh `page()` di `src/http/app.ts`: setiap `src`/`href` lokal `.js` atau `.css` mendapat `?v=<hash>`.
+
+## Aturan keterbacaan
+
+Tujuannya: siapa pun, manusia atau agent, bisa membuka satu file dan paham isinya tanpa membaca seluruh proyek. Semua kode sudah mengikuti aturan ini; `npm run check` menolak format yang menyimpang dan pelanggaran aturan ketergantungan.
+
+**Format**
+- Format diatur Prettier (`.prettierrc.json`), bukan selera. Jalankan `npm run format -- <file>` setelah mengubah file.
+- Satu pernyataan per baris. Satu aturan CSS per baris. Jangan menulis kode dalam gaya padat satu baris panjang.
+
+**Komentar**
+- Komentar ditulis dalam bahasa Indonesia. Nama variabel, fungsi, dan file tetap bahasa Inggris. Teks yang dilihat pengguna berbahasa Indonesia.
+- Setiap file dibuka dengan 1–3 baris komentar: file ini berisi apa dan dipakai oleh siapa.
+- Komentar menjelaskan *kenapa*, bukan mengulang *apa* yang sudah terbaca dari kode.
+
+**Modular atau tidak**
+Ukuran file dan fungsi bukan patokan, tapi tanda untuk menimbang. Pecah bila hasilnya lebih mudah dibaca:
+- file berisi lebih dari satu hal yang bisa dijelaskan terpisah (misalnya carousel sesi dan form pesanan dalam satu file);
+- bagian yang sering diubah bercampur dengan bagian yang jarang disentuh;
+- pembaca harus menggulir jauh untuk menemukan hal yang dicari.
+Jangan pecah bila potongannya selalu harus dibaca bersama, atau bila pemecahan hanya memindahkan kerumitan ke banyak file kecil yang saling bergantung.
+
+**Nama**
+- Nama file menyebut isinya, dalam kebab-case: `order-schema.ts`, `session-carousel.js`. Nama umum seperti `utils`, `helpers`, `shared`, `data`, `misc` tidak dipakai.
+- Query dikelompokkan per tabel di `data-access/<tabel>-queries.ts` dan dipanggil lewat namespace `<tabel>Sql`, dengan nama pendek yang menyebut maksudnya: `import * as ordersSql from '../data-access/orders-queries.js'` lalu `ordersSql.lockOwned(c, [...])`, bukan `lockOrdersIdByAccountIdDataProfileIdId(...)`.
+  - Awalan nama: `find` (satu baris), `list` (banyak baris), `count`/`sum`, `lock` (FOR UPDATE), `share` (FOR SHARE), `insert`, `upsert`, `update`, `delete`, atau kata kerja yang lebih tepat (`markSent`, `publish`). Nama `delete` saja tidak bisa dipakai karena kata tercadang; pakai `deleteById`.
+  - Awalan tabel milik komponen itu sendiri tidak diulang: `ai_orders` di komponen ai menjadi `orders-queries.ts` / `ordersSql`, `auto_share_jobs` menjadi `jobsSql`.
+  - Query yang tabelnya dipilih saat berjalan diberi modul bernama tugasnya (contoh `session-data-queries.ts`), dan nama tabelnya hanya boleh dari daftar tetap di kode.
+
+**Urutan isi file**
+Komentar pembuka, import, tipe, fungsi yang diekspor, lalu helper internal.
 
 ## Arsitektur singkat
 
