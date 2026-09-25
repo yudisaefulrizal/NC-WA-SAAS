@@ -12,6 +12,7 @@ import {AIStudio} from '../../src/components/ai/domain/studio.js';
 import {defaults,type AITransport} from '../../src/components/ai/domain/provider.js';
 import {defaultWorkflow} from '../../src/components/ai/domain/pipeline/workflow.js';
 import {activeWorkflow,changeWorkflow,workflowState} from '../../src/components/ai/domain/profiles/registry.js';
+import {screenshots} from './screenshots.js';
 
 const temporary=await mkdtemp(join(tmpdir(),'ncwa-studio-browser-'));
 const slot=net.createServer();await new Promise<void>(r=>slot.listen(0,'127.0.0.1',r));const port=(slot.address() as net.AddressInfo).port;await new Promise<void>(r=>slot.close(()=>r()));
@@ -64,8 +65,8 @@ try{
  await page.getByRole('button',{name:'Node Buat pesanan',exact:true}).click();assert.ok((await page.locator('#node-output').textContent())?.includes('SIM-1'));
  await page.locator('#publish').click();await page.locator('#confirm-publish').click();await page.locator('#notice').filter({hasText:'Versi aktif diperbarui'}).waitFor();
  assert.equal((await activeWorkflow() as any).nodes.router.tier,'smart');
- await mkdir('data/browser-check',{recursive:true});await page.screenshot({path:'data/browser-check/studio-desktop.png',fullPage:true});
- await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:'data/browser-check/studio-mobile.png',fullPage:true});
+ await mkdir(screenshots,{recursive:true});await page.screenshot({path:join(screenshots,'studio-desktop.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:join(screenshots,'studio-mobile.png'),fullPage:true});
  await page.locator('#reset').click();assert.equal(await page.locator('#chat-log .bubble').count(),0);
  await page.locator('#chat-input').fill('Uji pembatalan');await page.locator('#send').click();await page.locator('#stop').click();await page.locator('#notice').filter({hasText:'dihentikan'}).waitFor();
  assert.deepEqual(errors,[]);

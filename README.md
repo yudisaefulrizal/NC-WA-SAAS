@@ -41,6 +41,8 @@ sudo npm run build
 sudo systemctl restart nc-wa-saas
 ```
 
+Saat start pertama setelah update, folder lama `auth/` otomatis dipindah ke `storage/`. Jika service memakai `ReadWritePaths` seperti contoh di `deploy/`, buat dulu `storage/` (pemilik user app) dan sesuaikan `ReadWritePaths` sebelum restart.
+
 Contoh service systemd dan nginx ada di `deploy/`. Jika perintah dijalankan dengan sudo, pastikan pemilik file sesuai user yang menjalankan app.
 
 ## Struktur

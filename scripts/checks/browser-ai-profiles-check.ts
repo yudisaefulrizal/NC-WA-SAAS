@@ -13,6 +13,7 @@ import {digest} from '../../src/libraries/security.js';
 import {ai} from '../../src/components/ai/domain/service.js';
 import {createGateway} from '../../src/http/gateway.js';
 import {basicWallet} from '../../src/components/billing/domain/plans.js';
+import {screenshots} from './screenshots.js';
 
 const temporary=await mkdtemp(join(tmpdir(),'ncwa-profiles-browser-'));
 const slot=net.createServer();await new Promise<void>(r=>slot.listen(0,'127.0.0.1',r));
@@ -37,7 +38,7 @@ try{
  const kopi=await ai.createDataProfile(client,{profile_type:'cs',name:'Toko Kopi Senja'});
  await ai.saveDataProfileField(client,kopi.id,'usaha','Toko Kopi Senja, Bandung');
  for(const session of ['toko-utama','cabang-dago'])await ai.attachProfile(client,session,{data_profile_id:kopi.id,enabled:true});
- await mkdir('data/browser-check',{recursive:true});
+ await mkdir(screenshots,{recursive:true});
 
  // Session view: the attached profile shows on the card and the strip, with a warning that the content is shared.
  const {page,errors,context}=await open(clientToken,'/dashboard/ai');
@@ -46,7 +47,7 @@ try{
  assert.match(await strip.innerText(),/dipakai juga oleh cabang-dago/);
  assert.equal(await page.locator('.ai-session-card.selected .ai-session-profile').innerText(),'CS USAHA\nToko Kopi Senja');
  assert.equal(await page.locator('textarea[name=profile_usaha]').inputValue(),'Toko Kopi Senja, Bandung');
- await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/profiles-session.png'});
+ await page.locator('#ai-session-detail').screenshot({path:join(screenshots,'profiles-session.png')});
  // A session without a profile offers only the session tabs and a way to attach one.
  for(let i=0;i<5&&!(await strip.innerText()).includes('belum memakai');i++){await page.locator('#ai-session-next').click();await page.waitForTimeout(600);}
  assert.match(await strip.innerText(),/Sesi ini belum memakai profil AI/);
@@ -74,7 +75,7 @@ try{
  const card=page.locator('.ai-profile-card',{hasText:'Promo Lebaran'});await card.waitFor();
  assert.match(await card.innerText(),/Belum dipasang ke sesi mana pun/);
  assert.match(await page.locator('.ai-profile-card',{hasText:'Toko Kopi Senja'}).innerText(),/cabang-dago[\s\S]*toko-utama/);
- await page.locator('#ai-profiles-view').screenshot({path:'data/browser-check/profiles-list.png'});
+ await page.locator('#ai-profiles-view').screenshot({path:join(screenshots,'profiles-list.png')});
  await card.getByRole('button',{name:'Kelola isi'}).click();
  await page.locator('#ai-manage-name',{hasText:'Promo Lebaran'}).waitFor();
  assert.deepEqual(await page.locator('[data-ai-tab]:visible').allTextContents(),['Knowledge','Pesanan Masuk','Uji Coba']);
@@ -96,7 +97,7 @@ try{
   const links=await page.locator('.tabs .nav-links > a:visible').evaluateAll(els=>els.map(e=>Math.round(e.getBoundingClientRect().top)));assert.equal(new Set(links).size,1);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   assert.equal(await page.locator('#ai-knowledge-select').isVisible(),true);
-  await page.screenshot({path:'data/browser-check/profiles-mobile.png',fullPage:true});
+  await page.screenshot({path:join(screenshots,'profiles-mobile.png'),fullPage:true});
   await page.locator('[data-ai-view="profiles"]').click();await page.locator('.ai-profile-card').first().waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   assert.deepEqual(errors,[]);await context.close();}

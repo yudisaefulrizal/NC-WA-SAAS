@@ -1,12 +1,13 @@
 import {randomUUID} from 'node:crypto';
 import {createWriteStream} from 'node:fs';
 import {copyFile,mkdir,rename,rm,stat} from 'node:fs/promises';
-import {join,resolve} from 'node:path';
+import {join} from 'node:path';
 import type {Readable} from 'node:stream';
 import type {PoolConnection} from 'mysql2/promise';
 import {db} from '../../../../../libraries/db.js';
 import {ApiError} from '../../../../../libraries/errors.js';
 import {sniffMediaType} from '../../../../../libraries/media-type.js';
+import {storagePaths} from '../../../../../libraries/storage.js';
 import {copyEduContacts,copyEduPrograms,countEduContactsByDataProfileId,countEduDocumentsByDataProfileIdId,countEduProgramsByDataProfileId,deleteEduContactsByIdAccountIdDataProfileId,deleteEduDocumentsById,deleteEduProgramsByIdAccountIdDataProfileId,insertEduContact,insertEduDocuments,insertEduProgram,lockAccountsSuspendedById,lockDataProfilesProfileTypeByIdAccountId,lockEduDocumentsFileIdByIdAccountIdDataProfileId,selectEduContactsByAccountIdDataProfileId,selectEduDocumentFiles,selectEduDocumentRowsForCopy,selectEduDocuments,selectEduDocumentsByIdAccountIdDataProfileId,selectEduProgramsByAccountIdDataProfileId,selectEduProgramsIdByDataProfileIdNameId,updateDataProfilesRevisionById,updateEduContactsBagianByIdAccountIdDataProfileId,updateEduDocumentsDescriptionByIdAccountIdDataProfileId,updateEduDocumentsFileIdById,updateEduProgramsNameByIdAccountIdDataProfileId} from '../../../data-access/edu-queries.js';
 import {eduLimits} from './profile.js';
 // CS Lembaga Pendidikan: answers prospective students, parents and current students from what the institution
@@ -34,7 +35,7 @@ export function documentType(head:Buffer,filename:string):{media_type:'image'|'d
 }
 export function filename(value:unknown){const name=text(value,255,'Nama file',false).replace(/[\\/\0\r\n]/g,'_');return name;}
 export class EduStore {
- constructor(public root=resolve('auth','_ai-documents')){}
+ constructor(public root=storagePaths().aiDocuments){}
  private dir(account:string){return join(this.root,account);}
  path(account:string,id:string){return join(this.dir(account),rowId(id,'Dokumen'));}
  async programs(account:string,profile:string):Promise<EduProgram[]>{const [rows]=await selectEduProgramsByAccountIdDataProfileId(db,[account,profile]);return rows.map(r=>({id:String(r.id),name:String(r.name),description:String(r.description)}));}

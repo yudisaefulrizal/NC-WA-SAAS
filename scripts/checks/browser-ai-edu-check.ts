@@ -15,6 +15,7 @@ import {ai} from '../../src/components/ai/domain/service.js';
 import {createGateway} from '../../src/http/gateway.js';
 import {basicWallet} from '../../src/components/billing/domain/plans.js';
 import {setProfileEnabled} from '../../src/components/ai/domain/profiles/registry.js';
+import {screenshots} from './screenshots.js';
 
 const temporary=await mkdtemp(join(tmpdir(),'ncwa-edu-browser-'));
 const slot=net.createServer();await new Promise<void>(r=>slot.listen(0,'127.0.0.1',r));
@@ -41,7 +42,7 @@ try{
  const profile=await ai.createDataProfile(client,{profile_type:'pendidikan',name:"Ma'had Darul Ilmi"});
  await ai.attachProfile(client,'psb-darulilmi',{data_profile_id:profile.id,enabled:true});
  const stored=async()=>ai.dataProfile(client,profile.id);
- await mkdir('data/browser-check',{recursive:true});
+ await mkdir(screenshots,{recursive:true});
 
  const {page,errors,context}=await open(clientToken,'/dashboard/ai');
  const strip=page.locator('#ai-profile-strip');await strip.getByText("Ma'had Darul Ilmi").waitFor();
@@ -54,7 +55,7 @@ try{
  for(const name of ['edu_kind','edu_peserta'])assert.equal(await page.locator(`#ai-form [name=${name}]`).count(),0);
  await page.locator('#ai-form [name=edu_lembaga]').fill('Pesantren di Lembang, berdiri 1998.');
  await until(page,async id=>(await (await fetch('/ai/data-profiles/'+id)).json()).edu.lembaga==='Pesantren di Lembang, berdiri 1998.',profile.id,5000);
- await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-knowledge.png'});
+ await page.locator('#ai-session-detail').screenshot({path:join(screenshots,'edu-knowledge.png')});
  // Program: add, rename and describe; each edit saves itself.
  await page.locator('[data-knowledge-tab=program]').click();
  await page.locator('#edu-program-add').click();await page.locator('#edu-program-name').waitFor();
@@ -67,7 +68,7 @@ try{
  await page.locator('#edu-program-delete').click();
  await page.waitForFunction(()=>document.querySelectorAll('#edu-programs .edu-program-item').length===1,undefined,{timeout:5000});
  assert.equal(await page.locator('#edu-programs .edu-program-item').innerText().then(t=>t.startsWith('Tahfidz Mukim Putra')),true);
- await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-program.png'});
+ await page.locator('#ai-session-detail').screenshot({path:join(screenshots,'edu-program.png')});
  // Jadwal: one long text.
  await page.locator('[data-knowledge-tab=jadwal]').click();
  await page.locator('#edu-jadwal').fill('Gelombang 1: 1 November – 31 Desember 2026\nTes masuk setiap Sabtu pukul 08.00');
@@ -86,7 +87,7 @@ try{
  await page.locator('.edu-document textarea').fill('Denah dan rute ke pesantren.');
  await until(page,async id=>{const d=await (await fetch('/ai/data-profiles/'+id+'/documents')).json();return d.length===1&&d[0].filename==='denah-lokasi.png'&&d[0].description==='Denah dan rute ke pesantren.';},profile.id,5000);
  assert.equal(await page.locator('#edu-document-count').innerText(),'1 dari 20 dokumen');
- await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-dokumen.png'});
+ await page.locator('#ai-session-detail').screenshot({path:join(screenshots,'edu-dokumen.png')});
  // Kontak: a new row is created once Bagian and Kontak are filled, then updated in place.
  await page.locator('[data-knowledge-tab=kontak]').click();
  await page.locator('#edu-contact-add').click();
@@ -96,7 +97,7 @@ try{
  await until(page,async id=>{const c=await (await fetch('/ai/data-profiles/'+id+'/contacts')).json();return c.length===1&&c[0].deskripsi.startsWith('Kendala');},profile.id,6000);
  await contact.locator('input').nth(1).fill('0856-2200-1199');
  await until(page,async id=>{const c=await (await fetch('/ai/data-profiles/'+id+'/contacts')).json();return c.length===1&&c[0].kontak==='0856-2200-1199';},profile.id,6000);
- await page.locator('#ai-session-detail').screenshot({path:'data/browser-check/edu-kontak.png'});
+ await page.locator('#ai-session-detail').screenshot({path:join(screenshots,'edu-kontak.png')});
  const saved=await stored();assert.equal(saved.edu?.lembaga,'Pesantren di Lembang, berdiri 1998.');
  // Data Profil: the card counts programs, documents and contacts; managing it shows the education tabs.
  await page.locator('[data-ai-view="profiles"]').click();
@@ -121,7 +122,7 @@ try{
   await noScroll();
   // On phones the Knowledge sections are picked from a dropdown.
   assert.equal(await page.locator('#ai-knowledge-select').isVisible(),true);
-  for(const tab of ['program','jadwal','dokumen','kontak']){await page.locator('#ai-knowledge-select').selectOption(tab);await page.locator('#ai-knowledge-tab-'+tab).waitFor();await noScroll();await page.screenshot({path:`data/browser-check/edu-mobile-${tab}.png`,fullPage:true});}
+  for(const tab of ['program','jadwal','dokumen','kontak']){await page.locator('#ai-knowledge-select').selectOption(tab);await page.locator('#ai-knowledge-tab-'+tab).waitFor();await noScroll();await page.screenshot({path:join(screenshots,`edu-mobile-${tab}.png`),fullPage:true});}
   await page.locator('#ai-knowledge-select').selectOption('program');
   assert.equal(await page.locator('#edu-program-select').isVisible(),true);assert.equal(await page.locator('#edu-programs').isVisible(),false);
   assert.equal(await page.locator('#edu-program-add').isVisible(),true);
@@ -137,7 +138,7 @@ try{
   assert.deepEqual(await flags(),[false,true]);
   await page.locator('#nodes [data-node="kontak"]').click();
   assert.deepEqual(await page.locator('#node-tools label').allTextContents(),['get_kontak']);
-  await page.screenshot({path:'data/browser-check/edu-studio.png'});
+  await page.screenshot({path:join(screenshots,'edu-studio.png')});
   await page.locator('#profile-select').selectOption('cs');await page.locator('#canvas-profile',{hasText:'CS Usaha'}).waitFor();
   assert.equal(await page.locator('#nodes [data-node="layanan"]').count(),1);assert.deepEqual(await flags(),[true,false]);
   assert.deepEqual(errors,[]);await context.close();}

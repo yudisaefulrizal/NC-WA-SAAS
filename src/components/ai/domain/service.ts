@@ -3,7 +3,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {type SessionManager} from '../../whatsapp/index.js';
 import type {IncomingMessage} from '../../whatsapp/index.js';
 import {ProductImageStore} from './profiles/cs/product-images.js';
-import {resolve} from 'node:path';
+import {storagePaths} from '../../../libraries/storage.js';
 import {callAI,type AIConfig,type AITransport} from './provider.js';
 import * as settings from './settings.js';
 import * as logs from './logs.js';
@@ -18,7 +18,7 @@ import * as runtime from './runtime.js';
 export class AIService {
  queues=new Map<string,Promise<void>>();
  queued=0;
- productImages=new ProductImageStore(resolve('auth','_product-images'));
+ productImages=new ProductImageStore(storagePaths().productImages);
  constructor(readonly transport:AITransport=callAI,readonly wait:(milliseconds:number)=>Promise<void>=async milliseconds=>{await delay(milliseconds);},readonly tools:AITools=defaultTools){}
  config():Promise<AIConfig>{return settings.loadConfig(this);}
  configuration(){return settings.configuration(this);}

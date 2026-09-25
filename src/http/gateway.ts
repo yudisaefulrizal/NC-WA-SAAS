@@ -10,11 +10,12 @@ import {MediaStore} from '../components/whatsapp/index.js';
 import {AssetStore} from '../components/auto-share/index.js';
 import {ProductImageStore} from '../components/ai/index.js';
 import {EventStream} from '../components/whatsapp/index.js';
-import {resolve} from 'node:path';
+import {join} from 'node:path';
 import {readdir} from 'node:fs/promises';
 import type {RowDataPacket} from 'mysql2/promise';
 import {db} from '../libraries/db.js';
 import {digest} from '../libraries/security.js';
+import {storagePaths,storageRoot} from '../libraries/storage.js';
 import {basicWallet} from '../components/billing/index.js';
 import {SessionManager,type Connector} from '../components/whatsapp/index.js';
 import {ApiError} from '../libraries/errors.js';
@@ -25,7 +26,8 @@ import {customerOf,onChatChange,recordIncoming,recordOutgoing,updateStatus} from
 import {eduData} from '../components/ai/index.js';
 import {accountByApiKeyHash,accountByLoginToken,accountStatus,activeAccount} from '../components/account/index.js';
 
-export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth'),ai=defaultAI,referral=defaultReferral) {
+export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=storageRoot,ai=defaultAI,referral=defaultReferral) {
+ const paths=storagePaths(root);
  const hooks=new TenantWebhooks();
  referral.currentNumbersProvider=async(accountId:string)=>{
   const pending=managers.get(accountId);if(!pending)return [];
@@ -41,9 +43,9 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  const history=(work:Promise<unknown>)=>work.catch(error=>console.error('Riwayat chat gagal dicatat.',error instanceof Error?error.message:error));
  async function manager(id:string){
   if(!managers.has(id))managers.set(id,(async()=>{
-   const store=new SessionStore(resolve(root,id));
+   const store=new SessionStore(join(paths.whatsapp,id));
    const result=new SessionManager(connector?connector(id,store):baileysConnector(store,(session,messageId)=>ai.registerSystemMessage(id,session,messageId)),store);
-   const files=new MediaStore(resolve(root,'_media',id),process.env.APP_ORIGIN??'http://127.0.0.1:8067');
+   const files=new MediaStore(join(paths.media,id),process.env.APP_ORIGIN??'http://127.0.0.1:8067');
    const events=new EventStream();media.set(id,files);streams.set(id,events);
    result.onEvent=async event=>{
     events.push(event);await hooks.enqueue(id,event);
@@ -85,11 +87,11 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
   if(!rows[0]){res.status(401).json({error:'unauthorized'});return;}
   res.locals.accountId=rows[0].id;res.locals.manager=await manager(rows[0].id);await (res.locals.manager as SessionManager).onBeforeSend!();next();
  });
- const shareAssets=new AssetStore(resolve(root,'_share-assets'),db);
- const productImages=new ProductImageStore(resolve(root,'_product-images'));
+ const shareAssets=new AssetStore(paths.shareAssets,db);
+ const productImages=new ProductImageStore(paths.productImages);
  ai.productImages=productImages;
  // Documents of CS Lembaga Pendidikan live beside product photos, under this gateway's storage root.
- eduData.store.root=resolve(root,'_ai-documents');
+ eduData.store.root=paths.aiDocuments;
  const autoShare=createAutoShare(manager,shareAssets);
  router.use('/auto-share',autoShareRouter(autoShare));
  const routeContext={pending,hooks,media,streams,ai};
@@ -103,7 +105,7 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
   maintenance??=setInterval(()=>{refreshing??=refresh().catch(()=>console.error('Penyegaran hak session gagal.')).finally(()=>{refreshing=undefined;});},30000).unref();
 
   // Only persisted directories belonging to existing accounts may open sockets.
-  const entries=await readdir(root,{withFileTypes:true}).catch(error=>{
+  const entries=await readdir(paths.whatsapp,{withFileTypes:true}).catch(error=>{
    if(error.code==='ENOENT')return [];throw error;
   });
   for(const entry of entries){

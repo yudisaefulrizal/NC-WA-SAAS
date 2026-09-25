@@ -14,6 +14,7 @@ import {createGateway} from '../../src/http/gateway.js';
 import {recordOutgoing,updateStatus} from '../../src/components/ai/domain/chat.js';
 import {basicWallet} from '../../src/components/billing/domain/plans.js';
 import type {Update} from '../../src/components/whatsapp/domain/sessions.js';
+import {screenshots} from './screenshots.js';
 
 const temporary=await mkdtemp(join(tmpdir(),'ncwa-conversation-browser-'));
 const slot=net.createServer();await new Promise<void>(r=>slot.listen(0,'127.0.0.1',r));
@@ -72,7 +73,7 @@ try{
  await messages.getByText('AI dijeda karena ada balasan manual',{exact:false}).waitFor();
  // The composer stays one line tall until the text needs more.
  assert.ok((await page.locator('#chat-text').boundingBox())!.height<=50);
- await mkdir('data/browser-check',{recursive:true});await page.locator('#chat-shell').screenshot({path:'data/browser-check/chat-desktop.png'});
+ await mkdir(screenshots,{recursive:true});await page.locator('#chat-shell').screenshot({path:join(screenshots,'chat-desktop.png')});
 
  // AI controls update the server and leave notes in the history.
  await page.locator('#chat-pause').click();await page.locator('#chat-status',{hasText:'AI aktif'}).waitFor();
@@ -99,7 +100,7 @@ try{
  await page.locator('#chat-back').click();await list.waitFor();assert.equal(await page.locator('.chat-pane').isHidden(),true);
  await list.getByText('Rina Amalia',{exact:true}).click();await page.locator('#chat-view').waitFor();assert.equal(await page.locator('.chat-list-pane').isHidden(),true);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
- await page.screenshot({path:'data/browser-check/chat-mobile.png'});
+ await page.screenshot({path:join(screenshots,'chat-mobile.png')});
  assert.deepEqual(errors,[]);console.log('Chat view: list, filters, history, receipts, AI controls, manual reply, realtime and phone layout checks passed');
 }finally{
  await browser?.close();await gateway.stop();await new Promise<void>(r=>server.close(()=>r()));

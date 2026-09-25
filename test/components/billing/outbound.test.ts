@@ -35,7 +35,7 @@ test('Known pre-send rejection refunds; transport uncertainty holds credit and n
  await request(app).post('/sessions/shop/messages/media').set('X-API-Key',a.key).send({to:'628123456789',type:'image',url:'http://127.0.0.1/private'}).expect(400);assert.equal((await basicWallet(a.id)).balance,initial-1);
 });
 test('Media paths require account credentials and reject cross-account access/traversal',async()=>{
- const a=await user(),b=await user();const store=new MediaStore(join(root,'_media',a.id),'http://gateway.invalid');
+ const a=await user(),b=await user();const store=new MediaStore(join(root,'files','media',a.id),'http://gateway.invalid');
  const media=await store.save('shop',{messageId:'one',from:'628123',sender:'628123',isGroup:false,groupId:null,type:'image',text:'',timestamp:1,mimetype:'image/png',download:async()=>Readable.from(['fixture-image'])});
  const path=new URL(media!.url).pathname;await request(app).get(path).expect(401);await request(app).get(path).set('X-API-Key',b.key).expect(404);await request(app).get(path).set('X-API-Key',a.key).expect(200);
  await request(app).get('/media/..%2F..%2F.env').set('X-API-Key',a.key).expect(404);

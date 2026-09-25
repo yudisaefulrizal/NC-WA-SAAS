@@ -146,7 +146,7 @@ test('Duplicating a data profile copies content, sources and its own photo files
  const copied=(await t.api('get','/ai/data-profiles/'+copy.id+'/products').expect(200)).body[0];
  assert.ok(copied.image_id&&copied.image_id!==photo.id);
  await t.api('delete',base).expect(200);
- await assert.rejects(stat(join(root,'_product-images',t.id,photo.id)));
+ await assert.rejects(stat(join(root,'files','product-images',t.id,photo.id)));
  await t.api('get','/ai/data-profiles/'+copy.id+'/products-image/'+copied.image_id).expect(200).expect('Content-Type','image/jpeg');
 });
 

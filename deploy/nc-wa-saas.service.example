@@ -18,7 +18,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/srv/nc-wa-saas/auth /srv/nc-wa-saas/data
+# storage/ must exist (owned by ncwa) before the first start. The optional auth/ entry lets an older install
+# move its old auth/ directory into storage/ on first start; it can be removed afterwards.
+ReadWritePaths=/srv/nc-wa-saas/storage /srv/nc-wa-saas/data -/srv/nc-wa-saas/auth
 
 [Install]
 WantedBy=multi-user.target

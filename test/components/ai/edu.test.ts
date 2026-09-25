@@ -63,7 +63,7 @@ async function tenant(sessions=['psb']){
 async function eventually<T>(read:()=>Promise<T>,ok:(value:T)=>boolean){for(let i=0;i<150;i++){const value=await read();if(ok(value))return value;await new Promise(r=>setTimeout(r,20));}return read();}
 const pdf=Buffer.from('%PDF-1.4\n% brosur uji\n%%EOF\n');
 const upload=(t:Awaited<ReturnType<typeof tenant>>,path:string,file:Buffer,name:string,description:string,method:'post'|'put'='post')=>t.api(method,path).set('Content-Type','application/octet-stream').set('X-Filename',encodeURIComponent(name)).set('X-Description',encodeURIComponent(description)).send(file);
-const files=async(account:string)=>(await readdir(join(root,'_ai-documents',account)).catch(()=>[] as string[])).filter(f=>!f.endsWith('.part'));
+const files=async(account:string)=>(await readdir(join(root,'files','ai-documents',account)).catch(()=>[] as string[])).filter(f=>!f.endsWith('.part'));
 
 test('CS Lembaga Pendidikan starts switched off; once on, clients create data profiles with the institution kind',async()=>{
  const t=await tenant();

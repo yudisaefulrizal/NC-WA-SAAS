@@ -9,13 +9,13 @@ Baca sebelum mengerjakan proyek ini. Gambaran produk ada di [README.md](README.m
 - Commit dan push hanya bila diminta ("commit dan push").
 - Jangan menetapkan harga, model billing, atau penyedia tanpa keputusan pemilik.
 - Setiap akses data wajib memakai identitas akun dari server (sesi login atau API key), bukan ID dari URL atau body.
-- Jangan commit `.env`, `.envpengembangan`, API key, auth WhatsApp (`auth/`), media pelanggan, `data/`, atau salinan database. Log dan catatan tidak boleh memuat isi pesan, QR, atau secret.
+- Jangan commit `.env`, `.envpengembangan`, API key, `storage/` (login WhatsApp dan file klien), `data/`, atau salinan database. Log dan catatan tidak boleh memuat isi pesan, QR, atau secret.
 - Jangan mengubah proyek lain (`../nc-wa`, `../n8n-nc-wa`) kecuali diminta.
 
 ## Pengujian
 
 - **Tes integrasi** (`test/**/*.test.ts`, strukturnya mengikuti `src/`) memakai MySQL dan akun tiruan. Jalankan di MySQL sementara yang terisolasi, supaya tidak bersaing dengan scheduler server dev: `npm run test:isolated`. Runner menjalankan migrasi lalu seluruh tes secara serial. Dengan argumen, runner hanya menjalankan tes atau skrip itu, berurutan: `npm run test:isolated -- test/components/ai/edu.test.ts scripts/checks/browser-ai-edu-check.ts`. Atur `MYSQLD_PATH` bila binary MySQL berbeda.
-- **Pemeriksaan browser** (`scripts/checks/browser-*-check.ts`, Playwright) diperiksa pada lebar 1280 px dan 390 px. Jalankan lewat runner terisolasi yang sama; `CHROMIUM_PATH` opsional. Hasil tangkapan layar tersimpan di `data/browser-check/`.
+- **Pemeriksaan browser** (`scripts/checks/browser-*-check.ts`, Playwright) diperiksa pada lebar 1280 px dan 390 px. Jalankan lewat runner terisolasi yang sama; `CHROMIUM_PATH` opsional. Tangkapan layarnya disimpan di luar proyek, di `$TMPDIR/ncwa-browser-check/` (biasanya `/tmp/ncwa-browser-check/`).
   - Masih gagal sejak sebelum refactor struktur: `browser-check.ts` (menunggu `#stat-credit` yang kini tersembunyi), `browser-template-source-check.ts`, dan `browser-auto-share-check.ts` (belum mengikuti wizard template tiga tahap).
 - **Belum pernah diuji otomatis:** HP WhatsApp nyata, n8n nyata, QRIS merchant nyata, dan model AI sungguhan. Tulis "belum diuji" bila belum dilakukan.
 - Setelah perubahan skema, jalankan `npm run migrate` di database dev. Migrasi harus idempoten dan aman dijalankan ulang.
@@ -32,6 +32,7 @@ Struktur mengikuti Node.js Best Practices: kode dikelompokkan per komponen bisni
 | `src/components/<komponen>/index.ts` | API publik komponen. |
 | `src/libraries/` | Kode bersama tanpa aturan bisnis: `db`, `errors` (`ApiError`), `crypto`, `validation`, `pagination`, `download`, `log`, dan lainnya. |
 | `src/http/` | Perakitan: `app.ts` (middleware, urutan rute, halaman), `gateway.ts` (rute klien dan auth API key), `services.ts` (instans yang saling disambungkan). |
+| `storage/` (tidak di git) | Data runtime: `whatsapp/<akun>/<sesi>/` berisi login Baileys (jangan dihapus, nomor akan logout), `files/{media,product-images,ai-documents,share-assets}/<akun>/` berisi file klien. Path-nya dari `src/libraries/storage.ts`. Instalasi lama dengan `auth/` dipindah otomatis saat start pertama. |
 | `src/server.ts`, `src/migrate.ts` | Titik masuk aplikasi dan migrasi. Skema fondasi ada di `migrate.ts`, skema lain di `data-access/schema.ts` tiap komponen. |
 | `public/dashboard/` | Dashboard: `index.html`, `css/*.css`, `js/core.js`, `js/pages/*.js`, `js/start.js`. |
 | `public/ai-studio/` | Halaman AI Studio pemilik. |
@@ -57,7 +58,7 @@ Komponen: `account` (akun, login, API key), `billing` (paket, kredit WhatsApp, p
 ## Arsitektur singkat
 
 - **Kredit WhatsApp** dipesan dulu (reservasi) dengan idempotency key sebelum pesan dikirim (`billing/domain/outbound.ts`, `billing/domain/credits.ts`). Hasil kirim yang belum pasti tidak pernah dikirim ulang otomatis.
-- **Engine** (`whatsapp/domain/sessions.ts`): satu pemilik aktif per session. Auth disimpan di `auth/<akun>/`, dan semua session dipulihkan saat startup.
+- **Engine** (`whatsapp/domain/sessions.ts`): satu pemilik aktif per session. Login disimpan di `storage/whatsapp/<akun>/<sesi>/`, dan semua session dipulihkan saat startup.
 - **Asisten AI**:
   - Profil adalah pipeline di kode (`ai/domain/profiles/registry.ts` + `Pipeline` di `ai/domain/pipeline/runner.ts`): router, specialist, context, tool, dan tier model. Data profil (`ai_data_profiles`) adalah isi milik akun yang dipasang ke sesi lewat `ai_assistants.data_profile_id`.
   - Alur AI Studio disimpan per profil di `ai_workflow`, dengan draft dan publish masing-masing.

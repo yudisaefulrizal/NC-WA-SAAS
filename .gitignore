@@ -5,6 +5,8 @@ node_modules/
 dist/
 coverage/
 
+storage/
+# Old location of storage/, moved automatically on the first start of a newer version.
 auth/
 data/
 *.log

@@ -6,8 +6,12 @@ import {db} from './libraries/db.js';
 import {startBasicScheduler} from './components/billing/index.js';
 import {payments} from './http/services.js';
 import {acquireEngineLock} from './libraries/runtime-lock.js';
+import {moveLegacyStorage} from './libraries/storage.js';
 
 const lock=await acquireEngineLock();
+// Before anything reads sessions or files: an install still on the old auth/ directory moves into storage/.
+try{const moved=await moveLegacyStorage();if(moved)console.log(`Penyimpanan lama auth/ dipindah ke storage/ (${moved} folder).`);}
+catch(error){console.error('Pemindahan auth/ ke storage/ gagal; server tidak dijalankan agar sesi tidak tampak hilang.',error instanceof Error?error.message:'');await lock.release();await db.end();process.exit(1);}
 try {
  await recoverReservations();await ai.recover();
  await gateway.restore();await gateway.autoShare.recover();gateway.start();

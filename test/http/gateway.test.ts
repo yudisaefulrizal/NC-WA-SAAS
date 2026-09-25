@@ -26,7 +26,7 @@ test('Startup restores tenants once without requests and preserves logged-out se
  const {basicWallet}=await import('../../src/components/billing/domain/plans.js');
  for(const account of [accountA,accountB]){await basicWallet(account);await db.execute('UPDATE wallets SET session_limit=2 WHERE account_id=?',[account]);}
  for(const id of [accountA,accountB,orphan]){
-  const store=new SessionStore(join(saved,id));
+  const store=new SessionStore(join(saved,'whatsapp',id));
   await store.save({id:'shop',status:'connected',phone:null,filter:id===accountA?'private':'group'});
   await store.save({id:'offline',status:'logged_out',phone:null,filter:'all'});
  }
@@ -49,7 +49,7 @@ test('Startup restores tenants once without requests and preserves logged-out se
  assert.equal(closed,2);
 });
 
-test('Startup accepts a missing auth directory',async()=>{
+test('Startup accepts a missing storage directory',async()=>{
  const service=createGateway(()=>async()=>{throw new Error('Must not connect');},join(root,'missing'));
  try{await service.restore();}finally{await service.stop();}
 });

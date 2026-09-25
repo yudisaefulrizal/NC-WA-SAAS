@@ -9,6 +9,7 @@ import {db} from '../../src/libraries/db.js';
 import {digest} from '../../src/libraries/security.js';
 import {ai} from '../../src/components/ai/domain/service.js';
 import {createGateway} from '../../src/http/gateway.js';
+import {screenshots} from './screenshots.js';
 
 if(process.env.AUTO_SHARE_ISOLATED!=='1')throw Error('Jalankan melalui scripts/test/test-all.ts agar antrean terisolasi.');
 const temporary=await mkdtemp(join(tmpdir(),'ncwa-conversation-browser-'));
@@ -64,11 +65,11 @@ try{
  await page.locator('#share-run-list').getByText('Selesai',{exact:true}).waitFor();
  await page.locator('#share-run-list').getByRole('button',{name:'Detail',exact:true}).click();
  await page.locator('#share-run-detail').getByText('Berhasil',{exact:true}).waitFor();
- await page.screenshot({path:'data/auto-share-desktop.png',fullPage:true});
+ await page.screenshot({path:join(screenshots,'auto-share-desktop.png'),fullPage:true});
  await page.reload();await page.locator('#share-contact-list').getByText(customer+'@s.whatsapp.net',{exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.getByRole('button',{name:'Pengiriman / Jadwal',exact:true}).click();await page.locator('#share-job-list').getByRole('button',{name:'Ubah',exact:true}).click();await page.locator('#share-job-dialog').waitFor({state:'visible'});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.locator('#share-job-dialog').getByRole('button',{name:'Tutup',exact:true}).click();
- await page.screenshot({path:'data/auto-share-mobile.png',fullPage:true});
+ await page.screenshot({path:join(screenshots,'auto-share-mobile.png'),fullPage:true});
  assert.deepEqual(errors,[]);console.log('Auto Share browser checks passed: AI contact shortcut, template, schedule toggle, send, history, mobile');
 }finally{
  await browser?.close();await gateway.stop();await new Promise<void>(r=>server.close(()=>r()));
