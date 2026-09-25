@@ -159,14 +159,17 @@ form('adjustform',async data=>{const payload=JSON.stringify(data);if(!adjustment
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const modal=$(b.dataset.open);modal.querySelector('form').reset();modal.showModal();});
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 
-const aiTabNames=['knowledge','orders','conversations','usage','trial','integrasi'];
-function aiTab(tab){for(const name of aiTabNames){const section=$('ai-tab-'+name);if(section)section.hidden=name!==tab;}document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab('usaha');if(tab==='conversations'&&$('ai-session').value&&aiView==='sessions')void run(loadConversations);}
+const aiTabNames=['knowledge','orders','edu_program','edu_jadwal','edu_dokumen','edu_kontak','conversations','usage','trial','integrasi'];
+function aiTab(tab){for(const name of aiTabNames){const section=$('ai-tab-'+name);if(section)section.hidden=name!==tab;}document.querySelectorAll('[data-ai-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.aiTab===tab)));if(tab==='knowledge')knowledgeTab(knowledgeTabsFor(aiTargetType())[1]);if(tab==='conversations'&&$('ai-session').value&&aiView==='sessions')void run(loadConversations);}
 document.querySelectorAll('[data-ai-tab]').forEach(b=>b.onclick=()=>aiTab(b.dataset.aiTab));
-const knowledgeTabNames=['usaha','products','behavior','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
+const knowledgeTabNames=['usaha','products','behavior','lembaga','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
+// Knowledge sections differ per profile: CS Usaha has business fields and products, CS Lembaga Pendidikan its
+// institution profile; Perilaku AI, FAQ and Fallback Tim belong to both.
+const knowledgeTabsFor=type=>type==='pendidikan'?['behavior','lembaga','faq','fallback']:['behavior','usaha','products','cara_pemesanan','pembayaran','kebijakan','faq','fallback'];
+function renderKnowledgeTabs(){const allowed=knowledgeTabsFor(aiTargetType());document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.hidden=!allowed.includes(b.dataset.knowledgeTab));for(const option of $('ai-knowledge-select').options)option.hidden=!allowed.includes(option.value);$('ai-form').elements.profile_faq.maxLength=aiTargetType()==='pendidikan'?4000:2000;if(!allowed.includes($('ai-knowledge-select').value))knowledgeTab(allowed[1]);}
 function knowledgeTab(tab){$('ai-knowledge-select').value=tab;for(const name of knowledgeTabNames)$('ai-knowledge-tab-'+name).hidden=name!==tab;document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knowledgeTab===tab)));}
 document.querySelectorAll('[data-knowledge-tab]').forEach(b=>b.onclick=()=>knowledgeTab(b.dataset.knowledgeTab));
 $('ai-knowledge-select').onchange=e=>knowledgeTab(e.target.value);
-aiTab('knowledge');
 {const icon=document.querySelector('.ai-hero-icon'),plan=document.createElement('div'),label=document.createElement('span');plan.className='ai-hero-plan';label.id='ai-active-plan';label.className='ai-active-plan';label.textContent='—';icon.before(plan);plan.append(icon,label);}
 $('ai-hero-buy').onclick=()=>{$('ai-credit-units').value='1';aiCreditSummary();$('ai-credit-modal').showModal();};
 let aiUsagePage=1,aiUsageLoading=false,aiCreditPrice=0;
@@ -224,18 +227,20 @@ const profileType=id=>aiProfileTypes.find(t=>t.id===id);
 const selectedSession=()=>aiSessions.find(s=>s.id===$('ai-session').value);
 // The data profile being edited: the managed one, or the one attached to the selected session.
 const aiTarget=()=>aiView==='profiles'?aiManaged?.id??'':selectedSession()?.aiProfile?.id??'';
+const aiTargetType=()=>aiView==='profiles'?aiManaged?.profile_type??'':selectedSession()?.aiProfile?.profile_type??'';
+aiTab('knowledge');
 const profileBase=(id=aiTarget())=>'/ai/data-profiles/'+encodeURIComponent(id);
 // Session view keeps using the session routes, so orders remember which number they came from.
 const dataBase=()=>aiView==='profiles'?profileBase():'/sessions/'+encodeURIComponent($('ai-session').value)+'/ai';
 // Percakapan, Uji Pesan and Integrasi belong to every session; the profile adds its own tabs.
 function allowedAITabs(){
- if(aiView==='profiles')return aiManaged?['knowledge','orders','trial']:[];
+ if(aiView==='profiles')return aiManaged?(profileType(aiManaged.profile_type)?.tabs??['knowledge','orders','trial']).filter(t=>t!=='usage'):[];
  const session=selectedSession();if(!session)return [];
  const type=session.aiProfile&&profileType(session.aiProfile.profile_type);
  return ['conversations','trial','integrasi',...(type?type.tabs:[])];
 }
 function renderAITabs(){
- const allowed=allowedAITabs();
+ const allowed=allowedAITabs();renderKnowledgeTabs();
  document.querySelectorAll('[data-ai-tab]').forEach(b=>b.hidden=!allowed.includes(b.dataset.aiTab));
  const current=[...document.querySelectorAll('[data-ai-tab]')].find(b=>b.getAttribute('aria-pressed')==='true')?.dataset.aiTab;
  if(allowed.length&&!allowed.includes(current))aiTab(aiTabNames.find(t=>allowed.includes(t)));
@@ -272,6 +277,8 @@ function addAdminMenuToggle(nav){if($('admin-menu-toggle'))return;const toggle=e
 function wrapClientNav(nav){if(nav.querySelector(':scope > .nav-links'))return;const links=element('div','nav-links');links.append(...nav.querySelectorAll(':scope > a:not(.sidebar-brand)'));nav.querySelector(':scope > .sidebar-brand').after(links);}
 function element(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;}
 function sessionChips(sessions){const chips=element('div','ai-session-chips');for(const id of sessions)chips.append(element('span','ai-session-chip',id));return chips;}
+// What a data profile holds, in its own profile's terms.
+const profileCounts=p=>p.profile_type==='pendidikan'?[p.programs+' program',p.documents+' dokumen',p.contacts+' kontak']:[p.products+' produk',p.orders+' pesanan'];
 function renderDataProfiles(){
  const list=$('ai-profiles-list');list.replaceChildren();
  if(!aiDataProfiles.length)list.append(element('p','empty','Belum ada data profil. Buat data profil, lalu pasang ke sesi di tab Sesi.'));
@@ -280,11 +287,11 @@ function renderDataProfiles(){
   icon.innerHTML=profileIcon;title.append(element('strong','',p.name),element('span','ai-profile-type'+(p.profile_enabled?'':' disabled'),p.profile_name+(p.profile_enabled?'':' · nonaktif')));
   const menu=element('details','ai-card-menu'),summary=element('summary','','⋮'),items=element('div','ai-card-menu-items');summary.setAttribute('aria-label','Menu '+p.name);
   items.append(button('Ganti nama',async()=>{menu.open=false;const name=prompt('Nama baru untuk data profil ini:',p.name);if(!name?.trim()||name.trim()===p.name)return;await api(profileBase(p.id),'PATCH',{name:name.trim()});await loadDataProfiles();$('message').textContent='Nama data profil diperbarui.';}),
-   button('Duplikat',async()=>{menu.open=false;const name=prompt('Nama untuk salinan data profil ini:','Salinan '+p.name);if(!name?.trim())return;await api('/ai/data-profiles','POST',{name:name.trim(),copy_from:p.id});await loadDataProfiles();$('message').textContent='Data profil diduplikat beserta produk dan fotonya.';}),
-   button('Hapus',async()=>{menu.open=false;if(p.sessions.length){$('message').textContent='Cabut data profil ini dari sesi '+p.sessions.join(', ')+' sebelum menghapusnya.';return;}if(!confirm('Hapus data profil '+p.name+'? Knowledge, produk, foto, dan pesanannya ikut terhapus.'))return;await api(profileBase(p.id),'DELETE');await loadDataProfiles();$('message').textContent='Data profil dihapus.';}));
+   button('Duplikat',async()=>{menu.open=false;const name=prompt('Nama untuk salinan data profil ini:','Salinan '+p.name);if(!name?.trim())return;await api('/ai/data-profiles','POST',{name:name.trim(),copy_from:p.id});await loadDataProfiles();$('message').textContent=p.profile_type==='pendidikan'?'Data profil diduplikat beserta program, dokumen, dan kontaknya.':'Data profil diduplikat beserta produk dan fotonya.';}),
+   button('Hapus',async()=>{menu.open=false;if(p.sessions.length){$('message').textContent='Cabut data profil ini dari sesi '+p.sessions.join(', ')+' sebelum menghapusnya.';return;}if(!confirm('Hapus data profil '+p.name+'? '+(p.profile_type==='pendidikan'?'Profil lembaga, program, jadwal, dokumen, dan kontaknya':'Knowledge, produk, foto, dan pesanannya')+' ikut terhapus.'))return;await api(profileBase(p.id),'DELETE');await loadDataProfiles();$('message').textContent='Data profil dihapus.';}));
   items.lastElementChild.classList.add('danger');menu.append(summary,items);
   head.append(icon,title,menu);
-  const stats=element('div','ai-profile-stats');stats.append(element('span','',p.products+' produk'),element('span','',p.orders+' pesanan'),element('span','','Diubah '+new Date(p.updated_at).toLocaleDateString('id-ID',{day:'numeric',month:'short'})));
+  const stats=element('div','ai-profile-stats');stats.append(...profileCounts(p).map(text=>element('span','',text)),element('span','','Diubah '+new Date(p.updated_at).toLocaleDateString('id-ID',{day:'numeric',month:'short'})));
   const used=element('div','ai-profile-used');used.append(element('small','','DIPASANG DI'),p.sessions.length?sessionChips(p.sessions):element('span','ai-profile-idle','Belum dipasang ke sesi mana pun'));
   const actions=element('div','ai-profile-actions');actions.append(button('Kelola isi',()=>manageProfile(p)),button('Uji Coba',()=>manageProfile(p,'trial')));actions.lastElementChild.classList.add('secondary');
   card.append(head,stats,used,actions);list.append(card);
@@ -293,8 +300,11 @@ function renderDataProfiles(){
  $('ai-profile-types-info').textContent=enabled.length?'Profil tersedia: '+enabled.map(t=>t.name).join(', ')+'. Profil adalah alur AI siap pakai dari NC-WA; setiap data profil dibuat untuk satu profil. Profil lain muncul di sini setelah diaktifkan admin.':'Belum ada profil AI yang diaktifkan admin.';
  $('ai-profile-new').disabled=!enabled.length;
 }
-$('ai-profile-new').onclick=()=>{const f=$('ai-profile-create-form');f.reset();$('ai-profile-create-error').textContent='';$('ai-profile-create-type').replaceChildren(...aiProfileTypes.filter(t=>t.enabled).map(t=>new Option(t.name,t.id)));$('ai-profile-create-dialog').showModal();};
-form('ai-profile-create-form',async data=>{$('ai-profile-create-error').textContent='';try{const created=await api('/ai/data-profiles','POST',{profile_type:data.profile_type,name:data.name.trim()});$('ai-profile-create-dialog').close();await loadDataProfiles();manageProfile(aiDataProfiles.find(p=>p.id===created.id)??{...created,products:0,orders:0});$('message').textContent='Data profil dibuat. Isi knowledge dan produknya, lalu pasang ke sesi.';}catch(e){$('ai-profile-create-error').textContent=e.message;throw e;}});
+$('ai-profile-new').onclick=()=>{const f=$('ai-profile-create-form');f.reset();$('ai-profile-create-error').textContent='';$('ai-profile-create-type').replaceChildren(...aiProfileTypes.filter(t=>t.enabled).map(t=>new Option(t.name,t.id)));createKind();$('ai-profile-create-dialog').showModal();};
+// CS Lembaga Pendidikan asks for the institution kind up front; it seeds how the AI addresses people.
+function createKind(){$('ai-profile-create-kind').hidden=$('ai-profile-create-type').value!=='pendidikan';}
+$('ai-profile-create-type').onchange=createKind;
+form('ai-profile-create-form',async data=>{$('ai-profile-create-error').textContent='';try{const created=await api('/ai/data-profiles','POST',{profile_type:data.profile_type,name:data.name.trim(),...(data.profile_type==='pendidikan'?{edu_kind:data.edu_kind}:{})});$('ai-profile-create-dialog').close();await loadDataProfiles();manageProfile(aiDataProfiles.find(p=>p.id===created.id)??{...created,products:0,orders:0,programs:0,documents:0,contacts:0});$('message').textContent=data.profile_type==='pendidikan'?'Data profil dibuat. Isi profil lembaga, program, jadwal, dokumen, dan kontaknya, lalu pasang ke sesi.':'Data profil dibuat. Isi knowledge dan produknya, lalu pasang ke sesi.';}catch(e){$('ai-profile-create-error').textContent=e.message;throw e;}});
 // The selected session's profile: what it runs, who shares that content, and how to switch or detach it.
 function renderProfileStrip(){
  const strip=$('ai-profile-strip'),session=selectedSession();strip.hidden=aiView!=='sessions'||!session;strip.replaceChildren();strip.classList.toggle('is-empty',!session?.aiProfile);if(strip.hidden)return;
@@ -305,7 +315,7 @@ function renderProfileStrip(){
   const line=element('span','ai-profile-strip-line');line.append(element('strong','',session.id),document.createTextNode(' memakai profil '),element('strong','',type?.name??profile.profile_type),document.createTextNode(' dengan data profil '),element('strong','',profile.name));body.append(line);
   if(type&&!type.enabled)body.append(element('small','ai-warning','Profil ini sedang dinonaktifkan admin; AI tidak membalas sampai diaktifkan kembali.'));
   const shared=aiSessions.filter(s=>s.id!==session.id&&s.aiProfile?.id===profile.id).map(s=>s.id);
-  if(shared.length)body.append(element('small','ai-warning','Data profil ini dipakai juga oleh '+shared.join(', ')+'. Perubahan knowledge dan produk berlaku untuk semua sesi tersebut.'));
+  if(shared.length)body.append(element('small','ai-warning','Data profil ini dipakai juga oleh '+shared.join(', ')+'. Perubahan isinya berlaku untuk semua sesi tersebut.'));
   actions.append(button('Ganti data profil',()=>openAttach(session,true)),button('Cabut',async()=>{if(!confirm('Cabut profil dari sesi '+session.id+'? AI berhenti membalas di sesi ini dan memori AI-nya dikosongkan. Data profil '+profile.name+' tetap tersimpan.'))return;await api('/sessions/'+encodeURIComponent(session.id)+'/ai/profile','PUT',{data_profile_id:null});await refreshSessionCards();await loadAssistant();$('message').textContent='Profil dicabut dari sesi '+session.id+'.';}));
   actions.firstElementChild.classList.add('secondary');actions.lastElementChild.classList.add('danger');
  }
@@ -325,24 +335,24 @@ async function openAttach(session,switching=false){
 function renderAttachProfiles(){
  const f=$('ai-attach-form'),type=f.elements.profile_type?.value??f.querySelector('[name=profile_type]:checked')?.value,current=attachSession?.aiProfile;
  const options=aiDataProfiles.filter(p=>p.profile_type===type),chosen=current&&options.some(p=>p.id===current.id)?current.id:options[0]?.id??'new';
- $('ai-attach-profiles').replaceChildren(...options.map(p=>{const label=element('label','ai-choice'),input=document.createElement('input'),text=element('span');input.type='radio';input.name='data_profile';input.value=p.id;input.checked=p.id===chosen;input.onchange=attachWarning;const where=p.sessions.length?'Dipasang di '+p.sessions.length+' sesi':'Belum dipasang';text.append(element('strong','',p.name),element('small','',where+' · '+p.products+' produk'));label.append(input,text);return label;}));
+ $('ai-attach-profiles').replaceChildren(...options.map(p=>{const label=element('label','ai-choice'),input=document.createElement('input'),text=element('span');input.type='radio';input.name='data_profile';input.value=p.id;input.checked=p.id===chosen;input.onchange=attachWarning;const where=p.sessions.length?'Dipasang di '+p.sessions.length+' sesi':'Belum dipasang';text.append(element('strong','',p.name),element('small','',where+' · '+profileCounts(p)[0]));label.append(input,text);return label;}));
  f.querySelector('[name=data_profile][value=new]').checked=chosen==='new';f.querySelector('[name=data_profile][value=new]').onchange=attachWarning;
  attachWarning();
 }
 function attachWarning(){
  const f=$('ai-attach-form'),value=f.querySelector('[name=data_profile]:checked')?.value,current=attachSession?.aiProfile,profile=aiDataProfiles.find(p=>p.id===value);
- $('ai-attach-new-name').hidden=value!=='new';f.elements.name.required=value==='new';
+ $('ai-attach-new-name').hidden=value!=='new';f.elements.name.required=value==='new';$('ai-attach-new-kind').hidden=value!=='new'||f.querySelector('[name=profile_type]:checked')?.value!=='pendidikan';
  const notes=[];const others=profile?.sessions.filter(s=>s!==attachSession?.id)??[];
- if(others.length)notes.push(profile.name+' dipakai juga oleh '+others.join(', ')+'. Produk, knowledge, dan pesanannya dibagi bersama; memori AI dan percakapan tetap terpisah per sesi.');
+ if(others.length)notes.push(profile.name+' dipakai juga oleh '+others.join(', ')+'. Isinya dibagi bersama; memori AI dan percakapan tetap terpisah per sesi.');
  if(current&&value!==current.id)notes.push('Memori AI sesi '+attachSession.id+' akan dikosongkan karena berasal dari data profil lain. Riwayat chat tetap tersimpan.');
  $('ai-attach-warning').textContent=notes.join(' ');$('ai-attach-warning').hidden=!notes.length;
 }
 form('ai-attach-form',async data=>{$('ai-attach-error').textContent='';const session=attachSession;try{
  let id=data.data_profile;
- if(id==='new')id=(await api('/ai/data-profiles','POST',{profile_type:data.profile_type,name:(data.name||'').trim()})).id;
+ if(id==='new')id=(await api('/ai/data-profiles','POST',{profile_type:data.profile_type,name:(data.name||'').trim(),...(data.profile_type==='pendidikan'?{edu_kind:data.edu_kind}:{})})).id;
  await api('/sessions/'+encodeURIComponent(session.id)+'/ai/profile','PUT',{data_profile_id:id});
  $('ai-attach-dialog').close();await refreshSessionCards();aiTab('knowledge');await loadAssistant();
- $('message').textContent=session.aiEnabled?'Data profil sesi '+session.id+' diganti.':'Profil terpasang di '+session.id+'. Aktifkan AI Asisten di kartu sesi saat knowledge sudah siap.';
+ $('message').textContent=session.aiEnabled?'Data profil sesi '+session.id+' diganti.':'Profil terpasang di '+session.id+'. Aktifkan AI Asisten di kartu sesi saat isinya sudah siap.';
 }catch(e){$('ai-attach-error').textContent=e.message;throw e;}});
 function renderAISessionFilters(){
  const filters=$('ai-session-filters'),session=aiSessions.find(s=>s.id===$('ai-session').value);
@@ -556,6 +566,10 @@ function applyAssistantConfig(config,{keepFocus=false}={}){
  const setValue=(el,value)=>{if(el!==active)el.value=value;};
  for(const field of profileFields)setValue($('ai-form').elements['profile_'+field],config.profile?.[field]??'');
  setValue($('ai-form').elements.behavior,config.behavior??'');
+ const edu=config.edu;
+ for(const field of ['lembaga','peserta','wali','pendidik'])setValue($('ai-form').elements['edu_'+field],edu?.[field]??'');
+ if($('ai-form').elements.edu_kind!==active)$('ai-form').elements.edu_kind.value=edu?.kind??'sekolah';
+ setValue($('edu-jadwal'),edu?.jadwal??'');eduJadwalCount();
  setValue($('ai-form').elements.fallback_number,config.fallback_number??'');
  if($('ai-form').elements.fallback_notify!==active)$('ai-form').elements.fallback_notify.checked=Boolean(config.fallback_notify);
  // A data profile has no AI switch of its own; only a session's settings carry it.
@@ -583,7 +597,7 @@ async function loadAssistant(){const generation=++assistantLoad,id=$('ai-session
  try{const config=sessions&&id?await api('/sessions/'+encodeURIComponent(id)+'/ai'):!sessions&&target?await api(profileBase(target)):{enabled:false,profile:{},behavior:''};if(generation!==assistantLoad)return;
  applyAssistantConfig(config);
  if(!sessions||!id){chat.id='';chat.active='';chat.list=[];renderChatList();renderChatView();}
- await Promise.all([sessions&&id?loadConversations():null,target?loadAIData(generation):null]);
+ await Promise.all([sessions&&id?loadConversations():null,target?(aiTargetType()==='pendidikan'?loadEduData(generation):loadAIData(generation)):null]);
  if(!target)for(const name of ['ai-products','ai-orders','ai-fallbacks'])$(name).replaceChildren();
  }finally{if(generation===assistantLoad){for(const control of controls)control.disabled=!target;$('ai-product-add').disabled=$('ai-order-add').disabled=!target;}}}
 async function loadAIData(generation=assistantLoad){const target=aiTarget();if(!target)return;const base=dataBase();const [products,orders]=await Promise.all([api(base+'/products'),api(base+'/orders')]);if(generation!==assistantLoad||target!==aiTarget())return;
@@ -606,7 +620,7 @@ let aiFallbacksPage=1,aiFallbacksLoading=false;
 async function loadFallbacks(base=(()=>{const id=$('ai-session').value;return id&&aiView==='sessions'?'/sessions/'+encodeURIComponent(id)+'/ai':null;})(),page=aiFallbacksPage){
  if(!base||aiFallbacksLoading)return;aiFallbacksLoading=true;$('ai-fallbacks-prev').disabled=$('ai-fallbacks-next').disabled=true;
  try{const result=await api(base+'/fallbacks?page='+page);aiFallbacksPage=result.page;
- table('ai-fallbacks',['ID','Pelanggan','Status','Pertanyaan','Dibuat','Tindakan'],result.items,row=>{const actions=document.createElement('div');actions.className='row-actions';if(row.status==='waiting')actions.append(button('Jawab',async()=>{const answer=prompt('Jawaban untuk pelanggan:');if(!answer?.trim())return;await api(base+'/fallbacks/'+encodeURIComponent(row.id)+'/answer','POST',{answer});await loadFallbacks(base);}));if(row.status==='resolved'){actions.append(button('Ke Knowledge',()=>fallbackKnowledge(base,row)),button('Tambah produk',()=>fallbackProduct(row)));}actions.append(button('Hapus',async()=>{if(!confirm('Hapus tiket fallback ini?'))return;await api(base+'/fallbacks/'+encodeURIComponent(row.id),'DELETE');await loadFallbacks(base);}));return [row.id,row.customer,row.status,row.question,new Date(row.created_at).toLocaleString('id-ID'),actions.childElementCount?actions:'—'];});
+ table('ai-fallbacks',['ID','Pelanggan','Status','Pertanyaan','Dibuat','Tindakan'],result.items,row=>{const actions=document.createElement('div');actions.className='row-actions';if(row.status==='waiting')actions.append(button('Jawab',async()=>{const answer=prompt('Jawaban untuk pelanggan:');if(!answer?.trim())return;await api(base+'/fallbacks/'+encodeURIComponent(row.id)+'/answer','POST',{answer});await loadFallbacks(base);}));if(row.status==='resolved'){actions.append(button('Ke Knowledge',()=>fallbackKnowledge(base,row)));if(aiTargetType()==='cs')actions.append(button('Tambah produk',()=>fallbackProduct(row)));}actions.append(button('Hapus',async()=>{if(!confirm('Hapus tiket fallback ini?'))return;await api(base+'/fallbacks/'+encodeURIComponent(row.id),'DELETE');await loadFallbacks(base);}));return [row.id,row.customer,row.status,row.question,new Date(row.created_at).toLocaleString('id-ID'),actions.childElementCount?actions:'—'];});
  $('ai-fallbacks-page').textContent='Halaman '+result.page+' dari '+result.pages+' · '+result.total+' tiket';
  $('ai-fallbacks-prev').disabled=result.page<=1;$('ai-fallbacks-next').disabled=result.page>=result.pages;
  }catch(error){$('ai-fallbacks-prev').disabled=aiFallbacksPage<=1;$('ai-fallbacks-next').disabled=false;throw error;}finally{aiFallbacksLoading=false;}
@@ -632,6 +646,71 @@ let orderRequest;
 $('ai-order-add').onclick=()=>{$('ai-order-form').reset();orderRequest=undefined;$('ai-order-dialog').showModal();};
 aiDataForm('ai-order-form',async data=>{const base=dataBase(),payload={customer:data.customer,items:[{product_name:data.product_name,quantity:Number(data.quantity)}],notes:data.notes};const signature=JSON.stringify([base,payload]);if(!orderRequest||orderRequest.signature!==signature)orderRequest={signature,key:crypto.randomUUID()};await api(base+'/orders','POST',payload,{'Idempotency-Key':orderRequest.key});$('ai-order-dialog').close();orderRequest=undefined;await loadAIData();$('message').textContent='Pesanan tercatat untuk diproses.';});
 aiDataForm('ai-order-edit-form',async data=>{await api(dataBase()+'/orders/'+encodeURIComponent(data.id),'PUT',{status:data.status,notes:data.notes});$('ai-order-edit-dialog').close();await loadAIData();$('message').textContent='Pesanan diperbarui.';});
+// CS Lembaga Pendidikan: Profil Lembaga (in Knowledge), Program, Jadwal, Dokumen and Kontak. Every edit saves
+// itself; programs, documents and contacts go to their own endpoints under the data profile.
+const eduKindTerms={sekolah:['siswa','orang tua siswa','guru'],pesantren:['santri','wali santri','ustadz/ustadzah'],mahad:['thalib','wali thalib','ustadz/ustadzah'],kampus:['mahasiswa','orang tua mahasiswa','dosen'],kursus:['peserta','orang tua peserta','pengajar']};
+const edu={programs:[],selected:null,documents:[],contacts:[]};
+function eduDeleteButton(label,action){const b=button('',action);b.classList.add('table-icon-button','danger');b.setAttribute('aria-label',label);b.title=label;b.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';return b;}
+for(const field of ['lembaga','peserta','wali','pendidik']){const el=$('ai-form').elements['edu_'+field];el.oninput=()=>debounceAutosave(el,'edu_'+field,el.value);}
+// A new kind refills the three terms with its defaults; each can still be edited afterwards.
+$('ai-form').elements.edu_kind.onchange=e=>run(async()=>{const terms=eduKindTerms[e.target.value];await autosaveField('edu_kind',e.target.value);for(const [index,field] of ['peserta','wali','pendidik'].entries()){$('ai-form').elements['edu_'+field].value=terms[index];await autosaveField('edu_'+field,terms[index]);}});
+function eduJadwalCount(){$('edu-jadwal-count').textContent=new Intl.NumberFormat('id-ID').format($('edu-jadwal').value.length)+' / 8.000 karakter · tersimpan otomatis';}
+$('edu-jadwal').oninput=()=>{eduJadwalCount();debounceAutosave($('edu-jadwal'),'edu_jadwal',$('edu-jadwal').value);};
+async function loadEduData(generation=assistantLoad){const target=aiTarget();if(!target)return;const base=dataBase();
+ const [programs,documents,contacts]=await Promise.all([api(base+'/programs'),api(base+'/documents'),api(base+'/contacts')]);if(generation!==assistantLoad||target!==aiTarget())return;
+ edu.programs=programs;edu.documents=documents;edu.contacts=contacts;if(!programs.some(p=>p.id===edu.selected))edu.selected=programs[0]?.id??null;
+ renderEduPrograms();renderEduDocuments();renderEduContacts();
+ if(aiView==='sessions')await loadFallbacks('/sessions/'+encodeURIComponent($('ai-session').value)+'/ai');else $('ai-fallbacks').replaceChildren();
+}
+function renderEduPrograms(){
+ $('edu-program-count').textContent=edu.programs.length+' program';
+ $('edu-programs').replaceChildren(...edu.programs.map(p=>{const b=element('button','edu-program-item');b.type='button';b.setAttribute('aria-pressed',String(p.id===edu.selected));b.append(element('strong','',p.name),element('small','',p.description.replace(/\s+/g,' ').slice(0,70)||'Belum ada deskripsi'));b.onclick=()=>{edu.selected=p.id;renderEduPrograms();};return b;}));
+ $('edu-program-select').replaceChildren(...edu.programs.map(p=>new Option(p.name,p.id,false,p.id===edu.selected)));$('edu-program-select').closest('label').hidden=!edu.programs.length;
+ const program=edu.programs.find(p=>p.id===edu.selected);$('edu-program-form').hidden=!program;$('edu-program-empty').hidden=Boolean(program);
+ if(program){if(document.activeElement!==$('edu-program-name'))$('edu-program-name').value=program.name;if(document.activeElement!==$('edu-program-description'))$('edu-program-description').value=program.description;eduProgramStatus('');}
+}
+function eduProgramStatus(state){const length=new Intl.NumberFormat('id-ID').format($('edu-program-description').value.length);$('edu-program-status').textContent=(state?state+' · ':'')+length+' / 4.000 karakter';}
+let eduProgramTimer;
+function saveEduProgram(){const id=edu.selected;clearTimeout(eduProgramTimer);eduProgramStatus('Menyimpan…');eduProgramTimer=setTimeout(()=>run(async()=>{const program=edu.programs.find(p=>p.id===id);if(!program)return;const name=$('edu-program-name').value.trim();if(!name){eduProgramStatus('Nama program wajib diisi');return;}
+ try{const saved=await api(dataBase()+'/programs/'+encodeURIComponent(id),'PUT',{name,description:$('edu-program-description').value});Object.assign(program,saved);if(edu.selected===id){renderEduPrograms();eduProgramStatus('Tersimpan');}}catch(e){eduProgramStatus(e.message);throw e;}}),800);}
+$('edu-program-select').onchange=e=>{edu.selected=e.target.value;renderEduPrograms();};
+$('edu-program-name').oninput=saveEduProgram;$('edu-program-description').oninput=saveEduProgram;
+$('edu-program-add').onclick=()=>run(async()=>{const names=new Set(edu.programs.map(p=>p.name.toLowerCase()));let name='Program baru';for(let n=2;names.has(name.toLowerCase());n++)name='Program baru '+n;
+ const created=await api(dataBase()+'/programs','POST',{name,description:''});edu.programs.push(created);edu.selected=created.id;renderEduPrograms();$('edu-program-name').focus();$('edu-program-name').select();});
+$('edu-program-delete').onclick=()=>run(async()=>{const program=edu.programs.find(p=>p.id===edu.selected);if(!program||!confirm('Hapus program '+program.name+'?'))return;await api(dataBase()+'/programs/'+encodeURIComponent(program.id),'DELETE');edu.programs=edu.programs.filter(p=>p.id!==program.id);edu.selected=edu.programs[0]?.id??null;renderEduPrograms();$('message').textContent='Program dihapus.';});
+const fileSize=bytes=>bytes>=1048576?(bytes/1048576).toLocaleString('id-ID',{maximumFractionDigits:1})+' MB':Math.max(1,Math.round(bytes/1024))+' KB';
+const fileBadge=d=>d.media_type==='image'?(d.mimetype.split('/')[1]||'img').replace('jpeg','jpg').toUpperCase():/pdf/.test(d.mimetype)?'PDF':/word/.test(d.mimetype)?'DOC':/sheet|excel/.test(d.mimetype)?'XLS':/presentation|powerpoint/.test(d.mimetype)?'PPT':'FILE';
+async function uploadDocument(path,method,file,headers){const response=await fetch(path,{method,headers:{'Content-Type':file.type||'application/octet-stream','X-Filename':encodeURIComponent(file.name),...headers},body:file});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.message||'Gagal mengunggah dokumen.');return data;}
+$('edu-document-form').onsubmit=e=>{e.preventDefault();const f=e.currentTarget,file=f.elements.file.files[0],submit=f.querySelector('button');if(!file)return;
+ void run(async()=>{submit.disabled=true;submit.textContent='Mengunggah…';try{const created=await uploadDocument(dataBase()+'/documents','POST',file,{'X-Description':encodeURIComponent(f.elements.description.value.trim())});edu.documents.push(created);f.reset();renderEduDocuments();$('message').textContent='Dokumen '+created.filename+' tersimpan.';}finally{submit.disabled=false;submit.textContent='Unggah dokumen';}});};
+function renderEduDocuments(){
+ $('edu-document-count').textContent=edu.documents.length+' dari 20 dokumen';
+ if(!edu.documents.length){$('edu-documents').replaceChildren(element('p','empty','Belum ada dokumen.'));return;}
+ $('edu-documents').replaceChildren(...edu.documents.map(d=>{
+  const row=element('div','edu-document'),badge=element('span','edu-file-badge '+(d.media_type==='image'?'image':fileBadge(d).toLowerCase()),fileBadge(d)),info=element('div','edu-document-file'),link=element('a','',d.filename);
+  link.href=dataBase()+'/documents/'+encodeURIComponent(d.id)+'/file';link.target='_blank';link.rel='noopener';
+  const replace=element('label','edu-replace','Ganti file'),input=document.createElement('input');input.type='file';input.accept=$('edu-document-form').elements.file.accept;input.className='sr-only';
+  input.onchange=()=>run(async()=>{const file=input.files[0];if(!file)return;replace.firstChild.textContent='Mengunggah…';try{Object.assign(d,await uploadDocument(dataBase()+'/documents/'+encodeURIComponent(d.id)+'/file','PUT',file,{}));renderEduDocuments();$('message').textContent='File dokumen diganti.';}finally{replace.firstChild.textContent='Ganti file';}});
+  replace.append(input);info.append(link,element('small','',fileSize(d.size_bytes)),replace);
+  const description=document.createElement('textarea');description.maxLength=300;description.rows=2;description.value=d.description;description.setAttribute('aria-label','Deskripsi '+d.filename);
+  let timer;description.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>run(async()=>{if(!description.value.trim())return;await api(dataBase()+'/documents/'+encodeURIComponent(d.id),'PATCH',{description:description.value});d.description=description.value.trim();}),800);};
+  const remove=eduDeleteButton('Hapus dokumen '+d.filename,async()=>{if(!confirm('Hapus dokumen '+d.filename+'?'))return;await api(dataBase()+'/documents/'+encodeURIComponent(d.id),'DELETE');edu.documents=edu.documents.filter(x=>x.id!==d.id);renderEduDocuments();$('message').textContent='Dokumen dihapus.';});
+  row.append(badge,info,description,remove);return row;
+ }));
+}
+// A new contact row is saved once both Bagian and Kontak are filled; later edits update it in place.
+function renderEduContacts(){
+ if(!edu.contacts.length){$('edu-contacts').replaceChildren(element('p','empty','Belum ada kontak.'));return;}
+ const head=element('div','edu-contact-head');head.append(element('span','','Bagian'),element('span','','Kontak'),element('span','','Deskripsi'),element('span',''));
+ $('edu-contacts').replaceChildren(head,...edu.contacts.map(c=>{
+  const row=element('div','edu-contact'),field=(name,label,max,multi=false)=>{const el=document.createElement(multi?'textarea':'input');el.maxLength=max;el.value=c[name]??'';el.setAttribute('aria-label',label+(c.bagian?' '+c.bagian:''));if(multi)el.rows=2;el.oninput=()=>{c[name]=el.value;save();};return el;};
+  let timer;const save=()=>{clearTimeout(timer);timer=setTimeout(()=>run(async()=>{if(!c.bagian?.trim()||!c.kontak?.trim())return;const body={bagian:c.bagian,kontak:c.kontak,deskripsi:c.deskripsi??''};
+   if(c.id)await api(dataBase()+'/contacts/'+encodeURIComponent(c.id),'PUT',body);else if(!c.saving){c.saving=true;try{c.id=(await api(dataBase()+'/contacts','POST',body)).id;}finally{c.saving=false;}}}),800);};
+  const remove=eduDeleteButton('Hapus kontak '+(c.bagian||'baru'),async()=>{if(c.id){if(!confirm('Hapus kontak '+c.bagian+'?'))return;await api(dataBase()+'/contacts/'+encodeURIComponent(c.id),'DELETE');}edu.contacts=edu.contacts.filter(x=>x!==c);renderEduContacts();});
+  row.append(field('bagian','Bagian',100),field('kontak','Kontak',150),field('deskripsi','Deskripsi',300,true),remove);return row;
+ }));
+}
+$('edu-contact-add').onclick=()=>{if(edu.contacts.length>=30){$('message').textContent='Maksimal 30 kontak per data profil.';return;}edu.contacts.push({bagian:'',kontak:'',deskripsi:''});renderEduContacts();$('edu-contacts').querySelector('.edu-contact:last-child input').focus();};
 // Chat view of the AI page: conversation list on the left, WhatsApp-style history on the right.
 const chat={id:'',list:[],contacts:new Map(),saved:new Set(),filter:'all',search:'',active:'',messages:[],before:null,loading:false,sending:false,refresh:undefined};
 const chatTick={sent:'<path d="M3 12.5 7.5 17 17 7"/>',delivered:'<path d="M1.5 12.5 6 17 15.5 7"/><path d="M9 16.5 9.5 17 19 7"/>'};
@@ -730,7 +809,7 @@ $('chat-composer').onsubmit=e=>{e.preventDefault();const input=$('chat-text'),te
  void run(async()=>{chat.sending=true;e.currentTarget.querySelector('.chat-send').disabled=true;try{await api('/sessions/'+encodeURIComponent(chat.id)+'/ai/chats/'+encodeURIComponent(chat.active)+'/messages','POST',{text},{'Idempotency-Key':chatPending.key});input.value='';input.style.height='46px';chatPending={text:'',key:''};await loadConversations();await wallet();}finally{chat.sending=false;$('chat-composer').querySelector('.chat-send').disabled=false;}});};
 // Realtime: any change to the open session's chats refreshes the list and, when it is open, the conversation.
 function chatRealtime(data){if(data.event!=='chat.updated'||data.sessionId!==chat.id||$('ai-tab-conversations').hidden)return;clearTimeout(chat.refresh);chat.refresh=setTimeout(()=>{void run(loadConversations);},400);}
-form('ai-trial-form',async data=>{$('ai-trial-error').textContent='';$('ai-trial-answer').hidden=true;try{const result=await api('/api/ai/trial','POST',aiView==='profiles'?{data_profile:aiTarget(),question:data.question}:{session:data.session,question:data.question});$('ai-trial-answer-text').textContent=result.answer;$('ai-trial-answer').hidden=false;await loadAI();}catch(e){$('ai-trial-error').textContent=e.message;}});
+form('ai-trial-form',async data=>{$('ai-trial-error').textContent='';$('ai-trial-answer').hidden=true;try{const result=await api('/api/ai/trial','POST',aiView==='profiles'?{data_profile:aiTarget(),question:data.question}:{session:data.session,question:data.question});$('ai-trial-answer-text').textContent=result.answer;$('ai-trial-documents').hidden=!result.documents?.length;$('ai-trial-documents').textContent=result.documents?.length?'Dokumen yang akan dikirim lebih dulu: '+result.documents.join(', '):'';$('ai-trial-answer').hidden=false;await loadAI();}catch(e){$('ai-trial-error').textContent=e.message;}});
 function aiCreditSummary(){const units=Number($('ai-credit-units').value),valid=Number.isSafeInteger(units)&&units>=1&&units<=100;$('ai-credit-summary').textContent=valid&&aiCreditPrice?`${new Intl.NumberFormat('id-ID').format(units*10000)} kredit AI · ${money(aiCreditPrice*units)}`:'Jumlah unit harus bilangan 1–100.';$('ai-credit-confirm').disabled=!valid||!aiCreditPrice;return valid?units:null;}
 $('ai-credit-units').oninput=aiCreditSummary;
 $('ai-credit-confirm').onclick=()=>run(async()=>{const units=aiCreditSummary();if(!units)return;const control=$('ai-credit-confirm');control.disabled=true;try{const order=await api('/api/ai/payments','POST',{units});$('ai-credit-modal').close();await checkout(order.id);await paymentList();}finally{control.disabled=false;await loadAI();}});
@@ -1176,7 +1255,7 @@ Idempotency-Key: pesan-001
 {"to":"628123456789","type":"document","url":"https://contoh.com/katalog.pdf","filename":"Katalog-September.pdf","caption":"Berikut katalog terbaru kami."}</code></pre><p>Gunakan URL file yang dapat diakses publik oleh server. Properti <code>caption</code> bersifat opsional; <code>filename</code> digunakan untuk dokumen. Sertakan header <code>Idempotency-Key</code> yang berbeda pada setiap pengiriman media.</p><p>Fitur chat lainnya: <code>POST /sessions/:id/typing</code> dengan <code>{"to":"628...","state":"composing"}</code>, serta <code>POST /sessions/:id/read</code> dengan <code>{"from":"628...","messageId":"ID_PESAN"}</code>. Keduanya merespons <code>{"ok":true}</code>.</p>`),
   section('4. Webhook, media masuk & realtime',`<p><code>GET /webhooks</code> melihat daftar, <code>POST /webhooks</code> menambah, dan <code>DELETE /webhooks/:id</code> menghapus webhook.</p><p><strong>Request — tambah webhook</strong></p><pre><code>POST <span class="api-origin"></span>/webhooks
 {"url":"https://aplikasi-anda.com/webhook","sessionId":"toko-utama"}</code></pre><p><strong>Respons</strong></p><pre><code>{"id":"webhook-123","url":"https://aplikasi-anda.com/webhook","sessionId":"toko-utama"}</code></pre><p>Payload pesan masuk memiliki bentuk berikut. Bila ada media, ambil file dengan <code>GET /media/:id</code>. Untuk stream langsung gunakan SSE <code>GET /events</code> dengan header API key yang sama.</p><pre><code>{"event":"message","sessionId":"toko-utama","direction":"incoming","from":"628123456789","text":"Halo","timestamp":1720000000}</code></pre>`),
-  section('5. Asisten AI',`<p><strong>Profil dan data profil.</strong> Profil adalah alur AI siap pakai dari NC-WA (mis. CS Usaha); data profil adalah isi bisnis Anda untuk satu profil dan bisa dipasang ke beberapa sesi. <code>GET /ai/profile-types</code> menampilkan profil yang tersedia. Data profil: <code>GET</code>/<code>POST /ai/data-profiles</code> (body <code>{"profile_type":"cs","name":"Toko Kopi"}</code>, atau <code>{"name":"Salinan","copy_from":"ID"}</code> untuk menduplikat), <code>GET</code>/<code>PATCH</code>/<code>DELETE /ai/data-profiles/:id</code> (hapus hanya bila tidak terpasang), <code>PATCH /ai/data-profiles/:id/field</code>, serta produk, foto, dan pesanan di bawah <code>/ai/data-profiles/:id/products</code>, <code>/products-image</code>, dan <code>/orders</code>.</p><pre><code>PUT <span class="api-origin"></span>/sessions/toko-utama/ai/profile
+  section('5. Asisten AI',`<p><strong>Profil dan data profil.</strong> Profil adalah alur AI siap pakai dari NC-WA (mis. CS Usaha); data profil adalah isi bisnis Anda untuk satu profil dan bisa dipasang ke beberapa sesi. <code>GET /ai/profile-types</code> menampilkan profil yang tersedia. Data profil: <code>GET</code>/<code>POST /ai/data-profiles</code> (body <code>{"profile_type":"cs","name":"Toko Kopi"}</code>, atau <code>{"name":"Salinan","copy_from":"ID"}</code> untuk menduplikat), <code>GET</code>/<code>PATCH</code>/<code>DELETE /ai/data-profiles/:id</code> (hapus hanya bila tidak terpasang), <code>PATCH /ai/data-profiles/:id/field</code>, serta produk, foto, dan pesanan di bawah <code>/ai/data-profiles/:id/products</code>, <code>/products-image</code>, dan <code>/orders</code>.</p><p><strong>CS Lembaga Pendidikan.</strong> Buat data profil dengan <code>{"profile_type":"pendidikan","name":"Ma'had Darul Ilmi","edu_kind":"pesantren"}</code> (jenis: sekolah, pesantren, mahad, kampus, kursus). Bidang teks lewat <code>PATCH /ai/data-profiles/:id/field</code> dengan field <code>edu_lembaga</code>, <code>edu_jadwal</code>, <code>faq</code>, <code>edu_kind</code>, <code>edu_peserta</code>, <code>edu_wali</code>, <code>edu_pendidik</code>, <code>behavior</code>. Program: <code>GET</code>/<code>POST /ai/data-profiles/:id/programs</code> (<code>{"name","description"}</code>), <code>PUT</code>/<code>DELETE /programs/:program</code>. Kontak: <code>/contacts</code> (<code>{"bagian","kontak","deskripsi"}</code>). Dokumen: <code>POST /documents</code> dengan isi file sebagai body, header <code>X-Filename</code> dan <code>X-Description</code> (URI-encoded); <code>PATCH /documents/:doc</code> mengubah deskripsi, <code>PUT /documents/:doc/file</code> mengganti file, <code>GET /documents/:doc/file</code> mengunduhnya. Profil ini tidak menyimpan data pribadi siswa atau wali.</p><pre><code>PUT <span class="api-origin"></span>/sessions/toko-utama/ai/profile
 {"data_profile_id":"ID_DATA_PROFIL","enabled":true}</code></pre><p>Pasang, ganti, atau cabut (<code>{"data_profile_id":null}</code>) data profil sebuah sesi. Mengganti atau mencabut mengosongkan memori AI sesi itu; riwayat chat tetap tersimpan.</p><p>Endpoint per sesi di bawah ini tetap berlaku dan bekerja pada data profil yang terpasang. Bila sesi belum berprofil, penulisan pertama membuat data profil CS bernama <code>CS – &lt;sesi&gt;</code> dan memasangnya.</p><p>Kelola asisten: <code>GET</code>/<code>PUT /sessions/:id/ai</code>, aktifkan dengan <code>PATCH /sessions/:id/ai/enabled</code>, dan ubah satu bidang dengan <code>PATCH /sessions/:id/ai/field</code>.</p><pre><code>PATCH <span class="api-origin"></span>/sessions/toko-utama/ai/enabled
 {"enabled":true}</code></pre><p><strong>Respons</strong></p><pre><code>{"enabled":true}</code></pre><p>Produk: <code>GET</code>/<code>POST /sessions/:id/ai/products</code>, <code>PUT /sessions/:id/ai/products/:product</code>, serta upload gambar <code>POST /sessions/:id/ai/products-image</code> (body file dan header <code>X-Filename</code>). Pesanan: <code>GET</code>/<code>POST /sessions/:id/ai/orders</code> dan <code>PUT</code>/<code>DELETE /sessions/:id/ai/orders/:order</code>. Percakapan: <code>GET /sessions/:id/ai/conversations</code> dan <code>PUT /sessions/:id/ai/conversations/:customer</code>. Riwayat chat pribadi: <code>GET /sessions/:id/ai/chats</code> (daftar percakapan dengan pesan terakhir), <code>GET /sessions/:id/ai/chats/:customer/messages</code> (100 pesan terbaru; lanjutkan dengan <code>?before=</code> dari respons), dan <code>POST /sessions/:id/ai/chats/:customer/messages</code> dengan <code>{"text":"..."}</code> serta header <code>Idempotency-Key</code> untuk balasan manual (memakai 1 kredit dan menjeda AI kecuali full auto). Stream <code>/events</code> mengirim <code>chat.updated</code> saat riwayat berubah. Fallback: <code>GET /sessions/:id/ai/fallbacks</code>, <code>POST /sessions/:id/ai/fallbacks/:fallback/answer</code>, <code>POST /sessions/:id/ai/fallbacks/:fallback/knowledge</code>, atau <code>DELETE /sessions/:id/ai/fallbacks/:fallback</code>.</p>`),
   section('6. Auto Share',`<p>Semua endpoint memakai awalan <code>/auto-share</code>: asset (<code>GET/POST/DELETE /assets</code>), kontak (<code>GET/POST/PUT/DELETE /contacts</code>), template (<code>GET/POST/PUT/DELETE /templates</code>), jadwal (<code>GET/POST/PUT/DELETE /jobs</code>), jalankan sekarang (<code>POST /jobs/:id/send</code>), dan riwayat (<code>GET /runs</code>, <code>GET /runs/:id</code>).</p><pre><code>POST <span class="api-origin"></span>/auto-share/contacts

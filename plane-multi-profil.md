@@ -2,7 +2,7 @@
 
 Tanggal: 24–25 September 2026.
 
-Status: fondasi sudah diimplementasikan dengan CS Usaha sebagai profil pertama. Desain disetujui di kanvas Claude Design "Desain Multi-Profil NC-WA". Bukti pengujian dicatat di AGENT.MD.
+Status: fondasi sudah diimplementasikan dengan CS Usaha sebagai profil pertama, lalu CS Lembaga Pendidikan sebagai profil kedua (25 September 2026, lihat bagian 6). Desain disetujui di kanvas Claude Design "Desain Multi-Profil NC-WA" dan "Desain Profil CS Lembaga Pendidikan". Bukti pengujian dicatat di AGENT.MD.
 
 ## 1. Pengertian
 
@@ -11,6 +11,7 @@ Status: fondasi sudah diimplementasikan dengan CS Usaha sebagai profil pertama. 
   | Profil | Contoh data profil | Contoh hasil kerja |
   | --- | --- | --- |
   | CS usaha (tersedia) | Knowledge, produk | Balasan chat, pesanan |
+  | CS lembaga pendidikan (tersedia) | Profil lembaga, program, jadwal, dokumen, kontak | Balasan chat, kiriman dokumen |
   | Asisten pribadi | Catatan, jadwal | Pengingat, ringkasan |
   | Pembuat artikel | Topik, gaya tulisan | Artikel |
   | Generate carousel | Brand, warna, template | Gambar slide |
@@ -79,10 +80,28 @@ Hal yang khas satu profil, seperti produk dan pesanan, tetap milik profil terseb
 
 ## 5. Langkah berikutnya
 
-1. Menambah profil kedua. Setiap profil baru butuh:
-   - definisi di `src/ai-profiles.ts`;
-   - bentuk data profilnya;
-   - runtime pipeline, karena saat ini `process()` di `ai.ts` adalah runtime CS;
-   - simulasi AI Studio;
-   - tab menu sesi.
+1. Menambah profil berikutnya. Setiap profil baru butuh:
+   - definisi di `src/ai-profiles.ts` beserta `Pipeline` (agent, prompt router dan context, izin tool, tier default, protokol jawaban);
+   - bentuk data profilnya dan endpoint-nya;
+   - tool baca/tulisnya, didaftarkan di dispatcher `defaultTools` (`src/ai-agents.ts`);
+   - simulasi dan tata letak kanvas AI Studio (`layouts` di `public/ai-studio.js`);
+   - tab menu sesi dan sub-tab Knowledge-nya di dashboard.
 2. Profil yang bekerja terhadap profil lain (tester) membutuhkan target profil dan tempat menyimpan hasil kerja non-chat, seperti laporan, artikel, atau gambar.
+
+## 6. Profil CS Lembaga Pendidikan
+
+Satu profil untuk sekolah, pesantren, ma'had, kampus, dan kursus. Profil ini hanya memberi informasi dan **tidak menyimpan data pribadi** siswa, santri, atau wali (UU PDP): tidak ada pencatatan pendaftar, booking tes/kunjungan, atau data siswa aktif. Pendaftaran, tes, dan kunjungan mengikuti cara yang ditulis lembaga sendiri.
+
+| Menu | Isi |
+| --- | --- |
+| Knowledge | Perilaku AI, Profil Lembaga (jenis lembaga, sebutan peserta didik/orang tua/pendidik, teks profil 4.000 karakter), FAQ (4.000 karakter), Fallback Tim |
+| Program | Nama + deskripsi longtext (4.000 karakter), maksimal 50 program |
+| Jadwal | Satu longtext 8.000 karakter: pendaftaran, tes, kunjungan, event, kalender akademik, pengumuman |
+| Dokumen | Deskripsi (300 karakter) + file: PDF, Word, Excel, PowerPoint (maks. 10 MB) atau gambar JPG/PNG/WebP (maks. 5 MB); maksimal 20 dokumen dan 100 MB per data profil |
+| Kontak | Bagian, kontak, deskripsi; maksimal 30 |
+
+- **Pipeline**: Router → Pembuka, Profil Lembaga, Program, Jadwal, Kontak, Penutup, Lainnya → Context. Tool hanya membaca: `get_profil_lembaga`, `get_program`, `get_jadwal` (dengan tanggal hari ini), `get_kontak`, `get_dokumen`, dan `kirim_dokumen`.
+- **Pengiriman dokumen**: file yang dipilih `kirim_dokumen` dikirim sebelum jawaban teks, masing-masing sebagai satu pesan WhatsApp berbayar (gambar sebagai foto, lainnya sebagai dokumen dengan nama file). Paling banyak tiga per jawaban. Kiriman dicatat di memori AI sebagai `[Dokumen terkirim: nama]` sehingga dokumen yang sama tidak dikirim ulang dalam percakapan itu; Hapus konteks mengizinkannya lagi.
+- **Ketersediaan**: profil baru muncul nonaktif; admin mengaktifkannya di Profil AI setelah menyetel alurnya di AI Studio.
+- **Data**: kolom `edu_*` di `ai_data_profiles`; tabel `ai_edu_programs`, `ai_edu_contacts`, `ai_edu_documents` (file di `auth/_ai-documents/<akun>/`), terhapus bersama data profilnya.
+- **API**: `/ai/data-profiles/:id/programs`, `/contacts`, `/documents` (unggah body mentah dengan header `X-Filename` dan `X-Description`), `/documents/:doc/file`; juga tersedia di bawah `/sessions/:id/ai/...` untuk data profil yang terpasang. Produk dan pesanan hanya menerima data profil CS Usaha.

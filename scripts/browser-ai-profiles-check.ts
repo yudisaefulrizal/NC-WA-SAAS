@@ -23,6 +23,8 @@ const {createApp}=await import('../src/app.js');
 const gateway=createGateway(()=>async(_session,update)=>{update({status:'connected'});return {close(){},async logout(){},async typing(){},async read(){},async send(){return randomUUID();}};},temporary);
 const server=createApp(gateway).listen(port,'127.0.0.1');
 const client=randomUUID(),owner=randomUUID(),clientToken=randomUUID(),ownerToken=randomUUID();
+// waitForFunction treats an async predicate's Promise as truthy, so server state is polled here instead.
+const until=async<T>(page:import('playwright').Page,check:(arg:T)=>Promise<boolean>,arg:T,timeout=6000)=>{const end=Date.now()+timeout;for(;;){if(await page.evaluate(check,arg))return;if(Date.now()>end)throw Error('Waktu tunggu habis: '+check.toString().slice(0,160));await page.waitForTimeout(150);}};
 let browser;
 try{
  await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)',[client,client+'@test.invalid','unused']);
@@ -62,7 +64,7 @@ try{
  assert.ok(await page.locator('[data-ai-tab="knowledge"]').isVisible());
  // Knowledge typed here autosaves into the attached data profile.
  await page.locator('textarea[name=profile_usaha]').fill('Promo khusus Lebaran');
- await page.waitForFunction(async id=>{const r=await fetch('/ai/data-profiles/'+id);return (await r.json()).profile.usaha==='Promo khusus Lebaran';},promo.id,{timeout:5000});
+ await until(page,async id=>{const r=await fetch('/ai/data-profiles/'+id);return (await r.json()).profile.usaha==='Promo khusus Lebaran';},promo.id,5000);
  // Detach: AI stops for the session, the data profile stays.
  await strip.getByRole('button',{name:'Cabut'}).click();await strip.getByText('Sesi ini belum memakai profil AI').waitFor();
  assert.deepEqual((await ai.dataProfiles(client)).find(p=>p.id===promo.id)!.sessions,[]);
@@ -104,7 +106,7 @@ try{
   const row=page.locator('#admin-profiles-list tr',{hasText:'CS Usaha'});await row.waitFor();
   assert.match(await row.innerText(),/3 sesi|2 sesi/);
   await row.locator('label.admin-profile-toggle').click();await row.getByText('Nonaktif',{exact:true}).waitFor();
-  assert.deepEqual((await (await context.request.get(origin+'/api/admin/ai/profiles')).json()).map((p:any)=>[p.id,p.enabled]),[['cs',false]]);
+  assert.deepEqual((await (await context.request.get(origin+'/api/admin/ai/profiles')).json()).map((p:any)=>[p.id,p.enabled]),[['cs',false],['pendidikan',false]]);
   await page.locator('#admin-profiles-list tr',{hasText:'CS Usaha'}).locator('label.admin-profile-toggle').click();await page.locator('#admin-profiles-list tr',{hasText:'CS Usaha'}).getByText('Aktif',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);await context.close();}
  {const {page,errors,context}=await open(ownerToken,'/dashboard/admin/profiles',390,844);

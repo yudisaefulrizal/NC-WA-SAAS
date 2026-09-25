@@ -212,4 +212,16 @@ async function migrateProfiles(){
   await db.query('ALTER TABLE ai_orders DROP PRIMARY KEY, DROP INDEX order_request, MODIFY data_profile_id CHAR(36) NOT NULL, MODIFY session_id VARCHAR(64) COLLATE utf8mb4_bin NULL, ADD PRIMARY KEY(data_profile_id,id), ADD UNIQUE KEY order_request(data_profile_id,request_id), ADD CONSTRAINT ai_orders_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE');
  }
  if(legacy){const columns=[];for(const column of ['behavior','fallback_number','fallback_notify',...fields])if(await hasColumn('ai_assistants',column))columns.push(column);if(columns.length)await db.query('ALTER TABLE ai_assistants '+columns.map(column=>'DROP COLUMN '+column).join(', '));}
+ await migrateEducation();
+}
+// CS Lembaga Pendidikan: its text fields live on ai_data_profiles (FAQ reuses profil_faq); programs, contacts and
+// documents get their own tables, removed with the data profile. Re-runnable.
+async function migrateEducation(){
+ for(const [column,definition] of [['edu_kind',"VARCHAR(20) NOT NULL DEFAULT 'sekolah'"],['edu_peserta',"VARCHAR(40) NOT NULL DEFAULT ''"],['edu_wali',"VARCHAR(40) NOT NULL DEFAULT ''"],['edu_pendidik',"VARCHAR(40) NOT NULL DEFAULT ''"],['edu_lembaga','TEXT NULL'],['edu_jadwal','TEXT NULL']])if(!await hasColumn('ai_data_profiles',column))await db.query(`ALTER TABLE ai_data_profiles ADD COLUMN ${column} ${definition}`);
+ const owned=(name:string)=>`KEY ${name}_account(account_id),KEY ${name}_profile(data_profile_id),CONSTRAINT ${name}_account_fk FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,CONSTRAINT ${name}_data_profile_fk FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE`;
+ await db.query(`CREATE TABLE IF NOT EXISTS ai_edu_programs (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,name VARCHAR(150) NOT NULL,description TEXT NOT NULL,position INT UNSIGNED NOT NULL DEFAULT 0,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY edu_program_name(data_profile_id,name),${owned('ai_edu_programs')}) ENGINE=InnoDB`);
+ await db.query(`CREATE TABLE IF NOT EXISTS ai_edu_contacts (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,bagian VARCHAR(100) NOT NULL,kontak VARCHAR(150) NOT NULL,deskripsi VARCHAR(300) NOT NULL,position INT UNSIGNED NOT NULL DEFAULT 0,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,${owned('ai_edu_contacts')}) ENGINE=InnoDB`);
+ // file_id names the file on disk once "Ganti file" replaced the original (NULL: the file is named after id).
+ await db.query(`CREATE TABLE IF NOT EXISTS ai_edu_documents (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,file_id CHAR(36) NULL,filename VARCHAR(255) NOT NULL,mimetype VARCHAR(150) NOT NULL,media_type ENUM('image','document') NOT NULL,size_bytes INT UNSIGNED NOT NULL,description VARCHAR(300) NOT NULL,position INT UNSIGNED NOT NULL DEFAULT 0,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,${owned('ai_edu_documents')}) ENGINE=InnoDB`);
+ if(!await hasColumn('ai_edu_documents','position'))await db.query('ALTER TABLE ai_edu_documents ADD COLUMN position INT UNSIGNED NOT NULL DEFAULT 0 AFTER description');
 }

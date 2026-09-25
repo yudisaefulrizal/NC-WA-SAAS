@@ -22,6 +22,7 @@ import {baileysConnector} from './engine/baileys.js';
 import {referral as defaultReferral} from './referral.js';
 import {chatMessages,customerOf,listChats,onChatChange,recordIncoming,recordOutgoing,updateStatus} from './ai-chat.js';
 import {clientProfiles} from './ai-profiles.js';
+import {eduData} from './ai-edu.js';
 
 export function createGateway(connector?:(accountId:string,store:SessionStore)=>Connector,root=resolve('auth'),ai=defaultAI,referral=defaultReferral) {
  const hooks=new TenantWebhooks();
@@ -53,7 +54,7 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
     if(!message.isGroup)await history((async()=>{if(await ai.knownOrigin(id,session.id,message.messageId)!=='system')await recordOutgoing(id,session.id,{customer:message.from,messageId:message.messageId,origin:'manual',type:message.type,text:message.text});})());
     await ai.manualOutgoing(id,session.id,message);const added=await autoShare.listen(id,message,true);if(added)events.push({event:'auto_share.contact_added',sessionId:session.id,...added});};
    result.onSent=async(session,message)=>{const content=message.content,text='text' in content?content.text:content.caption??`[Pesan ${content.type}]`;
-    const customer=customerOf(message.to);if(customer)await history(recordOutgoing(id,session.id,{customer,messageId:message.messageId,origin:'api',type:'text' in content?'text':content.type,text:'text' in content?content.text:content.caption??''}));events.push({event:'message',direction:'outgoing',sessionId:session.id,messageId:message.messageId,from:message.to,sender:message.to,isGroup:message.to.endsWith('@g.us'),groupId:message.to.endsWith('@g.us')?message.to:null,type:'text' in content?'text':content.type,text,timestamp:Math.floor(Date.now()/1000),media:null});};
+    const customer=customerOf(message.to);if(customer)await history(recordOutgoing(id,session.id,{customer,messageId:message.messageId,origin:'api',type:'text' in content?'text':content.type,text:'text' in content?content.text:content.caption??content.filename??''}));events.push({event:'message',direction:'outgoing',sessionId:session.id,messageId:message.messageId,from:message.to,sender:message.to,isGroup:message.to.endsWith('@g.us'),groupId:message.to.endsWith('@g.us')?message.to:null,type:'text' in content?'text':content.type,text,timestamp:Math.floor(Date.now()/1000),media:null});};
    result.onReceipt=async(session,receipt)=>{await history(updateStatus(id,session.id,receipt.messageId,receipt.status));};
    result.onIncoming=async(session,message)=>{
     await result.onBeforeSend!();if(result.detail(session.id).serviceActive===false)return;
@@ -86,6 +87,8 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  const shareAssets=new AssetStore(resolve(root,'_share-assets'),db);
  const productImages=new ProductImageStore(resolve(root,'_product-images'));
  ai.productImages=productImages;
+ // Documents of CS Lembaga Pendidikan live beside product photos, under this gateway's storage root.
+ eduData.store.root=resolve(root,'_ai-documents');
  const autoShare=createAutoShare(manager,shareAssets);
  router.use('/auto-share',autoShare.router);
  router.post('/sessions/:id/messages/:kind',async(req,res)=>{
@@ -133,16 +136,42 @@ export function createGateway(connector?:(accountId:string,store:SessionStore)=>
  type Scope={profile:string|null;session:string};
  function dataRoutes(base:string,scope:(req:express.Request,res:express.Response,write:boolean)=>Promise<Scope>){
   const required=(profile:string|null)=>{if(!profile)throw new ApiError(404,'not_found','Data tidak ditemukan');return profile;};
+  // Products and orders are CS Usaha data; another profile's data profile never takes them.
+  const cs=async(res:express.Response,profile:string|null)=>{const id=required(profile);if(await ai.profileType(res.locals.accountId,id)!=='cs')throw new ApiError(409,'profile_mismatch','Produk dan pesanan hanya untuk profil CS Usaha.');return id;};
   router.get(base+'/products',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(profile?await aiData.products(res.locals.accountId,profile):[]);});
-  router.put(base+'/products/:product',async(req,res)=>{const {profile}=await scope(req,res,true);const {product,replacedImageId}=await aiData.saveProduct(res.locals.accountId,required(profile),String(req.params.product),record(req.body));if(replacedImageId)await productImages.remove(res.locals.accountId,replacedImageId).catch(()=>{});res.json(product);});
-  router.post(base+'/products',async(req,res)=>{const {profile}=await scope(req,res,true);const {product}=await aiData.saveProduct(res.locals.accountId,required(profile),'',record(req.body));res.json(product);});
-  router.post(base+'/products-image',express.raw({type:'*/*',limit:'12mb'}),async(req,res)=>{const {profile}=await scope(req,res,true);const filename=(req.get('X-Filename')??'photo').slice(0,255);res.json(await productImages.save(res.locals.accountId,required(profile),filename,Readable.from(req.body)));});
+  router.put(base+'/products/:product',async(req,res)=>{const {profile}=await scope(req,res,true);const {product,replacedImageId}=await aiData.saveProduct(res.locals.accountId,await cs(res,profile),String(req.params.product),record(req.body));if(replacedImageId)await productImages.remove(res.locals.accountId,replacedImageId).catch(()=>{});res.json(product);});
+  router.post(base+'/products',async(req,res)=>{const {profile}=await scope(req,res,true);const {product}=await aiData.saveProduct(res.locals.accountId,await cs(res,profile),'',record(req.body));res.json(product);});
+  router.post(base+'/products-image',express.raw({type:'*/*',limit:'12mb'}),async(req,res)=>{const {profile}=await scope(req,res,true);const filename=(req.get('X-Filename')??'photo').slice(0,255);res.json(await productImages.save(res.locals.accountId,await cs(res,profile),filename,Readable.from(req.body)));});
   router.get(base+'/products-image/:image',async(req,res)=>{await scope(req,res,false);const file=await productImages.get(res.locals.accountId,String(req.params.image));res.set('Content-Type',file.mimetype).set('Cache-Control','private, max-age=3600').sendFile(file.path);});
   router.get(base+'/orders',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(profile?await aiData.orders(res.locals.accountId,profile):[]);});
-  router.post(base+'/orders',async(req,res)=>{const input=record(req.body),key=req.get('Idempotency-Key');if(!key||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw new ApiError(400,'invalid_request','Idempotency-Key wajib diisi');const {profile,session}=await scope(req,res,true);res.json(await aiData.createOrder({account:res.locals.accountId,profile:required(profile),session,customer:customerNumber(input.customer),requestId:'manual_'+key,knowledge:''},orderInput({items:input.items,notes:input.notes})));});
+  router.post(base+'/orders',async(req,res)=>{const input=record(req.body),key=req.get('Idempotency-Key');if(!key||!/^[A-Za-z0-9_-]{1,100}$/.test(key))throw new ApiError(400,'invalid_request','Idempotency-Key wajib diisi');const {profile,session}=await scope(req,res,true);res.json(await aiData.createOrder({account:res.locals.accountId,profile:await cs(res,profile),session,customer:customerNumber(input.customer),requestId:'manual_'+key,knowledge:''},orderInput({items:input.items,notes:input.notes})));});
   router.put(base+'/orders/:order',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(await aiData.updateOrder(res.locals.accountId,required(profile),String(req.params.order),req.body));});
   router.delete(base+'/orders/:order',async(req,res)=>{const {profile}=await scope(req,res,false);res.json(await aiData.deleteOrder(res.locals.accountId,required(profile),String(req.params.order)));});
  }
+ // CS Lembaga Pendidikan: programs, contacts and documents of a data profile, or of the one a session runs.
+ // Reads and writes never create a data profile; a session without one has nothing to show.
+ const header=(req:express.Request,name:string)=>{const value=req.get(name)??'';try{return decodeURIComponent(value);}catch{throw new ApiError(400,'invalid_request','Header '+name+' tidak valid');}};
+ function eduRoutes(base:string,scope:(req:express.Request,res:express.Response)=>Promise<string|null>){
+  const target=async(req:express.Request,res:express.Response)=>{const profile=await scope(req,res);if(!profile)throw new ApiError(404,'data_profile_not_found','Sesi ini belum memakai data profil');return profile;};
+  const store=eduData.store;
+  router.get(base+'/programs',async(req,res)=>{const profile=await scope(req,res);res.json(profile?await store.programs(res.locals.accountId,profile):[]);});
+  router.post(base+'/programs',async(req,res)=>res.status(201).json(await store.saveProgram(res.locals.accountId,await target(req,res),null,req.body)));
+  router.put(base+'/programs/:program',async(req,res)=>res.json(await store.saveProgram(res.locals.accountId,await target(req,res),String(req.params.program),req.body)));
+  router.delete(base+'/programs/:program',async(req,res)=>res.json(await store.deleteProgram(res.locals.accountId,await target(req,res),String(req.params.program))));
+  router.get(base+'/contacts',async(req,res)=>{const profile=await scope(req,res);res.json(profile?await store.contacts(res.locals.accountId,profile):[]);});
+  router.post(base+'/contacts',async(req,res)=>res.status(201).json(await store.saveContact(res.locals.accountId,await target(req,res),null,req.body)));
+  router.put(base+'/contacts/:contact',async(req,res)=>res.json(await store.saveContact(res.locals.accountId,await target(req,res),String(req.params.contact),req.body)));
+  router.delete(base+'/contacts/:contact',async(req,res)=>res.json(await store.deleteContact(res.locals.accountId,await target(req,res),String(req.params.contact))));
+  router.get(base+'/documents',async(req,res)=>{const profile=await scope(req,res);res.json(profile?await store.documents(res.locals.accountId,profile):[]);});
+  // The file is the raw body; its name and description travel URI-encoded in X-Filename and X-Description.
+  router.post(base+'/documents',express.raw({type:'*/*',limit:'11mb'}),async(req,res)=>{const profile=await target(req,res);if(!Buffer.isBuffer(req.body))throw new ApiError(400,'invalid_request','File wajib dikirim');res.status(201).json(await store.saveDocument(res.locals.accountId,profile,header(req,'X-Filename'),header(req,'X-Description'),Readable.from([req.body])));});
+  router.put(base+'/documents/:document/file',express.raw({type:'*/*',limit:'11mb'}),async(req,res)=>{const profile=await target(req,res);if(!Buffer.isBuffer(req.body))throw new ApiError(400,'invalid_request','File wajib dikirim');res.json(await store.replaceDocumentFile(res.locals.accountId,profile,String(req.params.document),header(req,'X-Filename'),Readable.from([req.body])));});
+  router.patch(base+'/documents/:document',async(req,res)=>res.json(await store.describeDocument(res.locals.accountId,await target(req,res),String(req.params.document),req.body)));
+  router.delete(base+'/documents/:document',async(req,res)=>res.json(await store.deleteDocument(res.locals.accountId,await target(req,res),String(req.params.document))));
+  router.get(base+'/documents/:document/file',async(req,res)=>{const file=await store.file(res.locals.accountId,String(req.params.document),await target(req,res));const inline=file.media_type==='image'||file.mimetype==='application/pdf';res.set('Content-Type',file.mimetype).set('Content-Disposition',(inline?'inline':'attachment')+"; filename*=UTF-8''"+encodeURIComponent(file.filename)).set('X-Content-Type-Options','nosniff').set('Cache-Control','private, no-store').sendFile(file.path);});
+ }
+ eduRoutes('/sessions/:id/ai',async(req,res)=>{const session=String(req.params.id);(res.locals.manager as SessionManager).detail(session);return ai.sessionProfile(res.locals.accountId,session);});
+ eduRoutes('/ai/data-profiles/:profile',async(req,res)=>ai.ownedDataProfile(res.locals.accountId,req.params.profile));
  dataRoutes('/sessions/:id/ai',async(req,res,write)=>{const session=String(req.params.id);(res.locals.manager as SessionManager).detail(session);return {session,profile:write?await ai.ensureSessionProfile(res.locals.accountId,session):await ai.sessionProfile(res.locals.accountId,session)};});
  dataRoutes('/ai/data-profiles/:profile',async(req,res)=>({session:'',profile:await ai.ownedDataProfile(res.locals.accountId,req.params.profile)}));
  router.get('/ai/profile-types',async(_req,res)=>res.json(await clientProfiles(res.locals.accountId)));

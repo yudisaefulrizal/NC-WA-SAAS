@@ -2,13 +2,17 @@ import type {RowDataPacket} from 'mysql2/promise';
 import {db} from './db.js';
 import {ApiError} from './engine/sessions.js';
 import {record} from './ai-data.js';
-import {defaultWorkflow,workflowInput,csStudioMeta} from './ai-workflow.js';
+import {defaultWorkflow,workflowInput,csStudioMeta,studioMeta} from './ai-workflow.js';
+import {csPipeline,type Pipeline} from './ai-agents.js';
+import {eduPipeline} from './ai-edu.js';
 
 // A profile is a pipeline shipped with NC-WA: its nodes, tools, the shape of the data it reads (its
 // "data profile") and the session menu the dashboard shows for it are fixed in code. The owner only tunes
 // each node in AI Studio and switches the profile on or off for every client at once.
 export interface ProfileDefinition {
  id:string;name:string;description:string;nodeSummary:string;
+ // The runtime pipeline: specialists, prompts, tools and default tiers (see ai-agents.ts).
+ pipeline:Pipeline;
  // Session tabs shown while a session runs this profile; Percakapan (chat history) is always available.
  tabs:readonly string[];
  defaultWorkflow():unknown;
@@ -16,7 +20,8 @@ export interface ProfileDefinition {
  studioMeta():Record<string,unknown>;
 }
 export const profileDefinitions:Readonly<Record<string,ProfileDefinition>>={
- cs:{id:'cs',name:'CS Usaha',description:'Membalas pelanggan dari knowledge usaha, katalog produk, pesanan masuk, dan fallback tim.',nodeSummary:'Router, 5 specialist, Pesanan, Context',tabs:['knowledge','orders','usage','trial'],defaultWorkflow,workflowInput,studioMeta:csStudioMeta},
+ cs:{id:'cs',name:'CS Usaha',description:'Membalas pelanggan dari knowledge usaha, katalog produk, pesanan masuk, dan fallback tim.',nodeSummary:'Router, 5 specialist, Pesanan, Context',pipeline:csPipeline,tabs:['knowledge','orders','usage','trial'],defaultWorkflow:()=>defaultWorkflow(csPipeline),workflowInput:value=>workflowInput(value,csPipeline),studioMeta:csStudioMeta},
+ pendidikan:{id:'pendidikan',name:'CS Lembaga Pendidikan',description:'Menjawab calon siswa, wali, dan siswa aktif dari profil lembaga, program, jadwal, dokumen, dan kontak. Tidak menyimpan data pribadi.',nodeSummary:'Router, 7 specialist, Context',pipeline:eduPipeline,tabs:['knowledge','edu_program','edu_jadwal','edu_dokumen','edu_kontak','usage','trial'],defaultWorkflow:()=>defaultWorkflow(eduPipeline),workflowInput:value=>workflowInput(value,eduPipeline),studioMeta:()=>studioMeta(eduPipeline)},
 };
 // New profiles arrive switched off, so the owner tunes them in AI Studio before clients can pick them.
 export const enabledByDefault=(id:string)=>id==='cs';
