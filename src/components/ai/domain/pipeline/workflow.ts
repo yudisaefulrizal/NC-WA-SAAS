@@ -1,15 +1,22 @@
 // Alur AI Studio untuk sebuah pipeline: daftar node, alur bawaan, validasi alur yang disimpan pemilik, dan
 // informasi yang ditampilkan di samping kanvas.
 import { routerSchema } from './router-schema.js';
-import { type Pipeline } from './runner.js';
+import { type Pipeline, usesRouter } from './runner.js';
 import { csPipeline } from '../profiles/cs/pipeline.js';
 import { orderOutputSchema } from '../profiles/cs/order-schema.js';
 import { modelTiers, type AgentWorkflow } from './models.js';
 import { record } from '../../../../libraries/validation.js';
 import { ApiError } from '../../../../libraries/errors.js';
-// Semua node sebuah pipeline, sesuai urutan di AI Studio: router, specialist, node tambahan, context.
+// Semua node sebuah pipeline, sesuai urutan di AI Studio: router, specialist, node tambahan, context. Pipeline
+// dengan satu specialist tidak punya router maupun context (lihat usesRouter).
 export function pipelineNodes(pipeline: Pipeline) {
-  return ['router', ...Object.keys(pipeline.agents), ...Object.keys(pipeline.extraNodes), 'context'];
+  const routed = usesRouter(pipeline);
+  return [
+    ...(routed ? ['router'] : []),
+    ...Object.keys(pipeline.agents),
+    ...Object.keys(pipeline.extraNodes),
+    ...(routed ? ['context'] : []),
+  ];
 }
 function defaultPrompt(pipeline: Pipeline, role: string) {
   return role === 'router'

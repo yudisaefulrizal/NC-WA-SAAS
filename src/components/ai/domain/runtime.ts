@@ -168,7 +168,9 @@ export async function handleMessage(
   const jid = message.from + '@s.whatsapp.net';
   // Urutan yang dilihat pelanggan: jeda singkat, centang biru, lalu "mengetik..." selama jawaban dibuat.
   // Status dibaca/mengetik tidak dijamin, dan tidak pernah menambah pesan atau tagihan kredit.
-  await svc.wait(randomInt(200, 1001));
+  // Tester AI menunggu lebih lama seperti orang membaca dulu, supaya dua bot tidak saling membalas secepat kilat
+  // (yang bisa dianggap spam oleh WhatsApp).
+  await svc.wait(type === 'tester' ? randomInt(3000, 8001) : randomInt(200, 1001));
   await manager.read(session, jid, message.messageId).catch(() => {});
   await manager.typing(session, jid, 'composing').catch(() => {});
   // WhatsApp menghapus status "mengetik" setelah beberapa detik, jadi diperbarui terus sampai balasan terkirim.

@@ -234,6 +234,7 @@ try {
       [
         ['cs', false],
         ['pendidikan', false],
+        ['tester', false],
       ],
     );
     await page

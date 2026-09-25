@@ -172,16 +172,23 @@ export async function applyManualReply(
   customer: string,
   content: string,
 ) {
-  const [assistant] = await assistantsSql.findEnabled(c, [account, session]);
+  const [assistant] = await assistantsSql.findEnabledWithType(c, [account, session]);
   if (!assistant[0]?.enabled) return;
   const [settings] = await settingsSql.shareMemoryLimit(c);
   const limit = settings[0]?.memory_limit ?? defaults.memory_limit;
   await conversationsSql.ensure(c, [account, session, customer]);
   const [rows] = await conversationsSql.lockForReply(c, [account, session, customer]);
-  const memory = [
-    ...parseMemory(rows[0].messages),
-    ...(content ? [{ role: 'assistant' as const, content }] : []),
-  ].slice(-limit);
+  const earlier = parseMemory(rows[0].messages);
+  const memory = [...earlier, ...(content ? [{ role: 'assistant' as const, content }] : [])].slice(-limit);
+  // Tester AI: pesan manual adalah ucapan pelanggan tiruan itu sendiri, jadi memulai atau mengarahkan obrolan tanpa
+  // menjeda AI. Revisi dinaikkan supaya balasan yang sedang dibuat dibatalkan dan AI melanjutkan dari arahan ini;
+  // status Jeda tidak diubah, jadi obrolan yang dijeda tetap berhenti.
+  if (assistant[0].profile_type === 'tester') {
+    await conversationsSql.updateMessagesAndRevision(c, [JSON.stringify(memory), account, session, customer]);
+    if (!earlier.length && !rows[0].paused)
+      await recordNote(account, session, customer, 'Tester AI mulai menguji nomor ini', c);
+    return;
+  }
   await conversationsSql.pauseForManualReply(c, [JSON.stringify(memory), account, session, customer]);
   if (!rows[0].paused && !rows[0].full_auto)
     await recordNote(account, session, customer, 'AI dijeda karena ada balasan manual', c);

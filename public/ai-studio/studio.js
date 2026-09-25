@@ -151,11 +151,41 @@ const layouts = {
     sandbox:
       'SANDBOX · Tools dan dokumen simulasi. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.',
   },
+  // Satu node tanpa router, context, maupun tool: pesan dari CS masuk, Pelanggan membalas.
+  tester: {
+    specialists: ['pelanggan'],
+    tools: [],
+    positions: {
+      input: [35, 368],
+      pelanggan: [570, 368],
+      output: [1060, 368],
+      memory: [565, 870],
+      models: [55, 870],
+    },
+    edges: [
+      ['input', 'pelanggan'],
+      ['pelanggan', 'output'],
+      ['memory', 'pelanggan'],
+      ['models', 'pelanggan'],
+    ],
+    labels: [
+      ['01 / BALASAN CS MASUK', 35, 26],
+      ['02 / PELANGGAN', 570, 26],
+      ['03 / PESAN PELANGGAN', 1060, 26],
+      ['MODEL & MEMORI', 55, 825],
+    ],
+    names: { ...common, input: 'Balasan CS', output: 'Pesan pelanggan', pelanggan: 'Pelanggan' },
+    describe: {},
+    placeholder: 'Tulis balasan CS, misalnya: Halo kak, ada yang bisa kami bantu?',
+    sandbox:
+      'SANDBOX · Anda berperan sebagai CS, Tester AI membalas sebagai pelanggan. Tidak mengirim WhatsApp. Panggilan model memakai provider Anda dan dapat dikenai biaya provider.',
+  },
 };
-let names, specialists, positions, edges, toolNodes;
+let names, specialists, positions, edges, toolNodes, labels;
 function useLayout(id) {
   const l = layouts[id] ?? layouts.cs;
   ({ names, specialists, positions, edges } = l);
+  labels = l.labels;
   toolNodes = l.tools;
   describe = l.describe && { ...baseDescribe, ...l.describe };
   $('chat-input').placeholder = l.placeholder;
@@ -163,6 +193,7 @@ function useLayout(id) {
   for (const [key, block] of [
     ['cs', 'cs-sandbox'],
     ['pendidikan', 'edu-sandbox'],
+    ['tester', 'tester-sandbox'],
   ])
     $(block).hidden = key !== (layouts[id] ? id : 'cs');
 }
@@ -327,12 +358,12 @@ function draw() {
     b.onclick = () => selectNode(id);
     $('nodes').append(b);
   }
-  for (const [text, x, y] of [
+  for (const [text, x, y] of labels ?? [
     ['01 / MASUK & ROUTING', 35, 26],
     ['02 / SATU SPECIALIST', 570, 26],
     ['03 / KONTEKS & JAWABAN', 1060, 26],
     ['MODEL & MEMORI', 55, 825],
-    ['TOOLS / SIMULASI', Math.min(...toolNodes.map(t => positions[t][0])), 977],
+    ...(toolNodes.length ? [['TOOLS / SIMULASI', Math.min(...toolNodes.map(t => positions[t][0])), 977]] : []),
   ]) {
     const label = document.createElement('span');
     label.className = 'canvas-label';
@@ -535,7 +566,9 @@ async function load() {
   const result = await api(studioUrl());
   state = result;
   useLayout(result.profile);
-  if (!state.draft.nodes[selected] && !positions[selected]) selected = 'router';
+  // Profil tanpa router (Tester AI) membuka node pertamanya.
+  if (!state.draft.nodes[selected] && !positions[selected])
+    selected = state.draft.nodes.router ? 'router' : Object.keys(state.draft.nodes)[0];
   $('profile-name').textContent = $('canvas-profile').textContent = result.profile_name;
   $('profile-status').textContent = result.enabled ? 'Aktif untuk klien' : 'Nonaktif untuk klien';
   $('profile-status').classList.toggle('off', !result.enabled);
@@ -617,24 +650,26 @@ $('chat-form').onsubmit = async e => {
   let data;
   try {
     data =
-      profile === 'pendidikan'
-        ? {
-            edu: {
-              name: $('edu-test-name').value,
-              lembaga: $('edu-test-lembaga').value,
-              jadwal: $('edu-test-jadwal').value,
-              faq: $('edu-test-faq').value,
-              programs: JSON.parse($('edu-test-programs').value),
-              contacts: JSON.parse($('edu-test-contacts').value),
-              documents: JSON.parse($('edu-test-documents').value),
-            },
-            behavior: $('edu-test-behavior').value,
-          }
-        : {
-            profile: Object.fromEntries(profileFields.map(f => [f, $('test-profile-' + f).value])),
-            behavior: $('test-behavior').value,
-            products: JSON.parse($('test-products').value),
-          };
+      profile === 'tester'
+        ? { behavior: $('tester-test-behavior').value }
+        : profile === 'pendidikan'
+          ? {
+              edu: {
+                name: $('edu-test-name').value,
+                lembaga: $('edu-test-lembaga').value,
+                jadwal: $('edu-test-jadwal').value,
+                faq: $('edu-test-faq').value,
+                programs: JSON.parse($('edu-test-programs').value),
+                contacts: JSON.parse($('edu-test-contacts').value),
+                documents: JSON.parse($('edu-test-documents').value),
+              },
+              behavior: $('edu-test-behavior').value,
+            }
+          : {
+              profile: Object.fromEntries(profileFields.map(f => [f, $('test-profile-' + f).value])),
+              behavior: $('test-behavior').value,
+              products: JSON.parse($('test-products').value),
+            };
   } catch {
     notice('JSON data simulasi tidak valid. Periksa program, kontak, dokumen, atau produk.', true);
     return;
@@ -645,7 +680,8 @@ $('chat-form').onsubmit = async e => {
   $('run-status').textContent = 'Sedang berjalan';
   trace = [];
   nodeEvents = {};
-  selectedAgent = null;
+  // Tanpa router, satu-satunya specialist selalu yang menjawab.
+  selectedAgent = specialists.length === 1 ? specialists[0] : null;
   $('trace-list').replaceChildren();
   document.querySelectorAll('[data-node]').forEach(b => delete b.dataset.state);
   document.querySelectorAll('.edge').forEach(p => p.classList.remove('active'));

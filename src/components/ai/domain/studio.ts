@@ -58,7 +58,7 @@ export class AIStudio {
       behavior = text(body.behavior ?? '', 2000);
     if (!message) throw bad('Isi pesan pengujian.');
     // body.profile_type memilih pipeline; setiap profil membawa data simulasinya sendiri (CS: knowledge body.profile
-    // dan body.products; CS Lembaga Pendidikan: body.edu).
+    // dan body.products; CS Lembaga Pendidikan: body.edu; Tester AI: hanya body.behavior).
     const pipeline = profileDefinition(body.profile_type ?? 'cs'),
       edu = pipeline.id === 'pendidikan';
     let knowledge = '',
@@ -95,6 +95,8 @@ export class AIStudio {
         documents,
       };
       identity = eduIdentity(text(input.name ?? '', 100).trim() || 'Lembaga Simulasi');
+    } else if (pipeline.id === 'tester') {
+      // Tester AI tidak punya data bisnis; perannya datang dari body.behavior (Peran pelanggan simulasi).
     } else {
       const profileInput = record(body.profile ?? {});
       const profile = Object.fromEntries(
@@ -261,9 +263,10 @@ export class AIStudio {
       const system: AIMessage[] = [
         {
           role: 'system',
-          content: edu
-            ? pipeline.pipeline.system
-            : 'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika tidak tahu, arahkan pelanggan ke admin. Balas maksimal 300 kata.',
+          content:
+            pipeline.id !== 'cs'
+              ? pipeline.pipeline.system
+              : 'Jawab sebagai asisten bisnis berdasarkan pengetahuan yang diberikan. Jangan mengarang fakta. Jika tidak tahu, arahkan pelanggan ke admin. Balas maksimal 300 kata.',
         },
         ...(behavior ? [{ role: 'system' as const, content: behavior }] : []),
       ];

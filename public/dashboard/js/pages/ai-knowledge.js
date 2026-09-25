@@ -153,7 +153,9 @@ async function loadAssistant() {
     }
     await Promise.all([
       sessions && id ? loadConversations() : null,
-      target ? (aiTargetType() === 'pendidikan' ? loadEduData(generation) : loadAIData(generation)) : null,
+      // Tester AI tidak punya data selain Peran pelanggan, yang sudah dimuat bersama pengaturan asisten.
+      target && aiTargetType() === 'pendidikan' ? loadEduData(generation) : null,
+      target && aiTargetType() === 'cs' ? loadAIData(generation) : null,
     ]);
     if (!target) for (const name of ['ai-products', 'ai-orders', 'ai-fallbacks']) $(name).replaceChildren();
   } finally {

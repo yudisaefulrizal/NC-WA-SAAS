@@ -8,6 +8,7 @@ import { defaultWorkflow, workflowInput, csStudioMeta, studioMeta } from '../pip
 import { type Pipeline } from '../pipeline/runner.js';
 import { csPipeline } from './cs/pipeline.js';
 import { eduPipeline } from './pendidikan/pipeline.js';
+import { testerPipeline } from './tester/pipeline.js';
 import * as auditEventsSql from '../../data-access/audit-events-queries.js';
 import * as dataProfilesSql from '../../data-access/data-profiles-queries.js';
 import * as profileTypesSql from '../../data-access/profile-types-queries.js';
@@ -48,6 +49,18 @@ export const profileDefinitions: Readonly<Record<string, ProfileDefinition>> = {
     defaultWorkflow: () => defaultWorkflow(eduPipeline),
     workflowInput: value => workflowInput(value, eduPipeline),
     studioMeta: () => studioMeta(eduPipeline),
+  },
+  tester: {
+    id: 'tester',
+    name: 'Tester AI',
+    description:
+      'Berperan sebagai pelanggan untuk menguji nomor CS mana pun. Mulai dengan mengetik pesan dari HP nomor tester; hentikan dengan Jeda.',
+    nodeSummary: 'Pelanggan',
+    pipeline: testerPipeline,
+    tabs: ['knowledge', 'usage'],
+    defaultWorkflow: () => defaultWorkflow(testerPipeline),
+    workflowInput: value => workflowInput(value, testerPipeline),
+    studioMeta: () => ({ allowedTools: testerPipeline.permissions }),
   },
 };
 // Profil baru datang dalam keadaan mati, supaya pemilik menyetelnya di AI Studio sebelum klien bisa memilihnya.

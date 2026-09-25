@@ -10,9 +10,11 @@ function sessionChips(sessions) {
 }
 // Isi sebuah data profil, dalam istilah profilnya sendiri.
 const profileCounts = p =>
-  p.profile_type === 'pendidikan'
-    ? [p.programs + ' program', p.documents + ' dokumen', p.contacts + ' kontak']
-    : [p.products + ' produk', p.orders + ' pesanan'];
+  p.profile_type === 'tester'
+    ? ['Pelanggan tiruan']
+    : p.profile_type === 'pendidikan'
+      ? [p.programs + ' program', p.documents + ' dokumen', p.contacts + ' kontak']
+      : [p.products + ' produk', p.orders + ' pesanan'];
 function renderDataProfiles() {
   const list = $('ai-profiles-list');
   list.replaceChildren();
@@ -52,9 +54,11 @@ function renderDataProfiles() {
         await api('/ai/data-profiles', 'POST', { name: name.trim(), copy_from: p.id });
         await loadDataProfiles();
         $('message').textContent =
-          p.profile_type === 'pendidikan'
-            ? 'Data profil diduplikat beserta program, dokumen, dan kontaknya.'
-            : 'Data profil diduplikat beserta produk dan fotonya.';
+          p.profile_type === 'tester'
+            ? 'Data profil diduplikat beserta peran pelanggannya.'
+            : p.profile_type === 'pendidikan'
+              ? 'Data profil diduplikat beserta program, dokumen, dan kontaknya.'
+              : 'Data profil diduplikat beserta produk dan fotonya.';
       }),
       button('Hapus', async () => {
         menu.open = false;
@@ -68,9 +72,11 @@ function renderDataProfiles() {
             'Hapus data profil ' +
               p.name +
               '? ' +
-              (p.profile_type === 'pendidikan'
-                ? 'Profil lembaga, program, jadwal, dokumen, dan kontaknya'
-                : 'Knowledge, produk, foto, dan pesanannya') +
+              (p.profile_type === 'tester'
+                ? 'Peran pelanggannya'
+                : p.profile_type === 'pendidikan'
+                  ? 'Profil lembaga, program, jadwal, dokumen, dan kontaknya'
+                  : 'Knowledge, produk, foto, dan pesanannya') +
               ' ikut terhapus.',
           )
         )
@@ -142,9 +148,11 @@ form('ai-profile-create-form', async data => {
       },
     );
     $('message').textContent =
-      data.profile_type === 'pendidikan'
-        ? 'Data profil dibuat. Isi profil lembaga, program, jadwal, dokumen, dan kontaknya, lalu pasang ke sesi.'
-        : 'Data profil dibuat. Isi knowledge dan produknya, lalu pasang ke sesi.';
+      data.profile_type === 'tester'
+        ? 'Data profil dibuat. Tulis peran pelanggannya di Knowledge, lalu pasang ke sesi nomor tester.'
+        : data.profile_type === 'pendidikan'
+          ? 'Data profil dibuat. Isi profil lembaga, program, jadwal, dokumen, dan kontaknya, lalu pasang ke sesi.'
+          : 'Data profil dibuat. Isi knowledge dan produknya, lalu pasang ke sesi.';
   } catch (e) {
     $('ai-profile-create-error').textContent = e.message;
     throw e;

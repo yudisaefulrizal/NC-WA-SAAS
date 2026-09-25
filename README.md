@@ -11,6 +11,7 @@ Cara kerja dan arsitektur ada di [AGENT.MD](AGENT.MD).
 - **Asisten AI.** AI dipasang per nomor dengan kredit AI terpisah (dihitung per kata). Setiap sesi memakai satu **profil**, yaitu pipeline dari sistem, dan satu **data profil**, yaitu isi milik klien yang bisa dipakai di banyak sesi.
   - **CS Usaha:** knowledge, produk, dan pesanan.
   - **CS Lembaga Pendidikan:** profil lembaga, program, jadwal, dokumen yang dikirim ke WhatsApp, dan kontak. Profil ini tidak menyimpan data pribadi.
+  - **Tester AI:** AI berperan sebagai pelanggan sesuai Peran pelanggan untuk menguji nomor CS mana pun. Obrolan dimulai dari pesan manual di HP nomor tester dan berjalan sampai dijeda.
   - Juga tersedia: riwayat chat gaya WhatsApp dengan balasan manual, jeda, dan full auto; fallback ke tim; Uji Coba.
   - Pemilik menyetel prompt dan model tiap node di **AI Studio**, dan menyalakan atau mematikan profil di **Profil AI**.
 - **Auto Share.** Kontak dan kelompok, template (teks atau media, bisa mengambil data dari endpoint, bisa dirapikan AI), serta pengiriman sekali atau berulang dengan rotasi template dan riwayat per tujuan.

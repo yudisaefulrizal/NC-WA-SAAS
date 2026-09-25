@@ -96,6 +96,8 @@ Komentar pembuka, import, tipe, fungsi yang diekspor, lalu helper internal.
   - Kredit AI dihitung per kata, dipesan dulu, lalu diselesaikan setelah jawaban. Memori dan konteks S-P-O disimpan per sesi dan per pelanggan. Riwayat chat (`ai_chat_messages`) terpisah dari memori AI.
   - Mengganti atau mencabut data profil mengosongkan memori AI sesi itu.
   - Profil baru selalu mulai nonaktif sampai pemilik menyalakannya.
+  - Pipeline dengan satu specialist (Tester AI) tidak memakai router maupun node Context, karena ringkasan Context hanya dibaca router (`usesRouter` di `pipeline/runner.ts`).
+  - **Tester AI** menyimpan Peran pelanggan di kolom `behavior`. Pesan manual (dari HP atau dashboard) di sesi Tester AI tidak menjeda AI: pesan itu masuk memori sebagai ucapan tester dan membatalkan balasan yang sedang dibuat, sedangkan status Jeda tidak diubah (`applyManualReply` di `conversations.ts`). Tester AI menunggu 3–8 detik sebelum membalas supaya dua bot tidak saling membalas secepat kilat.
 - **Menambah profil baru** butuh:
   - folder `ai/domain/profiles/<profil>/` berisi `pipeline.ts` dan tool-nya, lalu daftarkan di `profiles/registry.ts`;
   - tabel di `ai/data-access/schema.ts`, query di `ai/data-access/<profil>-queries.ts`, dan endpoint di `ai/entry-points/routes.ts`;

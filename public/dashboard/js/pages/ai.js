@@ -8,7 +8,7 @@ function aiTab(tab) {
   document
     .querySelectorAll('[data-ai-tab]')
     .forEach(b => b.setAttribute('aria-pressed', String(b.dataset.aiTab === tab)));
-  if (tab === 'knowledge') knowledgeTab(knowledgeTabsFor(aiTargetType())[1]);
+  if (tab === 'knowledge') knowledgeTab(firstKnowledgeTab(aiTargetType()));
   if (tab === 'conversations' && $('ai-session').value && aiView === 'sessions') void run(loadConversations);
 }
 document.querySelectorAll('[data-ai-tab]').forEach(b => (b.onclick = () => aiTab(b.dataset.aiTab)));
@@ -28,11 +28,16 @@ const knowledgeTabNames = [
   'fallback',
 ];
 // Bagian Knowledge berbeda per profil: CS Usaha punya bidang usaha dan produk, CS Lembaga Pendidikan punya profil
-// lembaga; Perilaku AI, FAQ, dan Fallback Tim dimiliki keduanya.
+// lembaga; Perilaku AI, FAQ, dan Fallback Tim dimiliki keduanya. Tester AI hanya punya Peran pelanggan, yang disimpan
+// di bidang Perilaku AI.
 const knowledgeTabsFor = type =>
-  type === 'pendidikan'
-    ? ['behavior', 'lembaga', 'program', 'jadwal', 'dokumen', 'kontak', 'faq', 'fallback']
-    : ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'fallback'];
+  type === 'tester'
+    ? ['behavior']
+    : type === 'pendidikan'
+      ? ['behavior', 'lembaga', 'program', 'jadwal', 'dokumen', 'kontak', 'faq', 'fallback']
+      : ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'fallback'];
+// Bagian yang dibuka pertama: bagian isi utama profil, atau satu-satunya bagian bila hanya ada satu.
+const firstKnowledgeTab = type => knowledgeTabsFor(type)[1] ?? knowledgeTabsFor(type)[0];
 function renderKnowledgeTabs() {
   const allowed = knowledgeTabsFor(aiTargetType());
   document
@@ -40,15 +45,22 @@ function renderKnowledgeTabs() {
     .forEach(b => (b.hidden = !allowed.includes(b.dataset.knowledgeTab)));
   for (const option of $('ai-knowledge-select').options) option.hidden = !allowed.includes(option.value);
   $('ai-form').elements.profile_faq.maxLength = aiTargetType() === 'pendidikan' ? 4000 : 2000;
+  // Di Tester AI bidang Perilaku AI berisi peran pelanggan yang dimainkan AI.
+  const tester = aiTargetType() === 'tester',
+    behaviorLabel = tester ? 'Peran pelanggan' : 'Perilaku AI';
+  document.querySelector('[data-knowledge-tab="behavior"]').textContent = behaviorLabel;
+  $('ai-knowledge-select').querySelector('option[value="behavior"]').textContent = behaviorLabel;
+  $('ai-behavior-tester-help').hidden = !tester;
   {
     const behavior = $('ai-form').elements.behavior;
     behavior.dataset.csPlaceholder ??= behavior.placeholder;
-    behavior.placeholder =
-      aiTargetType() === 'pendidikan'
+    behavior.placeholder = tester
+      ? 'Tulis siapa pelanggan yang diperankan, apa yang dicari, dan sifatnya. Contoh: Ibu rumah tangga di Bandung yang mau pesan kue ulang tahun untuk hari Sabtu; tanyakan ukuran dan harga, lalu tawar sekali. Balas singkat seperti chat WhatsApp biasa.'
+      : aiTargetType() === 'pendidikan'
         ? "Tulis gaya bahasa dan cara menyebut orang. Contoh: Sopan dan ringkas, awali dengan salam Assalamu'alaikum. Sebut peserta didik sebagai santri, orang tua sebagai wali santri, dan pengajar sebagai ustadz/ustadzah. Nama asistennya Admin PSB."
         : behavior.dataset.csPlaceholder;
   }
-  if (!allowed.includes($('ai-knowledge-select').value)) knowledgeTab(allowed[1]);
+  if (!allowed.includes($('ai-knowledge-select').value)) knowledgeTab(firstKnowledgeTab(aiTargetType()));
 }
 function knowledgeTab(tab) {
   $('ai-knowledge-select').value = tab;

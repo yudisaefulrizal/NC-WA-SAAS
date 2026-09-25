@@ -8,8 +8,12 @@ export function findFallbackNumber(c: Executor, params: SqlValue[]) {
     params,
   );
 }
-export function findEnabled(c: Executor, params: SqlValue[]) {
-  return c.execute<RowDataPacket[]>('SELECT enabled FROM ai_assistants WHERE account_id=? AND session_id=?', params);
+// Saklar AI sesi beserta jenis profil data profil yang terpasang (NULL bila belum ada).
+export function findEnabledWithType(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT a.enabled,p.profile_type FROM ai_assistants a LEFT JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=? AND a.session_id=?',
+    params,
+  );
 }
 export function deleteBySession(c: Executor, params: SqlValue[]) {
   return c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?', params);
