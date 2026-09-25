@@ -1,7 +1,8 @@
-import {migrateAutoShare} from './auto-share-schema.js';
-import {migrateAI} from './ai-schema.js';
-import {migrateReferral} from './referral-schema.js';
-import { db } from './db.js';
+import {migrateAutoShare} from './components/auto-share/index.js';
+import {migrateAI} from './components/ai/index.js';
+import {migrateReferral} from './components/referral/index.js';
+import { db } from './libraries/db.js';
+
 try {
 await db.query(`CREATE TABLE IF NOT EXISTS accounts (id CHAR(36) PRIMARY KEY, email VARCHAR(254) NOT NULL UNIQUE, password_hash VARCHAR(256) NOT NULL, role ENUM('user','owner') NOT NULL DEFAULT 'user', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`);
 await db.query(`CREATE TABLE IF NOT EXISTS login_sessions (token_hash CHAR(64) PRIMARY KEY, account_id CHAR(36) NOT NULL, expires_at DATETIME NOT NULL, FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`);

@@ -1,0 +1,24 @@
+// SQL of this component, one named query per statement. Domain code passes the executor: the pool,
+// or the connection of a transaction it has opened.
+import type {ResultSetHeader,RowDataPacket} from 'mysql2/promise';
+import type {Executor,SqlValue} from '../../../libraries/db.js';
+export function lockAccountsSuspendedById(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT suspended FROM accounts WHERE id=? FOR UPDATE',params);}
+export function selectDataProfilesIdByIdAccountId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT id FROM ai_data_profiles WHERE id=? AND account_id=?',params);}
+export function selectDataSourcesByAccountIdDataProfileIdKind(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT mode,endpoint,secret FROM ai_data_sources WHERE account_id=? AND data_profile_id=? AND kind=?',params);}
+export function selectDataSourcesEndpointSecretByAccountIdDataProfileIdKind(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT endpoint,secret FROM ai_data_sources WHERE account_id=? AND data_profile_id=? AND kind=?',params);}
+export function upsertDataSources(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_data_sources(account_id,data_profile_id,kind,mode,endpoint,secret) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE mode=VALUES(mode),endpoint=VALUES(endpoint),secret=VALUES(secret)',params);}
+export function selectProductsByAccountIdDataProfileId(c:Executor,params:SqlValue[],activeOnly:boolean){return c.execute<RowDataPacket[]>('SELECT name,type,description,price,stock,active,image_id FROM ai_products WHERE account_id=? AND data_profile_id=?'+(activeOnly?' AND active=TRUE':'')+' AND name LIKE ? ORDER BY name LIMIT '+(activeOnly?'20':'200'),params);}
+export function selectProductImagesIdByIdAccountIdDataProfileId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT id FROM ai_product_images WHERE id=? AND account_id=? AND data_profile_id=?',params);}
+export function deleteProductsByAccountIdDataProfileIdName(c:Executor,params:SqlValue[]){return c.execute('DELETE FROM ai_products WHERE account_id=? AND data_profile_id=? AND name=?',params);}
+export function selectProductsImageIdByAccountIdDataProfileIdName(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT image_id FROM ai_products WHERE account_id=? AND data_profile_id=? AND name=?',params);}
+export function upsertProducts(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_products(account_id,data_profile_id,name,type,description,price,stock,active,image_id) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE type=VALUES(type),description=VALUES(description),price=VALUES(price),stock=VALUES(stock),active=VALUES(active),image_id=VALUES(image_id)',params);}
+export function selectOrdersByAccountIdDataProfileId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT * FROM ai_orders WHERE account_id=? AND data_profile_id=? ORDER BY created_at DESC,id DESC LIMIT 200',params);}
+export function selectOrdersByAccountIdDataProfileIdId(c:Executor,params:SqlValue[],customer:string | undefined){return c.execute<RowDataPacket[]>('SELECT * FROM ai_orders WHERE account_id=? AND data_profile_id=? AND id=?'+(customer?' AND customer=?':''),params);}
+export function lockOrdersIdByAccountIdDataProfileIdId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT id FROM ai_orders WHERE account_id=? AND data_profile_id=? AND id=? FOR UPDATE',params);}
+export function updateOrdersStatusByAccountIdDataProfileIdId(c:Executor,params:SqlValue[]){return c.execute('UPDATE ai_orders SET status=?,notes=? WHERE account_id=? AND data_profile_id=? AND id=?',params);}
+export function deleteOrdersByAccountIdDataProfileIdId(c:Executor,params:SqlValue[]){return c.execute<ResultSetHeader>('DELETE FROM ai_orders WHERE account_id=? AND data_profile_id=? AND id=?',params);}
+export function selectOrdersByAccountIdDataProfileIdRequestId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT * FROM ai_orders WHERE account_id=? AND data_profile_id=? AND request_id=?',params);}
+export function insertOrders(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_orders(account_id,data_profile_id,session_id,id,request_id,input_hash,customer,items,total,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)',params);}
+export function insertProductImages(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_product_images(id,account_id,data_profile_id,size_bytes) VALUES (?,?,?,?)',params);}
+export function selectProductImagesIdByAccountIdId(c:Executor,params:SqlValue[]){return c.execute<any[]>('SELECT id FROM ai_product_images WHERE account_id=? AND id=?',params);}
+export function deleteProductImagesByAccountIdId(c:Executor,params:SqlValue[]){return c.execute('DELETE FROM ai_product_images WHERE account_id=? AND id=?',params);}

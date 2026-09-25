@@ -12,13 +12,14 @@
     "check": "tsc --noEmit",
     "start": "node --env-file=.env dist/server.js",
     "migrate": "tsx --env-file=.env src/migrate.ts",
-    "test": "tsx --env-file=.env --test test/*.test.ts",
-    "owner": "tsx --env-file=.env src/owner.ts",
-    "test:browser": "tsx --env-file=.env scripts/browser-check.ts",
-    "backup": "tsx --env-file=.env scripts/backup.ts",
-    "bench": "tsx --env-file=.env scripts/bench.ts",
-    "setup:secrets": "tsx scripts/setup-secrets.ts",
-    "test:restore": "tsx scripts/restore-check.ts"
+    "test": "tsx --env-file=.env --test 'test/**/*.test.ts'",
+    "test:isolated": "tsx scripts/test/test-all.ts",
+    "owner": "tsx --env-file=.env scripts/tools/owner.ts",
+    "test:browser": "tsx --env-file=.env scripts/checks/browser-check.ts",
+    "backup": "tsx --env-file=.env scripts/tools/backup.ts",
+    "bench": "tsx --env-file=.env scripts/tools/bench.ts",
+    "setup:secrets": "tsx scripts/tools/setup-secrets.ts",
+    "test:restore": "tsx scripts/tools/restore-check.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",

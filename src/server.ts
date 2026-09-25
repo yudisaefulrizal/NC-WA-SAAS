@@ -1,11 +1,12 @@
-import {ai} from './ai.js';
-import {recoverReservations} from './credits.js';
-import {gateway} from './gateway.js';
-import {app} from './app.js';
-import {db} from './db.js';
-import {startBasicScheduler} from './scheduler.js';
-import {payments} from './payments.js';
-import {acquireEngineLock} from './runtime.js';
+import {ai} from './components/ai/index.js';
+import {recoverReservations} from './components/billing/index.js';
+import {gateway} from './http/gateway.js';
+import {app} from './http/app.js';
+import {db} from './libraries/db.js';
+import {startBasicScheduler} from './components/billing/index.js';
+import {payments} from './http/services.js';
+import {acquireEngineLock} from './libraries/runtime-lock.js';
+
 const lock=await acquireEngineLock();
 try {
  await recoverReservations();await ai.recover();

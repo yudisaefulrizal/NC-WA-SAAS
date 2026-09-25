@@ -1,0 +1,19 @@
+// SQL of this component, one named query per statement. Domain code passes the executor: the pool,
+// or the connection of a transaction it has opened.
+import type {RowDataPacket} from 'mysql2/promise';
+import type {Executor,SqlValue} from '../../../libraries/db.js';
+export function selectSettings(c:Executor){return c.query<RowDataPacket[]>('SELECT * FROM ai_settings WHERE id=1');}
+export function selectProviderRoutes(c:Executor){return c.query<RowDataPacket[]>('SELECT r.tier,p.* FROM ai_provider_routes r JOIN ai_provider_profiles p ON p.id=r.profile_id WHERE p.active=TRUE');}
+export function selectProviderProfiles(c:Executor){return c.query<RowDataPacket[]>('SELECT * FROM ai_provider_profiles ORDER BY created_at');}
+export function selectProviderRoutesTierProfileId(c:Executor){return c.query<RowDataPacket[]>('SELECT tier,profile_id FROM ai_provider_routes');}
+export function selectProviderProfilesSecretById(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT secret FROM ai_provider_profiles WHERE id=?',params);}
+export function upsertProviderProfiles(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_provider_profiles(id,name,provider,endpoint,secret,model_cheap,model_medium,model_smart,model_structured,active) VALUES (?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE name=VALUES(name),provider=VALUES(provider),endpoint=VALUES(endpoint),secret=VALUES(secret),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart),model_structured=VALUES(model_structured),active=VALUES(active)',params);}
+export function selectProviderRoutesTierByProfileId(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT tier FROM ai_provider_routes WHERE profile_id=?',params);}
+export function deleteProviderProfilesById(c:Executor,params:SqlValue[]){return c.execute<any>('DELETE FROM ai_provider_profiles WHERE id=?',params);}
+export function selectProviderProfilesIdModelById(c:Executor,params:SqlValue[],tier:string){return c.execute<RowDataPacket[]>('SELECT id,model_'+tier+' AS model FROM ai_provider_profiles WHERE id=? AND active=TRUE',params);}
+export function upsertProviderRoutes(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_provider_routes(tier,profile_id,model) VALUES (?,?,?) ON DUPLICATE KEY UPDATE profile_id=VALUES(profile_id),model=VALUES(model)',params);}
+export function updateSettingsProfileRoutingEnabled(c:Executor){return c.query('UPDATE ai_settings SET profile_routing_enabled=TRUE WHERE id=1');}
+export function selectProviderProfilesById(c:Executor,params:SqlValue[]){return c.execute<RowDataPacket[]>('SELECT provider,endpoint,secret FROM ai_provider_profiles WHERE id=? AND active=TRUE',params);}
+export function upsertSettings(c:Executor,params:SqlValue[]){return c.execute('INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,context_memory_limit,trace_enabled,credit_price,model_cheap,model_medium,model_smart,model_structured,tidy_prompt) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),context_memory_limit=VALUES(context_memory_limit),trace_enabled=VALUES(trace_enabled),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart),model_structured=VALUES(model_structured),tidy_prompt=VALUES(tidy_prompt)',params);}
+export function lockConversations(c:Executor){return c.query<RowDataPacket[]>('SELECT account_id,session_id,customer,messages FROM ai_conversations FOR UPDATE');}
+export function insertAISettingsUpdatedAudit(c:Executor,params:SqlValue[]){return c.execute("INSERT INTO audit_events(account_id,action) VALUES (?,'ai_settings_updated')",params);}
