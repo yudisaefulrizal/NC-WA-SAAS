@@ -4,16 +4,6 @@ import { record } from '../../../../libraries/validation.js';
 import { modelTiers, type ModelTier } from '../pipeline/models.js';
 import { filterOperators, maxToolLimit, type FilterOperator } from './record-query.js';
 
-export const businessTools = [
-  'get_knowledge',
-  'get_products',
-  'check_order',
-  'create_order',
-  'send_product_image',
-] as const;
-export type BusinessTool = (typeof businessTools)[number];
-export const usesBusinessTools = (d: GraphDefinition) => d.nodes.some(n => n.type === 'tool' && n.capability);
-
 export const nodeTypes = [
   'input',
   'memory',
@@ -27,6 +17,7 @@ export const nodeTypes = [
   'extract',
   'compute',
   'media',
+  'receive',
 ] as const;
 export type NodeType = (typeof nodeTypes)[number];
 export const fieldTypes = [
@@ -183,8 +174,9 @@ export interface GraphNode {
   caption?: string;
   send_when?: 'before' | 'after';
   media_as?: 'auto' | 'image' | 'document';
+  // Node Terima media: jenis lampiran pelanggan yang diterima.
+  accept?: ('image' | 'document')[];
   context_format?: 'text' | 'spo';
-  capability?: BusinessTool;
   fallback?: boolean;
   memory_limit?: number;
   memory?: string;
@@ -296,7 +288,6 @@ export function parseDefinition(value: unknown): GraphDefinition {
       tools: list(n.tools ?? [], 20).map(id),
       branches,
       ...(n.context_format !== undefined ? { context_format: choice(n.context_format, ['text', 'spo'] as const) } : {}),
-      ...(n.capability ? { capability: choice(n.capability, businessTools) } : {}),
       ...(n.fallback !== undefined ? { fallback: n.fallback === true } : {}),
       collection: text(n.collection ?? '', 32),
       operation: choice(n.operation ?? 'search', toolOperations),
@@ -324,6 +315,9 @@ export function parseDefinition(value: unknown): GraphDefinition {
       ...(n.caption !== undefined ? { caption: text(n.caption, 1000) } : {}),
       ...(n.send_when !== undefined ? { send_when: choice(n.send_when, ['before', 'after'] as const) } : {}),
       ...(n.media_as !== undefined ? { media_as: choice(n.media_as, ['auto', 'image', 'document'] as const) } : {}),
+      ...(n.accept !== undefined
+        ? { accept: [...new Set(list(n.accept, 2).map(v => choice(v, ['image', 'document'] as const)))] }
+        : {}),
       ...(n.memory !== undefined ? { memory: n.memory === '' ? '' : id(n.memory) } : {}),
       ...(n.memory_limit !== undefined ? { memory_limit: Number(n.memory_limit) } : {}),
     };
@@ -385,7 +379,7 @@ function rule(v: unknown): ConditionRule | ConditionGroup {
   if (r.rules === undefined) return leaf(r);
   return { match: choice(r.match, ['all', 'any'] as const), rules: list(r.rules, 20).map(leaf) };
 }
-const recordLookup = (n: GraphNode) => n.type === 'tool' && !n.capability && ['search', 'get'].includes(n.operation);
+const recordLookup = (n: GraphNode) => n.type === 'tool' && ['search', 'get'].includes(n.operation);
 // Cari/Ambil dulu hanya punya port "next". Definisi lama tetap berjalan sama: kedua port baru menuju tujuan lama.
 export function normalizeRecordPorts(d: GraphDefinition): GraphDefinition {
   for (const n of d.nodes.filter(recordLookup)) {
@@ -431,6 +425,7 @@ export function ports(node: GraphNode): string[] {
   if (node.type === 'agent' && node.fallback) return ['next', 'fallback'];
   if (node.type === 'condition') return ['yes', 'no'];
   if (recordLookup(node)) return ['found', 'empty'];
+  if (node.type === 'receive') return ['received', 'none'];
   return ['next'];
 }
 export function validateGraph(d: GraphDefinition): GraphIssue[] {
@@ -460,6 +455,8 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
           add('Field pilihan ' + f.id + ' membutuhkan opsi.', n.id);
     }
     if (n.type === 'media' && !n.value.trim()) add('Isi file yang dikirim, misalnya variabel field File.', n.id);
+    if (n.type === 'receive' && !(n.accept ?? ['image', 'document']).length)
+      add('Pilih minimal satu jenis media yang diterima.', n.id);
     if (n.type === 'compute') {
       const steps = n.steps ?? [];
       if (!steps.length) add('Tambahkan minimal satu langkah.', n.id);
@@ -468,11 +465,10 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
     if (n.tier === 'decision' && n.type !== 'router') add('Tier Keputusan hanya untuk Router.', n.id);
     if (n.type === 'router' && n.branches.length < 2) add('Router membutuhkan minimal dua cabang.', n.id);
     if (n.context_format && n.type !== 'context') add('Format konteks hanya untuk node Context.', n.id);
-    if (n.capability && n.type !== 'tool') add('Operasi bisnis hanya untuk Tool.', n.id);
     if (n.fallback && n.type !== 'agent') add('Port fallback hanya untuk Agent.', n.id);
     const collection = d.collections.find(c => c.id === n.collection);
-    if (n.type === 'tool' && !n.capability && !collection) add('Pilih koleksi untuk node Data.', n.id);
-    if (n.type === 'tool' && !n.capability && collection) {
+    if (n.type === 'tool' && !collection) add('Pilih koleksi untuk node Data.', n.id);
+    if (n.type === 'tool' && collection) {
       for (const f of n.filters ?? [])
         if (!collection.fields.some(x => x.id === f.field))
           add('Field filter ' + f.field + ' tidak ada di koleksi ' + collection.name + '.', n.id);
@@ -531,7 +527,7 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
   for (const n of d.nodes) {
     if (n.type === 'condition' && (!conditionRules(n).length || conditionRules(n).some(r => !r.field.trim())))
       add('Isi nilai yang diperiksa pada setiap syarat Kondisi.', n.id);
-    if (n.type === 'tool' && !n.capability && ['create', 'update'].includes(n.operation)) {
+    if (n.type === 'tool' && ['create', 'update'].includes(n.operation)) {
       try {
         JSON.parse(n.value);
       } catch {
@@ -581,14 +577,13 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
               router: ['branch', 'fallback_terkait'],
               condition: ['matched'],
               context: ['context'],
-              tool: source.capability
-                ? ['knowledge', 'products', 'order', 'available', 'reason', 'product_name', 'image_id']
-                : recordOutputs[source.operation],
+              tool: recordOutputs[source.operation],
               output: [],
               fallback: [],
               extract: [...(source.fields ?? []).map(f => f.id), 'missing'],
               compute: (source.steps ?? []).map(s => s.name),
               media: ['files', 'count', 'skipped'],
+              receive: ['file', 'filename', 'type', 'mimetype', 'caption'],
             };
             if (!fields[source.type].includes(path[2])) add('Field keluaran ' + match[1] + ' tidak dikenal.', n.id);
           }
@@ -612,6 +607,8 @@ export const recordOutputs: Record<ToolOperation, string[]> = {
   update: ['id', 'data', 'revision', 'customer', 'deleted'],
   delete: ['id', 'deleted'],
 };
+// Runtime hanya meneruskan pesan gambar/dokumen ke profil yang grafnya punya node Terima media.
+export const receivesMedia = (d: GraphDefinition) => d.nodes.some(n => n.type === 'receive');
 export function assertRunnable(d: GraphDefinition) {
   const issues = validateGraph(d);
   if (issues.length) throw bad(issues.map(i => (i.node ? i.node + ': ' : '') + i.message).join('\n'));

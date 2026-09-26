@@ -123,8 +123,7 @@ async function loadFallbacks(
         );
       if (row.status === 'resolved') {
         actions.append(button('Ke Knowledge', () => fallbackKnowledge(base, row)));
-        if (aiTargetType() === 'cs' || profileType(aiTargetType())?.business_tools)
-          actions.append(button('Tambah produk', () => fallbackProduct(row)));
+        if (aiTargetType() === 'cs') actions.append(button('Tambah produk', () => fallbackProduct(row)));
       }
       actions.append(
         button('Hapus', async () => {

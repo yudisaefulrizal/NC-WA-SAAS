@@ -13,6 +13,7 @@ const kinds = {
   extract: ['⌗', 'Ekstrak', 'Ubah kalimat pelanggan menjadi isian terstruktur'],
   compute: ['∑', 'Set / Hitung', 'Olah nilai dengan aturan pasti, tanpa AI'],
   media: ['▣', 'Kirim media', 'Kirim gambar atau dokumen ke pelanggan'],
+  receive: ['⇩', 'Terima media', 'Simpan gambar atau dokumen dari pelanggan'],
 };
 // Node yang bisa membaca Shared Memory; sama dengan memoryConsumers di definition.ts.
 const memoryConsumers = ['router', 'agent', 'context', 'extract'];
@@ -80,7 +81,8 @@ function nodePorts(n) {
   if (n.type === 'router') return n.branches.map(b => b.id);
   if (n.type === 'agent' && n.fallback) return ['next', 'fallback'];
   if (n.type === 'condition') return ['yes', 'no'];
-  if (n.type === 'tool' && !n.capability && ['search', 'get'].includes(n.operation)) return ['found', 'empty'];
+  if (n.type === 'tool' && ['search', 'get'].includes(n.operation)) return ['found', 'empty'];
+  if (n.type === 'receive') return ['received', 'none'];
   return ['next'];
 }
 const portLabels = {
@@ -90,13 +92,15 @@ const portLabels = {
   found: 'Ditemukan',
   empty: 'Kosong',
   fallback: 'Fallback',
+  received: 'Diterima',
+  none: 'Tidak ada',
 };
 // Kelompok palet; urutan di sini urutan tampil.
 const paletteGroups = [
   ['Alur', ['input', 'router', 'condition', 'output', 'fallback']],
   ['AI', ['agent', 'extract', 'context']],
   ['Data', ['tool', 'compute', 'memory']],
-  ['Kirim', ['media']],
+  ['Media', ['receive', 'media']],
 ];
 function uid(prefix) {
   return prefix + '_' + crypto.randomUUID().replaceAll('-', '').slice(0, 8);
@@ -140,6 +144,7 @@ function newNode(type, x = 120, y = 140) {
       : {}),
     ...(type === 'compute' ? { steps: [{ name: 'hasil', op: 'value', args: ['{{input.message}}'] }] } : {}),
     ...(type === 'media' ? { value: '', caption: '', send_when: 'before', media_as: 'auto' } : {}),
+    ...(type === 'receive' ? { accept: ['image', 'document'] } : {}),
   };
 }
 async function loadLibrary() {
@@ -180,6 +185,7 @@ function applyProfile(p) {
   state.id = p.id;
   state.revision = p.revision;
   state.published = p.published_revision;
+  state.active = p.active;
   state.dirty = false;
   state.selected = null;
   state.undo = [];
@@ -191,7 +197,6 @@ function applyProfile(p) {
   $('chat').replaceChildren();
   $('trace').replaceChildren();
   $('samples').value = '{}';
-  $('business-samples').value = '{}';
   $('profile-name').value = p.draft.name;
   $('profile-description').value = p.draft.description;
   renderStatus();
@@ -241,6 +246,7 @@ async function save() {
     if (state.id !== id) return p;
     state.revision = p.revision;
     state.published = p.published_revision;
+    state.active = p.active;
     if (snapshot() === before) {
       state.document = p.draft;
       state.dirty = false;
@@ -312,6 +318,8 @@ $('publish').onclick = () =>
       return;
     const p = await api(base + '/' + state.id + '/publish', 'POST', { revision: state.revision });
     state.published = p.published_revision;
+    state.active = p.active;
+    renderCollections();
     renderStatus();
     notice('Profil diterbitkan. Aktifkan melalui Profil AI di dashboard.');
   }, $('publish'));
@@ -368,8 +376,7 @@ function renderCollections() {
     const card = el('section', undefined, 'collection'),
       head = el('div', undefined, 'collection-head');
     head.append(
-      field('ID koleksi', c.id, v => mutate(() => (c.id = v))),
-      field('Nama koleksi', c.name, v => mutate(() => (c.name = v))),
+      field('Nama koleksi', c.name, v => mutate(() => renameCollection(c, v))),
       btn(
         'Hapus',
         () => {
@@ -407,8 +414,7 @@ function renderCollections() {
     for (const f of c.fields) {
       const row = el('div', undefined, 'field-grid');
       row.append(
-        field('ID field', f.id, v => mutate(() => (f.id = v))),
-        field('Label', f.label, v => mutate(() => (f.label = v))),
+        field('Nama field', f.label, v => mutate(() => renameField(c, f, v))),
         field(
           'Tipe',
           f.type,
@@ -426,6 +432,21 @@ function renderCollections() {
           Object.entries(fieldTypeLabels).map(([value, label]) => ({ value, label })),
         ),
         field('Wajib', f.required, v => mutate(() => (f.required = v)), 'checkbox'),
+      );
+      // Satu baris per field: Nama, Tipe, Wajib, Unik, Opsi/Koleksi tujuan, Nilai bawaan, Hapus.
+      row.append(
+        uniqueFieldTypes.includes(f.type)
+          ? field(
+              'Unik',
+              Boolean(f.unique),
+              v =>
+                mutate(() => {
+                  if (v) f.unique = true;
+                  else delete f.unique;
+                }),
+              'checkbox',
+            )
+          : el('span'),
       );
       if (f.type === 'choice' || f.type === 'multichoice')
         row.append(
@@ -453,6 +474,7 @@ function renderCollections() {
           ),
         );
       else row.append(el('span'));
+      row.append(['relation', 'file'].includes(f.type) ? el('span') : defaultField(f));
       const remove = btn(
         '×',
         () => {
@@ -463,27 +485,17 @@ function renderCollections() {
       );
       remove.setAttribute('aria-label', 'Hapus field ' + f.label);
       row.append(remove);
-      if (uniqueFieldTypes.includes(f.type))
-        row.append(
-          field(
-            'Unik',
-            Boolean(f.unique),
-            v =>
-              mutate(() => {
-                if (v) f.unique = true;
-                else delete f.unique;
-              }),
-            'checkbox',
-          ),
-        );
-      if (!['relation', 'file'].includes(f.type)) row.append(defaultField(f));
       card.append(row);
     }
     card.append(
       btn('＋ Field', () => {
         mutate(() =>
           c.fields.push({
-            id: uid('field'),
+            id: slugId(
+              'Field baru',
+              c.fields.map(x => x.id),
+              'field',
+            ),
             label: 'Field baru',
             type: 'text',
             required: false,
@@ -496,6 +508,73 @@ function renderCollections() {
     );
     host.append(card);
   }
+}
+// ID koleksi dan field dibuat dari namanya dan tidak ditampilkan. Selama belum pernah diterbitkan, ID ikut nama;
+// setelah terbit ID dikunci karena record klien tersimpan memakai ID itu.
+function slugId(text, taken, fallback) {
+  let base = String(text)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 26);
+  if (!/^[a-z]/.test(base)) base = (fallback + '_' + base).replace(/_+$/, '').slice(0, 26);
+  if (['constructor', 'prototype', 'missing'].includes(base)) base = fallback + '_' + base;
+  let id = base;
+  for (let i = 2; taken.includes(id); i++) id = base + '_' + i;
+  return id;
+}
+const publishedCollection = id => state.active?.collections.find(c => c.id === id);
+// Mengganti path variabel di semua teks node, misalnya nodes.cari.first.data.nama menjadi ...data.nama_produk.
+function rewriteVariables(pattern, replace) {
+  const fix = v => (typeof v === 'string' ? v.replace(pattern, replace) : v);
+  for (const n of state.document.nodes) {
+    for (const key of ['prompt', 'value', 'query', 'compare', 'caption', 'field']) n[key] = fix(n[key]);
+    for (const f of n.filters ?? []) f.value = fix(f.value);
+    for (const r of n.rules ?? []) {
+      for (const x of r.rules ?? [r]) {
+        x.field = fix(x.field);
+        x.compare = fix(x.compare);
+      }
+    }
+    for (const s of n.steps ?? []) s.args = s.args.map(fix);
+  }
+}
+function renameCollection(c, name) {
+  c.name = name;
+  if (publishedCollection(c.id)) return;
+  const next = slugId(
+    name,
+    state.document.collections.filter(x => x !== c).map(x => x.id),
+    'koleksi',
+  );
+  if (next === c.id) return;
+  for (const n of state.document.nodes) if (n.collection === c.id) n.collection = next;
+  for (const x of state.document.collections) for (const f of x.fields) if (f.collection === c.id) f.collection = next;
+  c.id = next;
+}
+function renameField(c, f, label) {
+  f.label = label;
+  if (publishedCollection(c.id)?.fields.some(x => x.id === f.id)) return;
+  const next = slugId(
+    label,
+    c.fields.filter(x => x !== f).map(x => x.id),
+    'field',
+  );
+  if (next === f.id) return;
+  const tools = state.document.nodes.filter(n => n.type === 'tool' && n.collection === c.id);
+  for (const n of tools) {
+    for (const x of n.filters ?? []) if (x.field === f.id) x.field = next;
+    if (n.sort_field === f.id) n.sort_field = next;
+    if (n.sum_field === f.id) n.sum_field = next;
+  }
+  if (tools.length)
+    rewriteVariables(
+      new RegExp('(nodes\\.(?:' + tools.map(n => n.id).join('|') + ')\\.[\\w.]*?data\\.)' + f.id + '\\b', 'g'),
+      '$1' + next,
+    );
+  f.id = next;
 }
 // Nilai bawaan diisi saat record baru dibuat tanpa nilai; bentuk isiannya mengikuti tipe field.
 function defaultField(f) {
@@ -529,7 +608,16 @@ function defaultField(f) {
 }
 $('add-collection').onclick = () => {
   mutate(() =>
-    state.document.collections.push({ id: uid('collection'), name: 'Koleksi baru', owner: 'shared', fields: [] }),
+    state.document.collections.push({
+      id: slugId(
+        'Koleksi baru',
+        state.document.collections.map(c => c.id),
+        'koleksi',
+      ),
+      name: 'Koleksi baru',
+      owner: 'shared',
+      fields: [],
+    }),
   );
   renderCollections();
 };
@@ -568,8 +656,10 @@ async function runTest() {
         message,
         history: state.history,
         records,
-        business: JSON.parse($('business-samples').value || '{}'),
         context: state.context,
+        media: $('test-media-name').value.trim()
+          ? { filename: $('test-media-name').value.trim(), type: $('test-media-type').value }
+          : null,
       }),
       signal: controller.signal,
     });
@@ -612,7 +702,6 @@ async function runTest() {
             el('div', '▣ ' + m.filename + (m.caption ? ' — ' + m.caption : ''), 'bubble assistant media'),
           );
         $('samples').value = JSON.stringify(result.records, null, 2);
-        $('business-samples').value = JSON.stringify(result.business, null, 2);
         $('test-message').value = '';
       }
     };

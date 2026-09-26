@@ -3,7 +3,7 @@
 // menyalakan atau mematikan profil untuk semua klien sekaligus.
 import * as graphsSql from '../../data-access/graph-profiles-queries.js';
 import { findGraph, listGraphs } from '../builder/store.js';
-import { usesBusinessTools, type GraphDefinition } from '../builder/definition.js';
+import type { GraphDefinition } from '../builder/definition.js';
 import { db } from '../../../../libraries/db.js';
 import { ApiError } from '../../../../libraries/errors.js';
 import { record } from '../../../../libraries/validation.js';
@@ -76,12 +76,6 @@ export async function profileDefinition(id: unknown): Promise<ProfileDefinition>
   const d = graph.active ?? graph.draft;
   return graphProfile(id, d);
 }
-export async function supportsBusinessTools(id: string) {
-  if (id === 'cs') return true;
-  if (!id.startsWith('g_')) return false;
-  const graph = await findGraph(id);
-  return Boolean(graph && usesBusinessTools(graph.active ?? graph.draft));
-}
 function graphWorkflow(d: GraphDefinition) {
   return {
     graph: d,
@@ -94,7 +88,7 @@ function graphProfile(id: string, d: GraphDefinition): ProfileDefinition {
     name: d.name,
     description: d.description,
     nodeSummary: 'Graf dinamis',
-    tabs: usesBusinessTools(d) ? ['knowledge', 'orders', 'usage', 'trial'] : ['knowledge', 'usage', 'trial'],
+    tabs: ['knowledge', 'usage', 'trial'],
     pipeline: {
       ...csPipeline,
       system:
@@ -113,7 +107,6 @@ const summary = (definition: ProfileDefinition) => ({
   name: definition.name,
   description: definition.description,
   tabs: definition.tabs,
-  business_tools: definition.id === 'cs' || (definition.id.startsWith('g_') && definition.tabs.includes('orders')),
   nodes: nodeCount(definition),
   node_summary: definition.nodeSummary,
 });

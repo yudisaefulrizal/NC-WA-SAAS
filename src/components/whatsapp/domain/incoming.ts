@@ -17,6 +17,8 @@ export interface IncomingMessage {
   mimetype?: string;
   // Nama profil WhatsApp pengirim; hanya dibaca Asisten AI dan tidak ikut event/webhook.
   pushName?: string;
+  // Nama file dokumen dari pengirim; hanya dibaca Asisten AI dan tidak ikut event/webhook.
+  filename?: string;
   download?: () => Promise<Readable>;
 }
 function address(jid: string) {
@@ -64,6 +66,7 @@ export function parseIncoming(message: WAMessage): IncomingMessage | undefined {
         type,
         text: 'caption' in media ? (media.caption ?? '') : '',
         mimetype: media.mimetype ?? 'application/octet-stream',
+        ...('fileName' in media && media.fileName ? { filename: String(media.fileName).slice(0, 255) } : {}),
       };
   }
 }

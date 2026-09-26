@@ -99,7 +99,7 @@ export function createGateway(
             await result.applyLimit((await basicWallet(id)).session_limit);
           };
           result.onOutgoing = async (session, message) => {
-            const { download, pushName, ...data } = message;
+            const { download, pushName, filename, ...data } = message;
             events.push({ event: 'message', direction: 'outgoing', sessionId: session.id, ...data, media: null });
             // Gema kiriman API/AI/Auto Share sudah didaftarkan sebagai 'system' sebelum dikirim dan dicatat oleh onSent.
             if (!message.isGroup)
@@ -155,7 +155,7 @@ export function createGateway(
             await result.onBeforeSend!();
             if (result.detail(session.id).serviceActive === false) return;
             await history(recordIncoming(id, session.id, message));
-            const { download, pushName, ...data } = message;
+            const { download, pushName, filename, ...data } = message;
             const stored = await files.save(session.id, message);
             const event = { event: 'message', sessionId: session.id, direction: 'incoming', ...data, media: stored };
             events.push(event);

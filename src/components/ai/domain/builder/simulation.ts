@@ -9,7 +9,8 @@ import { parseDefinition, validateRecord, text, type Collection } from './defini
 import { keywords, queryMemory, sumMemory, filterGroup, type StoredRecord } from './record-query.js';
 import { runRecordTool, type RecordAdapter } from './record-tools.js';
 import { previewMedia } from './media.js';
-import { businessSimulation, simulationCustomer } from './business-simulation.js';
+// Nomor pelanggan tiruan untuk koleksi milik pelanggan di simulasi.
+export const simulationCustomer = '628000000001';
 import { runGraph } from './engine.js';
 import { transientAIError } from '../pipeline/retry.js';
 export async function simulate(
@@ -22,6 +23,21 @@ export async function simulate(
   const body = record(value),
     d = parseDefinition(body.definition),
     message = text(body.message, 4000);
+  // Lampiran contoh untuk node Terima media; tidak ada file sungguhan, nama file dipakai sebagai nilainya.
+  let incomingMedia;
+  if (body.media !== undefined && body.media !== null) {
+    const m = record(body.media);
+    const filename = text(m.filename, 255).trim();
+    if (!filename || !['image', 'document'].includes(String(m.type)))
+      throw new ApiError(400, 'invalid_request', 'Lampiran simulasi membutuhkan nama file dan jenis gambar/dokumen.');
+    incomingMedia = {
+      file: filename,
+      filename,
+      type: m.type as 'image' | 'document',
+      mimetype: m.type === 'image' ? 'image/jpeg' : 'application/octet-stream',
+      caption: message.trim(),
+    };
+  }
   const history: AIMessage[] = [];
   if (body.history !== undefined) {
     if (!Array.isArray(body.history) || body.history.length > 60)
@@ -54,7 +70,6 @@ export async function simulate(
         : { id: randomUUID(), data: validateRecord(c, ownerKey ? fields : r), revision: 1, ...owner };
     });
   }
-  const business = businessSimulation(body.business);
   const config = { ...(await ai.config()), signal, onTrace: emit };
   const wrapped: AITransport = async (c, m, max) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -90,15 +105,14 @@ export async function simulate(
       customer: simulationCustomer,
       customerName: 'Pelanggan simulasi',
       serviceName: 'Data profil simulasi',
+      incomingMedia,
       requestId: randomUUID(),
-      knowledge: business.knowledge,
-      pendingFallbacks: business.pending,
+      knowledge: '',
       fallbackEnabled: true,
     },
     typeof body.context === 'string' ? text(body.context, 200) : null,
     (n, v, key) => runRecordTool(memoryRecords(records), d, n, v, key),
     300,
-    business.tools,
     previewMedia,
   );
   emit({
@@ -108,8 +122,6 @@ export async function simulate(
       ...result,
       context: config.graph_context ?? null,
       records,
-      business: business.snapshot(),
-      images: business.images,
     },
   });
 }

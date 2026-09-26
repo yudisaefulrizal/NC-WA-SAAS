@@ -170,3 +170,58 @@ test('Three-file cap applies across nodes and simulation only lists media', asyn
     ],
   );
 });
+
+test('Terima media routes by attachment and accepted type, and simulation can store the sample file', async () => {
+  const d = blankDefinition();
+  d.collections = [
+    {
+      id: 'bukti',
+      name: 'Bukti',
+      owner: 'customer',
+      fields: [{ id: 'foto', label: 'Foto', type: 'file', required: true, options: [], collection: '' }],
+    },
+  ];
+  const base = d.nodes[2];
+  d.nodes = [
+    d.nodes[0],
+    { ...base, id: 'terima', type: 'receive', accept: ['image'], value: '' },
+    {
+      ...base,
+      id: 'simpan',
+      type: 'tool',
+      collection: 'bukti',
+      operation: 'create',
+      value: '{"data":{"foto":"{{nodes.terima.file}}"}}',
+    },
+    { ...base, id: 'ok', value: 'Diterima {{nodes.terima.filename}} ({{nodes.terima.caption}})' },
+    { ...base, id: 'minta', value: 'Kirim fotonya ya' },
+  ];
+  d.edges = [
+    { id: 'e1', source: 'input', port: 'next', target: 'terima' },
+    { id: 'e2', source: 'terima', port: 'received', target: 'simpan' },
+    { id: 'e3', source: 'terima', port: 'none', target: 'minta' },
+    { id: 'e4', source: 'simpan', port: 'next', target: 'ok' },
+  ];
+  assert.deepEqual(validateGraph(parseDefinition(d)), []);
+  assert.match(
+    validateGraph(parseDefinition({ ...d, nodes: d.nodes.map(n => (n.id === 'terima' ? { ...n, accept: [] } : n)) }))
+      .map(i => i.message)
+      .join(),
+    /minimal satu jenis/,
+  );
+  let output: any;
+  const emit = (e: any) => {
+    if (e.state === 'completed') output = e.output;
+  };
+  const sim = (body: Record<string, unknown>) =>
+    simulate(owner, { definition: d, ...body }, emit, new AbortController().signal, noModel);
+  await sim({ message: 'ini buktinya', media: { filename: 'transfer.jpg', type: 'image' } });
+  assert.equal(output.answer, 'Diterima transfer.jpg (ini buktinya)');
+  assert.deepEqual(output.records.bukti[0].data, { foto: 'transfer.jpg' });
+  await sim({ message: 'halo' });
+  assert.equal(output.answer, 'Kirim fotonya ya');
+  // Dokumen tidak termasuk jenis yang diterima node ini.
+  await sim({ message: 'ini PDF', media: { filename: 'transfer.pdf', type: 'document' } });
+  assert.equal(output.answer, 'Kirim fotonya ya');
+  await assert.rejects(sim({ message: 'x', media: { filename: '', type: 'image' } }), /Lampiran simulasi/);
+});

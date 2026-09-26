@@ -108,16 +108,9 @@
               >
 {}</textarea>
             </label>
-            <label
-              >Data contoh bisnis (JSON)<textarea
-                id="business-samples"
-                rows="6"
-                placeholder='{"knowledge":"Profil usaha uji","products":[],"orders":[],"pending":[]}'
-              >
-{}</textarea>
-            </label>
             <p class="hint">
-              Pelanggan simulasi: 628000000001. Foto hanya dipratinjau sebagai hasil tool; tidak dikirim ke WhatsApp.
+              Pelanggan simulasi: 628000000001; record contoh koleksi milik pelanggan tanpa "customer" dianggap
+              miliknya. Media hanya ditampilkan, tidak dikirim ke WhatsApp.
             </p>
             <div id="chat" aria-live="polite"></div>
             <form id="test-form">
@@ -129,6 +122,20 @@
                   placeholder="Tulis pesan pelanggan…"
                 ></textarea>
               </label>
+              <div class="attachment-row">
+                <label
+                  >Lampiran simulasi (opsional)<input
+                    id="test-media-name"
+                    maxlength="255"
+                    placeholder="Contoh: bukti-transfer.jpg"
+                /></label>
+                <label
+                  >Jenis<select id="test-media-type">
+                    <option value="image">Gambar</option>
+                    <option value="document">Dokumen</option>
+                  </select></label
+                >
+              </div>
               <div class="actions">
                 <button type="button" id="reset-test">Mulai ulang</button
                 ><button type="button" id="stop-test" hidden>Hentikan</button

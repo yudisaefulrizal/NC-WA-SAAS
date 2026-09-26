@@ -550,7 +550,7 @@ select:focus {
 }
 .field-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 130px 70px 1fr 40px;
+  grid-template-columns: minmax(0, 1.3fr) 150px 56px 56px minmax(0, 1fr) minmax(0, 1fr) 40px;
   gap: 10px;
   align-items: end;
   padding: 10px 0;
@@ -925,4 +925,9 @@ th {
 .bubble.media {
   border-style: dashed;
   font-weight: 600;
+}
+.attachment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  gap: 10px;
 }

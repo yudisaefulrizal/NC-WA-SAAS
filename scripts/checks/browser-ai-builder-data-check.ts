@@ -108,6 +108,16 @@ try {
     await inspector.getByRole('radio', { name: 'Dipanggil Agent' }).click();
     assert.equal(await inspector.getByLabel('Dipakai Layanan', { exact: true }).isChecked(), true);
     await inspector.getByRole('radio', { name: 'Di alur' }).click();
+    // ID field dibuat dari nama dan tidak ditampilkan; selama belum terbit, mengganti nama ikut mengganti rujukan filter.
+    await page.getByRole('button', { name: 'Struktur data', exact: true }).click();
+    assert.equal(await page.locator('#collections').getByLabel('ID field').count(), 0);
+    await page
+      .locator('#collections .collection')
+      .first()
+      .getByLabel('Nama field', { exact: true })
+      .first()
+      .fill('Nama Produk');
+    await page.getByRole('button', { name: 'Alur', exact: true }).click();
 
     // Kondisi: satu syarat jam dan satu grup "salah satu".
     await page.locator('#node-types').getByRole('button', { name: 'Kondisi', exact: true }).click();
@@ -123,8 +133,12 @@ try {
     await page.locator('#editor').waitFor();
     const exported = await context.request.get(origin + '/api/admin/ai/builder/' + id + '/export');
     const definition = await exported.json();
-    const dataNode = definition.nodes.find((n: any) => n.type === 'tool' && n.collection === 'produk' && n.filters);
-    assert.deepEqual(dataNode.filters, [{ field: 'nama', operator: 'contains', value: '{{input.message}}' }]);
+    const dataNode = definition.nodes.find(
+      (n: any) => n.type === 'tool' && n.collection === 'produk' && n.filters?.length,
+    );
+    assert.deepEqual(dataNode.filters, [{ field: 'nama_produk', operator: 'contains', value: '{{input.message}}' }]);
+    assert.equal(definition.collections[0].fields[0].id, 'nama_produk');
+    assert.equal(definition.collections.at(-1).id, 'booking');
     assert.equal(dataNode.limit, 5);
     assert.equal(dataNode.operation, 'search');
     assert.equal(dataNode.sum_field, 'biaya');

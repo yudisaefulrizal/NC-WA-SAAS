@@ -20,8 +20,10 @@ import { text } from './input-validation.js';
 import { countWords, aiFallback, creditCost } from './metering.js';
 import { profileFields, ProfileField, composeKnowledge } from './profiles/cs/knowledge.js';
 import { transaction, lockAccount } from './transaction.js';
-import { recordFilePath } from './builder/record-files.js';
 import type { QueuedMedia } from './builder/media.js';
+import { recordFilePath, uploadRecordFile, recordFileLimits } from './builder/record-files.js';
+import { receivesMedia } from './builder/definition.js';
+import type { ToolContext } from './pipeline/runner.js';
 import { parseMemory } from './memory.js';
 import type { AIService } from './service.js';
 import * as conversations from './conversations.js';
@@ -40,14 +42,23 @@ export function incoming(
   session: string,
   message: IncomingMessage,
 ) {
-  if (message.isGroup || message.type !== 'text' || !message.text.trim() || !/^\d{5,20}$/.test(message.from))
+  // Teks selalu diproses; gambar dan dokumen hanya untuk profil dinamis yang punya node Terima media (dicek nanti).
+  if (
+    message.isGroup ||
+    !/^\d{5,20}$/.test(message.from) ||
+    (message.type === 'text' ? !message.text.trim() : !['image', 'document'].includes(message.type))
+  )
     return Promise.resolve();
   const key = JSON.stringify([account, session, message.from]);
   if (svc.queued >= 128) return Promise.resolve();
   svc.queued++;
   const task = (svc.queues.get(key) ?? Promise.resolve())
     .then(async () => {
-      if (!(await conversations.handleFallbackReply(svc, account, manager, session, message)))
+      // Balasan tim untuk tiket fallback selalu berupa teks.
+      if (
+        message.type !== 'text' ||
+        !(await conversations.handleFallbackReply(svc, account, manager, session, message))
+      )
         await handleMessage(svc, account, manager, session, message);
     })
     .catch(() => {
@@ -88,6 +99,14 @@ export async function handleMessage(
     type = assistant.data_profile?.profile_type ?? '',
     pipeline = type ? (await profileDefinition(type)).pipeline : undefined;
   if (!assistant.enabled || !pipeline || !assistant.profile_enabled) return;
+  let incomingMedia: ToolContext['incomingMedia'];
+  const attachment = message.type === 'text' ? undefined : message;
+  if (attachment) {
+    const workflow = type.startsWith('g_') ? ((await activeWorkflow(type)) as AgentWorkflow) : undefined;
+    if (!workflow?.graph || !receivesMedia(workflow.graph)) return;
+    // Memori dan input alur memakai penanda lampiran ditambah keterangannya.
+    message = { ...message, text: mediaText(message) };
+  }
   manager.connected(session);
   if ((await basicWallet(account)).balance < 1) return;
   const id = digest(JSON.stringify([session, message.from, message.messageId]));
@@ -99,7 +118,7 @@ export async function handleMessage(
     if (!current[0]?.enabled) return;
     // Knowledge CS diambil sekali di sini; tool pendidikan membaca data profil saat dijalankan.
     const knowledge =
-      type === 'cs' || type.startsWith('g_')
+      type === 'cs'
         ? composeKnowledge(
             Object.fromEntries(
               profileFields.map(field => [field, String(current[0]['profil_' + field] ?? '')]),
@@ -166,6 +185,8 @@ export async function handleMessage(
     };
   });
   if (!prepared) return;
+  // Lampiran baru diunduh setelah pesan pasti diproses (tidak dijeda, kredit cukup).
+  if (attachment) incomingMedia = await storeIncoming(account, prepared.profileId, attachment);
   config.workflow = (await activeWorkflow(type)) as AgentWorkflow;
   const jid = message.from + '@s.whatsapp.net';
   // Urutan yang dilihat pelanggan: jeda singkat, centang biru, lalu "mengetik..." selama jawaban dibuat.
@@ -300,6 +321,7 @@ export async function handleMessage(
           session,
           customer: message.from,
           customerName: message.pushName ?? '',
+          incomingMedia,
           serviceName: prepared.serviceName,
           requestId: id,
           knowledge: prepared.knowledge,
@@ -641,5 +663,40 @@ export async function handleMessage(
     });
   } finally {
     await stopTyping();
+  }
+}
+
+function mediaText(message: IncomingMessage) {
+  const label = message.type === 'image' ? '[Gambar]' : '[Dokumen: ' + (message.filename ?? 'file') + ']';
+  return (label + ' ' + message.text.trim()).trim();
+}
+// Lampiran disimpan sebagai file data profil (belum terikat record). Lampiran yang terlalu besar atau jenisnya tidak
+// didukung dianggap tidak ada, sehingga alur masuk ke port "Tidak ada".
+async function storeIncoming(account: string, profile: string, message: IncomingMessage) {
+  if (!message.download) return undefined;
+  try {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of await message.download()) {
+      size += chunk.length;
+      if (size > recordFileLimits.documentBytes) return undefined;
+      chunks.push(chunk);
+    }
+    const extension =
+      { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }[message.mimetype ?? ''] ?? '';
+    const name =
+      message.filename ??
+      (message.type === 'image' ? 'gambar-' + message.messageId.slice(0, 8) + extension : 'dokumen');
+    const file = await uploadRecordFile(account, profile, name, Buffer.concat(chunks));
+    return {
+      file: file.id,
+      filename: file.filename,
+      type: file.media_type,
+      mimetype: file.mimetype,
+      caption: message.text.trim(),
+    };
+  } catch {
+    console.error('Lampiran pelanggan tidak dapat disimpan.');
+    return undefined;
   }
 }

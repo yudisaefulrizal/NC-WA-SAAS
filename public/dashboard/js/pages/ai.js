@@ -30,12 +30,10 @@ const knowledgeTabNames = [
 ];
 // Bagian Knowledge berbeda per profil: CS Usaha punya bidang usaha dan produk, CS Lembaga Pendidikan punya profil
 // lembaga; Perilaku AI, FAQ, dan Fallback Tim dimiliki keduanya. Tester AI hanya punya Peran pelanggan, yang disimpan
-// di bidang Perilaku AI.
+// di bidang Perilaku AI. Profil dinamis menyimpan isinya di koleksi, dikelola di halaman data koleksi.
 const knowledgeTabsFor = type =>
   type?.startsWith('g_')
-    ? profileType(type)?.business_tools
-      ? ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'records', 'fallback']
-      : ['behavior', 'records', 'fallback']
+    ? ['behavior', 'records', 'fallback']
     : type === 'tester'
       ? ['behavior']
       : type === 'pendidikan'
@@ -260,10 +258,6 @@ $('ai-manage-back').onclick = () => {
   run(loadDataProfiles);
 };
 function manageProfile(profile, tab = 'knowledge') {
-  if (profile.profile_type.startsWith('g_') && !profileType(profile.profile_type)?.business_tools) {
-    location.href = '/dashboard/ai-data?profile=' + encodeURIComponent(profile.id);
-    return;
-  }
   aiManaged = profile;
   renderAIView();
   aiTab(tab);

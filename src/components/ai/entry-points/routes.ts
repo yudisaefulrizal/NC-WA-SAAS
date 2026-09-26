@@ -1,7 +1,6 @@
 // Rute HTTP Asisten AI di router gateway: pengaturan per sesi, data profil dan isinya (produk dan pesanan CS;
 // program, kontak, dan dokumen CS Lembaga Pendidikan), tiket fallback, dan tampilan Percakapan. Router sudah
 // terautentikasi: res.locals berisi accountId dan SessionManager akun itu.
-import { supportsBusinessTools } from '../domain/profiles/registry.js';
 import express from 'express';
 import { Readable } from 'node:stream';
 import { ApiError } from '../../../libraries/errors.js';
@@ -51,8 +50,8 @@ export function aiRoutes(
     // Produk dan pesanan adalah data CS Usaha; data profil milik profil lain tidak pernah menerimanya.
     const cs = async (res: express.Response, profile: string | null) => {
       const id = required(profile);
-      if (!(await supportsBusinessTools(await ai.profileType(res.locals.accountId, id))))
-        throw new ApiError(409, 'profile_mismatch', 'Profil ini belum memakai Tool bisnis produk/pesanan.');
+      if ((await ai.profileType(res.locals.accountId, id)) !== 'cs')
+        throw new ApiError(409, 'profile_mismatch', 'Produk dan pesanan hanya untuk profil CS Usaha.');
       return id;
     };
     router.get(base + '/products', async (req, res) => {

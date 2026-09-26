@@ -76,6 +76,7 @@ function renderInspector() {
   if (n.type === 'extract') renderExtract(host, n);
   if (n.type === 'compute') renderCompute(host, n);
   if (n.type === 'media') renderMedia(host, n);
+  if (n.type === 'receive') renderReceive(host, n);
   if (n.type === 'context')
     host.append(
       field('Format konteks', n.context_format || 'text', v => mutate(() => (n.context_format = v)), 'select', [
@@ -186,52 +187,7 @@ function renderInspector() {
       );
   }
   if (n.type === 'condition') renderRules(host, n);
-  if (n.type === 'tool') {
-    host.append(
-      field(
-        'Jenis',
-        n.capability || '',
-        v => {
-          mutate(() => {
-            if (v) n.capability = v;
-            else delete n.capability;
-            if (v === 'create_order') n.tier = 'structured';
-          });
-          renderInspector();
-        },
-        'select',
-        [
-          { value: '', label: 'Data koleksi' },
-          { value: 'get_knowledge', label: 'Bisnis: baca profil usaha' },
-          { value: 'get_products', label: 'Bisnis: cari produk katalog' },
-          { value: 'check_order', label: 'Bisnis: periksa pesanan pelanggan' },
-          { value: 'create_order', label: 'Bisnis: buat pesanan tervalidasi' },
-          { value: 'send_product_image', label: 'Bisnis: kirim foto produk' },
-        ],
-      ),
-    );
-    if (n.capability) {
-      host.append(
-        edit('query', 'Parameter / variabel (diisi Agent bila dipanggil)'),
-        el(
-          'p',
-          'Data bisnis dikelola per Data Profil melalui menu usaha, produk, dan pesanan. Identitas pelanggan berasal dari sesi. Sandbox memakai data contoh bisnis.',
-          'hint',
-        ),
-      );
-      if (n.capability === 'create_order')
-        host.append(
-          edit('tier', 'Tier ekstraksi Pesanan', 'select', [
-            { value: 'cheap', label: 'Murah' },
-            { value: 'medium', label: 'Sedang' },
-            { value: 'smart', label: 'Cerdas' },
-            { value: 'structured', label: 'Terstruktur' },
-          ]),
-          edit('model', 'Model ekstraksi (opsional)'),
-          edit('prompt', 'Instruksi ekstraksi (kosong untuk bawaan)', 'textarea'),
-        );
-    } else renderRecordTool(host, n);
-  }
+  if (n.type === 'tool') renderRecordTool(host, n);
   if (['output', 'fallback'].includes(n.type))
     host.append(edit('value', n.type === 'output' ? 'Jawaban / variabel hasil' : 'Pesan untuk petugas', 'textarea'));
   if (n.type === 'input')
@@ -282,28 +238,22 @@ function renderInspector() {
           x.id !== n.id &&
           (x.type === 'memory'
             ? x.id === n.memory
-            : ['agent', 'context', 'router', 'tool', 'extract', 'compute', 'media'].includes(x.type)),
+            : ['agent', 'context', 'router', 'tool', 'extract', 'compute', 'media', 'receive'].includes(x.type)),
       )
       .flatMap(x =>
         (x.type === 'memory'
           ? ['history', 'context']
           : x.type === 'tool'
-            ? x.capability
-              ? {
-                  get_knowledge: ['knowledge'],
-                  get_products: ['products'],
-                  check_order: ['order'],
-                  create_order: ['order'],
-                  send_product_image: ['available', 'product_name', 'image_id'],
-                }[x.capability]
-              : recordOutputs(x)
+            ? recordOutputs(x)
             : x.type === 'extract'
               ? [...(x.fields ?? []).map(f => f.id), 'missing']
               : x.type === 'compute'
                 ? (x.steps ?? []).map(step => step.name)
                 : x.type === 'media'
                   ? ['files', 'count', 'skipped']
-                  : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]]
+                  : x.type === 'receive'
+                    ? ['file', 'filename', 'type', 'mimetype', 'caption']
+                    : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]]
         ).map(key => 'nodes.' + x.id + '.' + key),
       ),
   ])
@@ -703,8 +653,16 @@ function renderExtract(host, n) {
   n.fields.forEach((f, i) => {
     const box = el('div', undefined, 'rule');
     box.append(
-      field('ID field', f.id, v => mutate(() => (f.id = v))),
-      field('Label', f.label, v => mutate(() => (f.label = v))),
+      field('Nama field', f.label, v =>
+        mutate(() => {
+          // ID keluaran Ekstrak mengikuti nama; rujukan {{nodes.<node>.<id>}} di node lain ikut diganti.
+          f.label = v;
+          const next = slugId(v, ['missing', ...n.fields.filter(x => x !== f).map(x => x.id)], 'field');
+          if (next === f.id) return;
+          rewriteVariables(new RegExp('(nodes\\.' + n.id + '\\.)' + f.id + '\\b', 'g'), '$1' + next);
+          f.id = next;
+        }),
+      ),
       field(
         'Tipe',
         f.type,
@@ -745,7 +703,7 @@ function renderExtract(host, n) {
     btn('＋ Field', () => {
       mutate(() =>
         n.fields.push({
-          id: 'field_' + (n.fields.length + 1),
+          id: slugId('Field baru', ['missing', ...n.fields.map(x => x.id)], 'field'),
           label: 'Field baru',
           type: 'text',
           required: false,
@@ -867,6 +825,36 @@ function renderMedia(host, n) {
     el(
       'p',
       'Dikirim setelah alur selesai dan tidak dikirim bila percakapan diteruskan ke tim. Maksimal 3 file per balasan, 1 kredit WhatsApp per file. Simulasi dan Uji Coba hanya menampilkan daftarnya.',
+      'hint',
+    ),
+  );
+}
+function renderReceive(host, n) {
+  n.accept ??= ['image', 'document'];
+  host.append(el('h3', 'Jenis yang diterima'));
+  for (const [type, label] of [
+    ['image', 'Gambar (JPG, PNG, WebP; maks. 5 MB)'],
+    ['document', 'Dokumen (PDF, Word, Excel, PowerPoint; maks. 10 MB)'],
+  ])
+    host.append(
+      field(
+        label,
+        n.accept.includes(type),
+        v => mutate(() => (n.accept = v ? [...new Set([...n.accept, type])] : n.accept.filter(t => t !== type))),
+        'checkbox',
+      ),
+    );
+  host.append(
+    el(
+      'p',
+      'Lampiran pelanggan disimpan sebagai file data profil dan keluar lewat Diterima; pesan tanpa lampiran atau jenis lain lewat Tidak ada. Simpan ke record dengan node Data, misalnya {"data":{"bukti":"{{nodes.' +
+        n.id +
+        '.file}}"}}. File yang tidak dipakai record dibersihkan setelah sehari.',
+      'hint',
+    ),
+    el(
+      'p',
+      'Pesan gambar/dokumen hanya diproses profil yang punya node ini. Isi gambar tidak dibaca AI; keterangan foto tersedia di caption dan input.message.',
       'hint',
     ),
   );

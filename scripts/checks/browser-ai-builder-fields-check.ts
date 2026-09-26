@@ -1,4 +1,4 @@
-// Pemeriksaan browser Tahap 2–3 pada 1280/390 px: node Ekstrak, Set / Hitung, dan Kirim media, tipe field baru dengan nilai bawaan dan
+// Pemeriksaan browser Tahap 2–4 pada 1280/390 px: node Ekstrak, Set / Hitung, Terima media, dan Kirim media, tipe field baru dengan nilai bawaan dan
 // unik, simpan-buka ulang, serta formulir record klien (jam, tanggal-jam, pilihan ganda, telepon, unggah file).
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
@@ -99,13 +99,13 @@ try {
     const produk = page.locator('#collections .collection').first();
     await produk.getByRole('button', { name: '＋ Field' }).click();
     const added = produk.locator('.field-grid').last();
-    await added.getByLabel('ID field', { exact: true }).fill('kategori');
+    await added.getByLabel('Nama field', { exact: true }).fill('Kategori');
     await added.getByLabel('Tipe', { exact: true }).selectOption('multichoice');
     await produk.locator('.field-grid').last().getByLabel('Opsi (pisahkan koma)').fill('Reguler, Promo');
     await produk.locator('.field-grid').last().getByLabel('Nilai bawaan (pisahkan koma)').fill('Reguler');
     await produk.getByRole('button', { name: '＋ Field' }).click();
     const phone = produk.locator('.field-grid').last();
-    await phone.getByLabel('ID field', { exact: true }).fill('kontak');
+    await phone.getByLabel('Nama field', { exact: true }).fill('Kontak');
     await phone.getByLabel('Tipe', { exact: true }).selectOption('phone');
     await produk.locator('.field-grid').last().getByLabel('Unik', { exact: true }).check();
 
@@ -132,6 +132,9 @@ try {
     await inspector.getByLabel('Keterangan (opsional)', { exact: true }).fill('Brosur terbaru');
     await inspector.getByLabel('Waktu kirim', { exact: true }).selectOption('after');
     await inspector.getByLabel('Kirim sebagai', { exact: true }).selectOption('document');
+    // Terima media: hanya gambar.
+    await page.locator('#node-types').getByRole('button', { name: 'Terima media', exact: true }).click();
+    await inspector.getByLabel(/^Dokumen \(PDF/).uncheck();
     await page.locator('#save').click();
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.reload();
@@ -151,6 +154,7 @@ try {
     const computeNode = definition.nodes.find((n: any) => n.type === 'compute');
     assert.deepEqual(computeNode.steps[0], { name: 'total', op: 'multiply', args: ['150000', '2'] });
     assert.equal(computeNode.steps[1].op, 'format_rupiah');
+    assert.deepEqual(definition.nodes.find((n: any) => n.type === 'receive').accept, ['image']);
     const media = definition.nodes.find((n: any) => n.type === 'media');
     assert.deepEqual(
       [media.value, media.caption, media.send_when, media.media_as],
@@ -202,7 +206,7 @@ try {
     await context.close();
   }
   console.log(
-    'Tahap 2–3: Ekstrak, Set / Hitung, Kirim media, tipe field baru, nilai bawaan, unik, dan unggah file lulus pada 1280 dan 390px.',
+    'Tahap 2–4: Ekstrak, Set / Hitung, Terima media, Kirim media, tipe field baru, nilai bawaan, unik, dan unggah file lulus pada 1280 dan 390px.',
   );
 } finally {
   await browser?.close();

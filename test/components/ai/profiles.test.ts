@@ -14,6 +14,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { Readable } from 'node:stream';
 import { createGateway } from '../../../src/http/gateway.js';
 import { type Update } from '../../../src/components/whatsapp/domain/sessions.js';
 import { ApiError } from '../../../src/libraries/errors.js';
@@ -584,5 +585,112 @@ test('Kirim media sends a collection file before the text answer and skips it wh
   assert.equal(sentNow[1].content.text, 'Ini fotonya');
   const ai = (await chatMessages(t.id, 'shop', customer)).messages.filter(m => m.origin === 'ai');
   assert.ok(ai.some(m => m.type === 'image' && m.text === 'Kopi Susu'));
+  await rm(join(storagePaths().recordFiles, t.id), { recursive: true, force: true });
+});
+
+test('Terima media stores a customer image into a record; profiles without the node ignore images', async () => {
+  const t = await tenant(['shop', 'lain']);
+  const d = blankDefinition('Graph terima');
+  d.collections = [
+    {
+      id: 'bukti',
+      name: 'Bukti',
+      owner: 'customer',
+      fields: [
+        { id: 'foto', label: 'Foto', type: 'file', required: true, options: [], collection: '' },
+        { id: 'catatan', label: 'Catatan', type: 'text', required: false, options: [], collection: '' },
+      ],
+    },
+  ];
+  const base = d.nodes[2];
+  d.nodes = [
+    d.nodes[0],
+    { ...base, id: 'terima', type: 'receive', accept: ['image'], value: '' },
+    {
+      ...base,
+      id: 'simpan',
+      type: 'tool',
+      collection: 'bukti',
+      operation: 'create',
+      value: '{"data":{"foto":"{{nodes.terima.file}}","catatan":"{{nodes.terima.caption}}"}}',
+    },
+    { ...base, id: 'ok', value: 'Bukti diterima' },
+    { ...base, id: 'minta', value: 'Silakan kirim foto bukti' },
+  ];
+  d.edges = [
+    { id: 'e1', source: 'input', port: 'next', target: 'terima' },
+    { id: 'e2', source: 'terima', port: 'received', target: 'simpan' },
+    { id: 'e3', source: 'terima', port: 'none', target: 'minta' },
+    { id: 'e4', source: 'simpan', port: 'next', target: 'ok' },
+  ];
+  const g = await createGraph(owner, d);
+  graphs.push(g.id);
+  await saveGraph(owner, g.id, { revision: 1 }, true);
+  await setProfileEnabled(owner, g.id, true);
+  const p = await service.createDataProfile(t.id, { profile_type: g.id, name: 'Graf terima' });
+  await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: p.id, enabled: true }).expect(200);
+  // Sesi lain memakai profil tanpa node Terima media: gambar diabaikan.
+  const plain = blankDefinition('Graph tanpa terima');
+  plain.nodes = plain.nodes.filter(n => n.type !== 'agent');
+  plain.nodes[1].value = 'Teks saja';
+  plain.edges = [{ id: 'e1', source: 'input', port: 'next', target: 'output' }];
+  const other = await createGraph(owner, plain);
+  graphs.push(other.id);
+  await saveGraph(owner, other.id, { revision: 1 }, true);
+  await setProfileEnabled(owner, other.id, true);
+  const q = await service.createDataProfile(t.id, { profile_type: other.id, name: 'Graf teks' });
+  await t.api('put', '/sessions/lain/ai/profile').send({ data_profile_id: q.id, enabled: true }).expect(200);
+
+  const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#00a' } })
+    .png()
+    .toBuffer();
+  const image = (session: string, messageId: string) =>
+    updates.get(t.id + '/' + session)!({
+      incoming: {
+        messageId,
+        text: 'transfer BCA',
+        from: customer,
+        sender: customer,
+        isGroup: false,
+        groupId: null,
+        type: 'image',
+        mimetype: 'image/png',
+        timestamp: 1,
+        download: async () => Readable.from([png]),
+      },
+    });
+  image('lain', 'IMG0');
+  t.send('lain', 'TXT0', 'Halo');
+  await eventually(
+    () => answers(t.id, 'lain'),
+    n => n === 1,
+  );
+  assert.equal(await answers(t.id, 'lain'), 1);
+
+  t.send('shop', 'TXT1', 'Sudah transfer');
+  await eventually(
+    () => answers(t.id, 'shop'),
+    n => n === 1,
+  );
+  image('shop', 'IMG1');
+  await eventually(
+    () => answers(t.id, 'shop'),
+    n => n === 2,
+  );
+  const texts = (await chatMessages(t.id, 'shop', customer)).messages.filter(m => m.origin === 'ai').map(m => m.text);
+  assert.deepEqual(texts, ['Silakan kirim foto bukti', 'Bukti diterima']);
+  const [saved] = (await recordStore.readRecords(t.id, p.id, 'bukti')).records;
+  assert.equal(saved.customer, customer);
+  assert.equal(saved.data.catatan, 'transfer BCA');
+  const listed = await recordStore.readRecords(t.id, p.id, 'bukti');
+  assert.equal(listed.files[String(saved.data.foto)].mimetype, 'image/png');
+  const [mem] = (
+    await db.execute<any[]>(
+      'SELECT messages FROM ai_conversations WHERE account_id=? AND session_id=? AND customer=?',
+      [t.id, 'shop', customer],
+    )
+  )[0];
+  const history = typeof mem.messages === 'string' ? JSON.parse(mem.messages) : mem.messages;
+  assert.ok(history.some((m: any) => m.role === 'user' && m.content === '[Gambar] transfer BCA'));
   await rm(join(storagePaths().recordFiles, t.id), { recursive: true, force: true });
 });

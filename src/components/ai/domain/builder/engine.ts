@@ -5,9 +5,7 @@ import { validatedAI } from '../pipeline/retry.js';
 import type { AIConfig, AITransport, AIMessage } from '../provider.js';
 import { tierConfig } from '../pipeline/models.js';
 import { isJevModel } from '../pipeline/jev-router.js';
-import { executeBusinessTool, businessDescriptions } from './business-tools.js';
-import { aiData } from '../profiles/cs/store.js';
-import type { AITools, ToolContext } from '../pipeline/runner.js';
+import type { ToolContext } from '../pipeline/runner.js';
 import { assertRunnable, type GraphDefinition, type GraphNode } from './definition.js';
 import { queryRecords, countCollection, getRecord, writeRecord } from './store.js';
 import { conditionMatches, systemVariables } from './conditions.js';
@@ -95,7 +93,6 @@ export async function runGraph(
   previousContext: string | null,
   toolOverride?: GraphTool,
   maxWords = 300,
-  business: AITools = aiData,
   resolveMedia: MediaResolver = databaseMedia(scope),
 ) {
   const media: QueuedMedia[] = [];
@@ -165,17 +162,13 @@ export async function runGraph(
       createHash('sha256')
         .update(JSON.stringify(canonical(value)) ?? 'null')
         .digest('hex');
-    const mutating = n.capability
-      ? ['create_order', 'send_product_image'].includes(n.capability)
-      : ['create', 'update', 'delete'].includes(n.operation);
+    const mutating = ['create', 'update', 'delete'].includes(n.operation);
     if (mutating && mutations.has(key)) return mutations.get(key);
     // Nilai filter boleh berisi variabel, misalnya tanggal hasil Ekstrak atau system.today.
     const configured = n.filters?.length
       ? { ...n, filters: n.filters.map(f => ({ ...f, value: String(interpolate(f.value, state) ?? '') })) }
       : n;
-    const result = n.capability
-      ? await executeBusinessTool(n, value, scope, business, counted, config)
-      : await executeTool(configured, value, key);
+    const result = await executeTool(configured, value, key);
     if (mutating && !(result as { error?: unknown })?.error) mutations.set(key, result);
     return result;
   };
@@ -351,12 +344,9 @@ export async function runGraph(
         port = yes ? 'yes' : 'no';
         result = { matched: yes };
       } else if (n.type === 'tool') {
-        const value = interpolate(
-          n.capability || !['create', 'update'].includes(n.operation) ? n.query : JSON.parse(n.value),
-          state,
-        );
+        const value = interpolate(['create', 'update'].includes(n.operation) ? JSON.parse(n.value) : n.query, state);
         result = await tool(n, value, scope.requestId + ':' + n.id);
-        if (!n.capability && ['search', 'get'].includes(n.operation))
+        if (['search', 'get'].includes(n.operation))
           port = Number((result as { count?: number }).count) > 0 ? 'found' : 'empty';
       } else if (n.type === 'agent') {
         agent = n.id;
@@ -372,8 +362,8 @@ export async function runGraph(
                 tools.map(t => ({
                   id: t.id,
                   label: t.label,
-                  operation: t.capability || t.operation,
-                  ...(t.capability ? { description: businessDescriptions[t.capability] } : recordToolGuide(d, t)),
+                  operation: t.operation,
+                  ...recordToolGuide(d, t),
                 })),
               ) +
               (n.fallback && scope.fallbackEnabled
@@ -464,6 +454,13 @@ export async function runGraph(
           files.push({ name: item.filename, type: item.type });
         }
         result = { files, count: files.length, skipped };
+      } else if (n.type === 'receive') {
+        const incoming = scope.incomingMedia;
+        const accepted = incoming && (n.accept ?? ['image', 'document']).includes(incoming.type);
+        port = accepted ? 'received' : 'none';
+        result = accepted
+          ? { ...incoming }
+          : { file: null, filename: null, type: null, mimetype: null, caption: incoming?.caption ?? null };
       } else if (n.type === 'context') {
         const selected = {
           ...tierConfig(config, n.tier),

@@ -1,5 +1,4 @@
 // Data profil (isi milik klien untuk satu profil) dan data profil mana yang dijalankan setiap sesi: membuat,
-import { supportsBusinessTools } from './profiles/registry.js';
 // menggandakan, mengganti nama, menghapus, memasang ke sesi, dan menyimpan bidang-bidangnya.
 import { copyGraphRecords, requireAvailableGraph } from './builder/store.js';
 import { profileFiles, removeRecordFiles } from './builder/record-files.js';
@@ -129,7 +128,7 @@ export function profileView(svc: AIService, row: RowDataPacket) {
   ) as Record<ProfileField, string>;
   return {
     profile,
-    knowledge: row.profile_type === 'cs' || String(row.profile_type).startsWith('g_') ? composeKnowledge(profile) : '',
+    knowledge: row.profile_type === 'cs' ? composeKnowledge(profile) : '',
     behavior: String(row.behavior ?? ''),
     fallback_number: String(row.fallback_number ?? ''),
     fallback_notify: Boolean(row.fallback_notify),
@@ -351,7 +350,7 @@ export async function saveProfileField(
       return;
     }
   }
-  if ((await supportsBusinessTools(type)) && profileFields.includes(field as ProfileField)) {
+  if (type === 'cs' && profileFields.includes(field as ProfileField)) {
     await dataProfilesSql.updateProfileField(
       db,
       [text(value, 2000, profileLabels[field as ProfileField]), profile, account],
@@ -382,7 +381,7 @@ export async function saveProfileField(
     ]);
     return;
   }
-  if ((await supportsBusinessTools(type)) && (field === 'products_source' || field === 'orders_source')) {
+  if (type === 'cs' && (field === 'products_source' || field === 'orders_source')) {
     const kind = field === 'products_source' ? 'products' : 'orders';
     const input = await sourceInput(value);
     await transaction(async c => {

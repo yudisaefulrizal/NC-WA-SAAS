@@ -1,9 +1,7 @@
 // Template awal memakai format yang sama dengan profil kosong dan berkas impor.
-import { csTemplate } from './cs-template.js';
 import { blankDefinition, type Collection, type GraphDefinition, type GraphNode } from './definition.js';
 export function templates(): { id: string; definition: GraphDefinition }[] {
-  return ['catalog', 'pendidikan', 'tester', 'cs'].map(id => {
-    if (id === 'cs') return { id, definition: csTemplate() };
+  return ['catalog', 'pendidikan', 'tester'].map(id => {
     const d = blankDefinition(
       id === 'catalog' ? 'Katalog sederhana' : id === 'pendidikan' ? 'CS Pendidikan' : 'Tester AI',
     );

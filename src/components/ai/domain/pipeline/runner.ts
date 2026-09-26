@@ -28,6 +28,14 @@ export interface ToolContext {
   // Nama WhatsApp pelanggan dan nama data profil, untuk variabel customer.name dan service.name profil dinamis.
   readonly customerName?: string;
   readonly serviceName?: string;
+  // Lampiran pelanggan yang sudah disimpan sebagai file data profil, untuk node Terima media.
+  readonly incomingMedia?: {
+    readonly file: string;
+    readonly filename: string;
+    readonly type: 'image' | 'document';
+    readonly mimetype: string;
+    readonly caption: string;
+  };
   readonly requestId: string;
   readonly knowledge: string;
   readonly behavior?: string;
@@ -89,17 +97,7 @@ export async function runAgents(
   pipeline: Pipeline = csPipeline,
 ) {
   if (config.workflow?.graph)
-    return runGraph(
-      config.workflow.graph,
-      transport,
-      config,
-      messages,
-      context,
-      routerContext,
-      undefined,
-      maxWords,
-      tools,
-    );
+    return runGraph(config.workflow.graph, transport, config, messages, context, routerContext, undefined, maxWords);
   const input = messages.filter(m => m.role === 'user').at(-1)?.content;
   if (!input) throw Error('ai_missing_input');
   const pending = context.pendingFallbacks ?? [];

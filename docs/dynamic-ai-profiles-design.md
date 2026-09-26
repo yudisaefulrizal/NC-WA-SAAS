@@ -5,14 +5,14 @@ Implementasi berdasarkan diskusi pemilik: editor visual dengan graf bebas, struk
 ## Menggunakan fitur
 
 1. Buka **Dashboard Admin → Profil AI → Buat profil · Editor alur · Impor JSON**, atau `/dashboard/admin/ai-builder`.
-2. Buat profil kosong, gunakan template CS Usaha/Pendidikan/Tester, atau impor paket JSON. Profil baru berstatus draft dan belum aktif untuk klien.
-3. Tentukan koleksi pada **Struktur data**. ID koleksi/field menjadi referensi stabil; ubah label untuk mengganti nama tampilan.
+2. Buat profil kosong, gunakan template Katalog sederhana/Pendidikan/Tester, atau impor paket JSON. Profil baru berstatus draft dan belum aktif untuk klien.
+3. Tentukan koleksi pada **Struktur data**. ID koleksi dan field tidak ditampilkan: dibuat otomatis dari namanya (misalnya "Jadwal Dokter" menjadi `jadwal_dokter`). Selama belum pernah diterbitkan, ID ikut nama dan rujukan di node Data (koleksi, filter, urutan, jumlah, serta variabel `...data.<field>`) ikut diganti; setelah terbit ID dikunci karena record klien memakainya, dan mengganti nama hanya mengubah tampilan. Field node Ekstrak mengikuti aturan yang sama untuk variabel `nodes.<node>.<field>`.
 4. Susun node dan koneksi pada **Alur**. Klik/tarik palet untuk menambah, tarik header node untuk memindahkan, sambungkan port keluar ke port masuk. Pengaturan node juga menyediakan pemilih tujuan koneksi untuk keyboard/ponsel.
 5. Jalankan **Pengujian** dengan pesan dan data contoh. Lihat hasil per node di jejak eksekusi. Data contoh hanya berlaku untuk simulasi.
 6. Simpan draft dan periksa masalah pada **Ringkasan**. Terbitkan sesudah diuji. Aktifkan profil melalui daftar **Profil AI** agar bisa dipilih akun.
 7. Akun membuat **Data Profil**, memilih profil tersebut, lalu **Kelola isi** untuk mengisi koleksi. Pasang Data Profil ke sesi melalui mekanisme yang sama dengan profil bawaan.
 
-Profil bawaan dan AI Studio lamanya tetap tersedia. Template Katalog sederhana/Pendidikan adalah titik awal dengan koleksi umum. Template CS Usaha lengkap memakai operasi bisnis CS yang tersedia sebagai kemampuan Tool. Tidak ada konversi otomatis data profil lama.
+Profil bawaan dan AI Studio lamanya tetap tersedia. Template Katalog sederhana/Pendidikan adalah titik awal dengan koleksi umum. Builder hanya berisi perkakas umum: tidak ada operasi khusus satu jenis usaha, dan profil dinamis tidak memakai tabel produk/pesanan CS bawaan. Tidak ada konversi otomatis data profil lama.
 
 ## Node dan kontrak eksekusi
 
@@ -23,9 +23,10 @@ Profil bawaan dan AI Studio lamanya tetap tersedia. Template Katalog sederhana/P
 | Router | Memilih satu cabang sesuai kriteria; tier Keputusan mendukung JEV melalui protokol keputusan yang sudah tersedia |
 | Agent | Menghasilkan jawaban, atau memakai node Tool data yang diizinkan secara eksplisit |
 | Kondisi | Satu atau beberapa syarat (semua/salah satu), boleh dengan grup DAN/ATAU satu tingkat; lihat **Kondisi** |
-| Data (tipe `tool`) | Cari, Ambil, Buat, Ubah, Hapus, atau Hitung isi koleksi; atau kemampuan bisnis: knowledge, katalog, pesanan pelanggan, buat pesanan, foto produk |
+| Data (tipe `tool`) | Cari, Ambil, Buat, Ubah, Hapus, atau Hitung isi koleksi |
 | Ekstrak | Mengubah pesan (dan riwayat bila memori terhubung) menjadi field terstruktur; lihat **Ekstrak** |
 | Set / Hitung | Mengolah nilai dengan operasi tetap tanpa model; lihat **Set / Hitung** |
+| Terima media | Menyimpan gambar/dokumen dari pelanggan sebagai file data profil; port Diterima/Tidak ada; lihat **Terima media** |
 | Kirim media | Mengantrekan file dari field File/gambar atau URL HTTPS untuk dikirim bersama jawaban; lihat **Kirim media** |
 | Context | Menyimpan ringkasan untuk percakapan berikutnya, maksimal 200 karakter |
 | Output | Mengambil teks/variabel sebagai jawaban akhir |
@@ -39,7 +40,7 @@ Variabel memakai `{{input.message}}`, `{{nodes.nama_node.answer}}`, atau variabe
 
 ## Node Data
 
-Node Data (`type: "tool"` tanpa `capability`) memilih satu `operation`:
+Node Data (`type: "tool"`) memilih satu `operation`:
 
 | Operasi | Input (`query` untuk alur, atau `query` dari Agent) | Keluaran | Port di alur |
 | --- | --- | --- | --- |
@@ -83,6 +84,12 @@ Keluaran: satu nilai per field, ditambah `missing` (ID field wajib yang kosong).
 | `item_at` | daftar, urutan mulai 1 | item atau `null` |
 
 Angka dari teks diterima bila seluruhnya angka (`"2"`), bukan format ribuan (`"1.500"`). Nilai yang tidak sesuai menghentikan alur dengan `ai_compute_failed` di jejak eksekusi.
+
+## Terima media
+
+Menerima dan mengirim media adalah dua node terpisah. Runtime meneruskan pesan gambar atau dokumen dari pelanggan hanya ke profil yang graf terbitnya punya node **Terima media**; profil lain tetap mengabaikannya. Setelah pesan dipastikan diproses (tidak dijeda, kredit cukup), lampiran diunduh dari WhatsApp dan disimpan sebagai file data profil dengan batas yang sama seperti unggahan dashboard (gambar JPG/PNG/WebP 5 MB, dokumen 10 MB, total 100 MB). File belum terikat record sampai disimpan lewat node Data, misalnya `{"data":{"bukti":"{{nodes.terima.file}}"}}`; bila tidak dipakai, dibersihkan setelah sehari. Isi gambar tidak dibaca AI.
+
+`accept` memilih `image` dan/atau `document` (bawaan keduanya). Port **Diterima** (`received`) bila ada lampiran yang jenisnya diterima dan berhasil disimpan; **Tidak ada** (`none`) untuk pesan teks, jenis lain, atau lampiran yang terlalu besar/tidak didukung. Keluaran `file`, `filename`, `type`, `mimetype`, `caption` (bernilai null di port Tidak ada, kecuali caption). Memori dan `input.message` memakai penanda `[Gambar] keterangan` atau `[Dokumen: nama] keterangan`. Balasan tim untuk tiket fallback tetap hanya teks. Simulasi menerima lampiran contoh (`media: {filename, type}`), dan nama filenya dipakai sebagai nilai file; Uji Coba hanya teks.
 
 ## Kirim media
 
@@ -190,7 +197,7 @@ Pencarian dan filter membaca JSON dalam cakupan akun/profil/koleksi (dan pelangg
 - `test/components/ai/builder-data.test.ts`: kontrak dan normalisasi, isolasi record per pelanggan, paritas filter/kata kunci/urutan/batas antara MySQL dan simulasi, operasi node Data di alur, Kondisi dan variabel WIB, simulasi, duplikasi, dan konflik kepemilikan saat publikasi.
 - `test/components/ai/builder-sources.test.ts`: pengaturan sumber dan token, penolakan SSRF, penulisan dashboard ke koleksi API, keenam operasi ke API tiruan beserta isi `query`/`context`, validasi balasan, error HTTP, uji dari dashboard, dan simulasi yang tidak memanggil API.
 - `scripts/checks/browser-ai-builder-sources-check.ts`: ganti koleksi ke API, simpan-buka ulang, uji API, dan kembali ke tabel pada 1280/390 px.
-- `test/components/ai/builder-media.test.ts`: kontrak Kirim media, file milik data profil sendiri, URL, nilai kosong, dan batas tiga file lintas node di simulasi; `profiles.test.ts` memeriksa urutan kirim gambar lalu teks di engine WhatsApp tiruan dan tidak ada media saat Fallback.
+- `test/components/ai/builder-media.test.ts`: kontrak Terima media dan Kirim media, port dan jenis yang diterima, simulasi lampiran, file milik data profil sendiri, URL, nilai kosong, dan batas tiga file lintas node di simulasi; `profiles.test.ts` memeriksa urutan kirim gambar lalu teks di engine WhatsApp tiruan, tidak ada media saat Fallback, gambar pelanggan tersimpan ke record lewat Terima media, dan profil tanpa node itu mengabaikan gambar.
 - `test/components/ai/builder-fields.test.ts`: tipe field baru dan normalisasinya, nilai bawaan, keunikan (store, simulasi, publikasi), paritas filter pilihan ganda/telepon, siklus file, dan rute file HTTP.
 - `test/components/ai/builder-extract-compute.test.ts`: kontrak dan urutan langkah, Ekstrak dengan riwayat, JSON Schema dan fallback-nya, nilai hilang/tidak valid, serta semua operasi Set / Hitung.
 - `scripts/checks/browser-ai-builder-fields-check.ts`: Ekstrak, Set / Hitung, tipe field baru, nilai bawaan, unik, simpan-buka ulang, dan unggah file di formulir klien pada 1280/390 px.
@@ -199,7 +206,7 @@ Pencarian dan filter membaca JSON dalam cakupan akun/profil/koleksi (dan pelangg
 - `scripts/checks/browser-ai-builder-check.ts`: editor dan formulir data pada 1280/390 px, termasuk simpan lalu buka ulang dan impor.
 - Tes profil lama/AI Studio/agent serta pemeriksaan browser profil lama untuk regresi integrasi.
 
-Pengujian otomatis menggunakan MySQL sementara, transport AI tiruan, serta engine WhatsApp tiruan. Model asli telah diuji pada sandbox CS lengkap untuk salam, produk, pesanan, dan foto. HP WhatsApp nyata belum diuji; lihat `cs-builder-parity-report.md`.
+Pengujian otomatis menggunakan MySQL sementara, transport AI tiruan, serta engine WhatsApp tiruan. Model AI sungguhan dan HP WhatsApp nyata belum diuji untuk profil dinamis.
 
 
 ## Shared Memory
@@ -214,14 +221,6 @@ Penyimpanan tetap memakai `ai_conversations.messages` dan `router_context` denga
 
 Profil kosong/template baru memiliki sambungan resource bawaan. Definisi lama yang menempatkan Shared Memory di jalur berurutan dinormalisasi ketika dibaca: sambungan alur dilewatkan langsung dan node model sesudahnya mendapat referensi resource. Versi tersimpan tidak ditulis ulang otomatis. Profil tanpa sambungan memori tidak membaca riwayat secara otomatis; pasang resource pada node yang memerlukannya.
 
-## Kemampuan bisnis pada Tool
-
-Node Tool dapat memilih `capability`: `get_knowledge`, `get_products`, `check_order`, `create_order`, atau `send_product_image`. Tanpa capability, kontrak CRUD koleksi tetap berlaku. Nama/ID node bebas; dispatch mengikuti capability dan izin Agent, bukan nama node.
-
-Operasi bisnis memakai tabel bersama yang sudah ada (`ai_products`, `ai_orders`, `ai_product_images`, `ai_data_sources`, dan bidang profil usaha di `ai_data_profiles`), dengan cakupan akun dan data profil. Tidak membuat tabel per profil. Koleksi kustom tetap memakai `ai_data_records`; katalog/pesanan bisnis tidak diduplikasi ke koleksi JSON. Menu isi profil menampilkan usaha, katalog, sumber data, dan pesanan ketika graf memakai kemampuan bisnis.
-
-`check_order` membatasi pelanggan dari konteks server. `create_order` menerima objek item tervalidasi atau teks pesanan. Teks menggunakan parser lebih dahulu, lalu ekstraksi AI dengan tier/model/instruksi node Tool jika diperlukan. Harga, ketersediaan, stok, dan idempotensi mengikuti layanan CS yang sama. Sesuai perilaku CS bawaan, pesanan baru belum mengurangi/memesan stok dan belum berarti pembayaran berhasil.
-
-Runtime meneruskan tool melalui adapter yang sama dengan profil bawaan sehingga pemilihan foto masuk antrean pengiriman setelah jawaban berhasil. Sandbox memiliki adapter terpisah tanpa database, endpoint, atau pengiriman WhatsApp. Isikan `business` dengan `knowledge`, `products`, `orders`, dan `pending` pada pengujian; pelanggan sintetisnya `628000000001`. Hasil bisnis dikembalikan untuk giliran berikutnya.
+## Fallback dari Agent
 
 Aktifkan **port Fallback** pada Agent dan hubungkan ke node Fallback (atau jalur penanganan lain). Agent dapat mengeluarkan `{fallback,question}` hanya bila port aktif dan runtime mengizinkan. Node Fallback tanpa pemetaan memakai alasan/pertanyaan Agent. Router meneruskan tiket menunggu sebagai data; JEV menilai keterkaitan dengan pertanyaan Noul, router biasa memakai `fallback_terkait`. Hanya ID tiket yang benar-benar tersedia diterima. Agent menerima tiket terkait beserta instruksi menghindari duplikasi.
