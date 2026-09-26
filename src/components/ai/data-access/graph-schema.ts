@@ -46,6 +46,14 @@ export async function migrateGraphs() {
     await db.query(
       'ALTER TABLE ai_data_records ADD KEY record_customer(account_id,data_profile_id,collection_id,customer)',
     );
+  // File field File/gambar. record_id kosong berarti baru diunggah dan belum disimpan ke record.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS ai_record_files (id CHAR(36) PRIMARY KEY,account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,record_id CHAR(36) NULL,filename VARCHAR(255) NOT NULL,mimetype VARCHAR(150) NOT NULL,media_type VARCHAR(10) NOT NULL,size_bytes INT UNSIGNED NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,KEY record_file_scope(account_id,data_profile_id,record_id),FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE,FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
+  );
+  // Koleksi yang diganti API milik klien. Tanpa baris berarti koleksi memakai tabel aplikasi (ai_data_records).
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS ai_collection_sources (account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,collection_id VARCHAR(32) NOT NULL,endpoint VARCHAR(512) NOT NULL,secret TEXT NOT NULL,PRIMARY KEY(data_profile_id,collection_id),FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE,FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
+  );
   await db.query(
     `CREATE TABLE IF NOT EXISTS ai_graph_mutations (account_id CHAR(36) NOT NULL,data_profile_id CHAR(36) NOT NULL,request_key CHAR(64) NOT NULL,result JSON NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,data_profile_id,request_key),FOREIGN KEY(data_profile_id) REFERENCES ai_data_profiles(id) ON DELETE CASCADE,FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
   );

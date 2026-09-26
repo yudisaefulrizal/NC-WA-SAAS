@@ -88,7 +88,7 @@ function renderCanvas() {
       row.append(p);
       box.append(row);
     }
-    if (['router', 'agent', 'context'].includes(n.type)) {
+    if (memoryConsumers.includes(n.type)) {
       const row = el('div', n.memory ? 'Memori terhubung' : 'Tanpa memori', 'port-row memory-row');
       const p = el('button', undefined, 'port memory-port memory-input');
       p.dataset.target = n.id;
@@ -193,7 +193,7 @@ function connect(target, connection = 'flow') {
 function attachMemory(source, target) {
   const m = state.document.nodes.find(n => n.id === source),
     n = state.document.nodes.find(n => n.id === target);
-  if (m?.type !== 'memory' || !n || !['router', 'agent', 'context'].includes(n.type)) {
+  if (m?.type !== 'memory' || !n || !memoryConsumers.includes(n.type)) {
     notice('Memori dapat dipasang pada Router, Agent, atau Context.');
     return;
   }

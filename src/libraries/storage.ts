@@ -12,6 +12,8 @@ export function storagePaths(root = storageRoot) {
     media: join(root, 'files', 'media'),
     productImages: join(root, 'files', 'product-images'),
     aiDocuments: join(root, 'files', 'ai-documents'),
+    // File di field File/gambar koleksi profil dinamis.
+    recordFiles: join(root, 'files', 'record-files'),
     shareAssets: join(root, 'files', 'share-assets'),
   };
 }

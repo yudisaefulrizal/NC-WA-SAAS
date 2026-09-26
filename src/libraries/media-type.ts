@@ -1,4 +1,5 @@
 // Mengenali jenis file dari byte awalnya, untuk unggahan media dan dokumen.
+import { ApiError } from './errors.js';
 export type ShareMediaType = 'image' | 'video' | 'document' | 'audio';
 
 // Dokumen Office (docx/pptx/xlsx) berupa arsip ZIP; membedakan jenisnya berarti membuka arsip dan
@@ -38,4 +39,37 @@ export function sniffMediaType(head: Buffer, filename: string): { mediaType: Sha
     return { mediaType: 'document', mimetype: officeMimetypes[extension] ?? 'application/octet-stream' };
   }
   return null;
+}
+// Gambar dan file PDF/Word/Excel/PowerPoint; file Office lama (.doc/.xls/.ppt) dikenali dari header OLE ditambah
+// ekstensinya, karena wadah itu tidak menyimpan jenis file yang bisa dibaca.
+const legacyOffice: Record<string, string> = {
+  '.doc': 'application/msword',
+  '.xls': 'application/vnd.ms-excel',
+  '.ppt': 'application/vnd.ms-powerpoint',
+};
+export function documentFileType(
+  head: Buffer,
+  filename: string,
+): { media_type: 'image' | 'document'; mimetype: string } {
+  const sniffed = sniffMediaType(head, filename),
+    extension = /\.[a-z0-9]+$/i.exec(filename)?.[0].toLowerCase() ?? '';
+  if (sniffed?.mediaType === 'image') return { media_type: 'image', mimetype: sniffed.mimetype };
+  if (
+    sniffed?.mediaType === 'document' &&
+    sniffed.mimetype !== 'application/zip' &&
+    sniffed.mimetype !== 'application/octet-stream'
+  )
+    return { media_type: 'document', mimetype: sniffed.mimetype };
+  if (
+    head.length >= 8 &&
+    head.readUInt32BE(0) === 0xd0cf11e0 &&
+    head.readUInt32BE(4) === 0xa1b11ae1 &&
+    legacyOffice[extension]
+  )
+    return { media_type: 'document', mimetype: legacyOffice[extension] };
+  throw new ApiError(
+    400,
+    'unsupported_file_type',
+    'Dokumen harus PDF, Word, Excel, PowerPoint, atau gambar JPG/PNG/WebP',
+  );
 }

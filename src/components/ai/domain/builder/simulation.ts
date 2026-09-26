@@ -6,7 +6,7 @@ import { ai } from '../service.js';
 import type { AITraceEvent } from '../pipeline/models.js';
 import type { AIMessage, AITransport } from '../provider.js';
 import { parseDefinition, validateRecord, text, type Collection } from './definition.js';
-import { keywords, queryMemory, sumMemory, type StoredRecord } from './record-query.js';
+import { keywords, queryMemory, sumMemory, filterGroup, type StoredRecord } from './record-query.js';
 import { runRecordTool, type RecordAdapter } from './record-tools.js';
 import { businessSimulation, simulationCustomer } from './business-simulation.js';
 import { runGraph } from './engine.js';
@@ -137,8 +137,9 @@ function memoryRecords(records: Record<string, StoredRecord[]>): RecordAdapter {
       const input = record(value);
       const owner = c.owner === 'customer' ? { customer: simulationCustomer } : {};
       if (operation === 'create') {
-        const row = { id: randomUUID(), data: validateRecord(c, input.data), revision: 1, ...owner };
+        const row = { id: randomUUID(), data: validateRecord(c, input.data, true), revision: 1, ...owner };
         relations(c, row.data);
+        unique(c, row.data, row.id);
         records[c.id].push(row);
         return { ...row, deleted: false };
       }
@@ -153,12 +154,31 @@ function memoryRecords(records: Record<string, StoredRecord[]>): RecordAdapter {
       for (const [field, v] of Object.entries(record(input.data)))
         if (v === null || v === '') delete next[field];
         else next[field] = v;
+      unique(c, validateRecord(c, next), row.id);
       row.data = validateRecord(c, next);
       relations(c, row.data);
       row.revision++;
       return { ...row, deleted: false };
     },
   };
+  // Sama dengan assertUnique di store: seluruh record koleksi, memakai aturan "sama dengan" pencarian.
+  function unique(c: Collection, data: Record<string, unknown>, self: string) {
+    for (const f of c.fields.filter(f => f.unique && data[f.id] !== undefined)) {
+      const same = queryMemory(records[c.id], {
+        keywords: [],
+        groups: [filterGroup(c, [{ field: f.id, operator: 'equals', value: String(data[f.id]) }])],
+        sort: { field: 'created_at', type: 'created_at', direction: 'asc' },
+        limit: 2,
+        offset: 0,
+      });
+      if (same.some(r => r.id !== self))
+        throw new ApiError(
+          409,
+          'duplicate_value',
+          f.label + ' "' + String(data[f.id]) + '" sudah dipakai record lain.',
+        );
+    }
+  }
   function relations(c: Collection, data: Record<string, unknown>) {
     for (const f of c.fields.filter(f => f.type === 'relation'))
       if (data[f.id] && !records[f.collection]?.some(r => r.id === data[f.id]))

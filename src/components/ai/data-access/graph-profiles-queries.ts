@@ -35,6 +35,11 @@ function filterSql(f: RecordFilter & { type: string }, params: SqlValue[]): stri
     params.push(path(f.field));
     return 'JSON_EXTRACT(data,?) IS ' + (f.operator === 'empty' ? 'NULL' : 'NOT NULL');
   }
+  if (f.type === 'multichoice' && (f.operator === 'equals' || f.operator === 'not_equals')) {
+    params.push(path(f.field), f.value);
+    return (f.operator === 'equals' ? '' : 'NOT ') + 'JSON_CONTAINS(JSON_EXTRACT(data,?),JSON_QUOTE(?))';
+  }
+  if (f.type === 'multichoice' && f.operator !== 'contains' && f.operator !== 'not_contains') return 'FALSE';
   if (f.type === 'boolean') {
     if (f.operator !== 'equals' && f.operator !== 'not_equals') return 'FALSE';
     params.push(path(f.field), ['true', 'ya', '1'].includes(f.value.trim().toLowerCase()) ? 'true' : 'false');

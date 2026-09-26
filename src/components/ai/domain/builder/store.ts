@@ -16,7 +16,17 @@ import {
   type Collection,
   type GraphDefinition,
 } from './definition.js';
-import { keywords, type RecordQuery, type StoredRecord } from './record-query.js';
+import { keywords, filterGroup, type RecordQuery, type StoredRecord } from './record-query.js';
+import * as filesSql from '../../data-access/record-files-queries.js';
+import * as sourcesSql from '../../data-access/collection-sources-queries.js';
+import {
+  claimFiles,
+  releaseFiles,
+  copyRecordFile,
+  removeRecordFiles,
+  recordFile,
+  type RecordFile,
+} from './record-files.js';
 const decode = (v: unknown) => (typeof v === 'string' ? JSON.parse(v) : v);
 // Pelanggan yang sedang chat, diisi runtime dari sesi WhatsApp. Tanpa viewer berarti pemilik akun di dashboard.
 export interface RecordViewer {
@@ -106,6 +116,7 @@ export async function saveGraph(actor: string, id: string, body: unknown, publis
       const next = parseDefinition(decode(row.draft));
       assertRunnable(next);
       let cursor = '';
+      const seen = new Set<string>();
       for (;;) {
         const [records] = await sql.recordsByType(c, [id, cursor]);
         for (const r of records) {
@@ -136,6 +147,28 @@ export async function saveGraph(actor: string, id: string, body: unknown, publis
             );
           }
           const data = decode(r.data);
+          for (const f of schema.fields.filter(f => f.unique && data[f.id] !== undefined)) {
+            const v = data[f.id],
+              key = [r.data_profile_id, r.collection_id, f.id, typeof v === 'string' ? v.toLowerCase() : String(v)];
+            if (seen.has(JSON.stringify(key)))
+              throw new ApiError(
+                409,
+                'schema_conflict',
+                'Field ' + f.label + ' tidak bisa dibuat unik karena data tersimpan memuat nilai kembar.',
+              );
+            seen.add(JSON.stringify(key));
+          }
+          for (const f of schema.fields.filter(f => f.type === 'file' && data[f.id] !== undefined)) {
+            const [file] = fileIdPattern(String(data[f.id]))
+              ? await filesSql.find(c, [String(r.account_id), String(r.data_profile_id), String(data[f.id])])
+              : [[]];
+            if (!file[0])
+              throw new ApiError(
+                409,
+                'schema_conflict',
+                'Field ' + f.label + ' tidak bisa menjadi File karena data tersimpan bukan file yang diunggah.',
+              );
+          }
           for (const f of schema.fields.filter(f => f.type === 'relation'))
             if (data[f.id]) {
               const [target] = await sql.record(c, [
@@ -204,7 +237,46 @@ export async function readRecords(
 ) {
   if (!Number.isSafeInteger(page) || page < 0 || page > 10000 || query.length > 1000)
     throw new ApiError(400, 'invalid_request', 'Pencarian tidak valid.');
-  return queryRecords(account, profile, collection, { keyword: query, offset: page * 100 }, undefined, customer);
+  const result = await queryRecords(
+    account,
+    profile,
+    collection,
+    { keyword: query, offset: page * 100 },
+    undefined,
+    customer,
+  );
+  // Nama file untuk field File/gambar supaya dashboard bisa menampilkan tautannya.
+  const schema = await collectionOf(account, profile, collection);
+  const ids = result.records.flatMap(r =>
+    schema.fields.filter(f => f.type === 'file' && typeof r.data[f.id] === 'string').map(f => String(r.data[f.id])),
+  );
+  const [rows] = await filesSql.listByIds(db, account, profile, [...new Set(ids)].filter(fileIdPattern));
+  const files: Record<string, RecordFile> = Object.fromEntries(rows.map(r => [String(r.id), recordFile(r)]));
+  return { ...result, files };
+}
+const fileIdPattern = (v: string) => /^[0-9a-f-]{36}$/.test(v);
+const fileValues = (schema: Collection, data: Record<string, unknown>) =>
+  schema.fields.filter(f => f.type === 'file' && typeof data[f.id] === 'string').map(f => String(data[f.id]));
+// Field unik dibandingkan dengan aturan "sama dengan" pencarian, di seluruh record koleksi pada data profil ini.
+async function assertUnique(
+  c: import('mysql2/promise').PoolConnection,
+  scope: string[],
+  schema: Collection,
+  data: Record<string, unknown>,
+  self: string,
+) {
+  for (const f of schema.fields.filter(f => f.unique && data[f.id] !== undefined)) {
+    const group = filterGroup(schema, [{ field: f.id, operator: 'equals', value: String(data[f.id]) }]);
+    const [rows] = await sql.searchRecords(c, scope, {
+      keywords: [],
+      groups: [group],
+      sort: { field: 'created_at', type: 'created_at', direction: 'asc' },
+      limit: 2,
+      offset: 0,
+    });
+    if (rows.some(r => String(r.id) !== self))
+      throw new ApiError(409, 'duplicate_value', f.label + ' "' + String(data[f.id]) + '" sudah dipakai record lain.');
+  }
 }
 export async function queryRecords(
   account: string,
@@ -260,7 +332,14 @@ export async function writeRecord(
   const input = record(value);
   const id = operation === 'create' ? randomUUID() : String(input.id);
   const key = requestKey ? createHash('sha256').update(requestKey).digest('hex') : null;
-  return transaction(async c => {
+  let removedFiles: string[] = [];
+  // Koleksi yang diganti API dikelola di sistem klien; dashboard tidak menulis ke tabel aplikasinya.
+  if (!viewer) {
+    const [api] = await sourcesSql.find(db, [account, profile, collection]);
+    if (api[0])
+      throw new ApiError(409, 'collection_uses_api', 'Koleksi ini memakai API sendiri. Kelola datanya di sistem Anda.');
+  }
+  const result = await transaction(async c => {
     await lockAccount(c, account);
     const [graphs] = await sql.shareOwnedGraph(c, [account, profile]);
     if (!graphs[0]?.active) throw new ApiError(404, 'data_profile_not_found', 'Data profil aktif tidak ditemukan.');
@@ -278,7 +357,7 @@ export async function writeRecord(
       customer: string | null = null,
       revision = 1;
     if (operation === 'create') {
-      data = validateRecord(schema, input.data);
+      data = validateRecord(schema, input.data, true);
       if (schema.owner === 'customer') customer = scoped ?? customerNumber(input.customer);
     } else {
       const [existing] = await sql.record(c, [account, profile, collection, id]);
@@ -305,6 +384,9 @@ export async function writeRecord(
         if (!target[0] || (owned && target[0].customer !== customer))
           throw new ApiError(400, 'invalid_relation', 'Record relasi tidak ditemukan.');
       }
+    if (operation !== 'delete') await assertUnique(c, [account, profile, collection], schema, data, id);
+    const files = fileValues(schema, data);
+    if (operation !== 'create') removedFiles = await releaseFiles(c, account, profile, id, files);
     if (operation === 'delete') {
       const [records] = await sql.allRecords(c, [account, profile]);
       for (const r of records) {
@@ -317,6 +399,7 @@ export async function writeRecord(
     } else if (operation === 'create')
       await sql.insertRecord(c, [id, account, profile, collection, JSON.stringify(data), customer]);
     else await sql.updateRecord(c, [JSON.stringify(data), account, profile, collection, id]);
+    await claimFiles(c, account, profile, id, files);
     const result = {
       id,
       data,
@@ -327,6 +410,8 @@ export async function writeRecord(
     if (key) await sql.insertMutation(c, [account, profile, key, JSON.stringify(result)]);
     return result;
   });
+  await removeRecordFiles(account, removedFiles);
+  return result;
 }
 export { blankDefinition };
 
@@ -349,6 +434,7 @@ export async function copyGraphRecords(
   source: string,
   target: string,
   includeCustomer = false,
+  copiedFiles: string[] = [],
 ) {
   const [graphs] = await sql.shareOwnedGraph(c, [account, source]);
   if (!graphs[0]?.active) return;
@@ -363,6 +449,8 @@ export async function copyGraphRecords(
       schema = d.collections.find(s => s.id === r.collection_id);
     for (const f of schema?.fields ?? [])
       if (f.type === 'relation' && data[f.id]) data[f.id] = ids.get(data[f.id]) ?? data[f.id];
+      else if (f.type === 'file' && typeof data[f.id] === 'string')
+        data[f.id] = await copyRecordFile(c, account, source, target, ids.get(String(r.id))!, data[f.id], copiedFiles);
     await sql.insertRecord(c, [
       ids.get(String(r.id))!,
       account,

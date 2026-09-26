@@ -12,6 +12,9 @@ import { assertRunnable, type GraphDefinition, type GraphNode } from './definiti
 import { queryRecords, countCollection, getRecord, writeRecord } from './store.js';
 import { conditionMatches, systemVariables } from './conditions.js';
 import { runRecordTool, recordToolGuide, type RecordAdapter } from './record-tools.js';
+import { sourcedRecords } from './collection-sources.js';
+import { compute } from './compute.js';
+import { extractInstruction, extractFormat, parseExtraction } from './extract.js';
 export type GraphTool = (node: GraphNode, value: unknown, key: string) => Promise<unknown>;
 export function lookup(path: string, state: Record<string, unknown>): unknown {
   let v: unknown = state;
@@ -38,13 +41,16 @@ function softLookup(path: string, state: Record<string, unknown>) {
 // Record milik pelanggan selalu dibatasi ke pelanggan dari sesi, bukan dari argumen model.
 function databaseRecords(scope: ToolContext, d: GraphDefinition): RecordAdapter {
   const viewer = { customer: scope.customer };
-  return {
-    search: (c, search) => queryRecords(scope.account, scope.profile, c.id, search, viewer),
-    count: (c, search, sum) => countCollection(scope.account, scope.profile, c.id, search, sum, viewer),
-    get: (c, id) => getRecord(scope.account, scope.profile, c.id, id, viewer),
-    write: (c, operation, value, key) =>
-      writeRecord(scope.account, scope.profile, c.id, operation, value, key, d, viewer, { merge: true }),
-  };
+  return sourcedRecords(
+    {
+      search: (c, search) => queryRecords(scope.account, scope.profile, c.id, search, viewer),
+      count: (c, search, sum) => countCollection(scope.account, scope.profile, c.id, search, sum, viewer),
+      get: (c, id) => getRecord(scope.account, scope.profile, c.id, id, viewer),
+      write: (c, operation, value, key) =>
+        writeRecord(scope.account, scope.profile, c.id, operation, value, key, d, viewer, { merge: true }),
+    },
+    scope,
+  );
 }
 export function interpolate(value: unknown, state: Record<string, unknown>): unknown {
   if (typeof value === 'string') {
@@ -384,6 +390,43 @@ export async function runGraph(
           history.push({ tool: t.id, output });
           outputs[t.id] = output;
         }
+      } else if (n.type === 'extract') {
+        const fields = n.fields ?? [];
+        const selected = { ...tierConfig(config, n.tier), call_role: n.id };
+        selected.model = n.model || selected.model;
+        if (isJevModel(selected.model)) throw Error('ai_jev_requires_router');
+        const request: AIMessage[] = [
+          { role: 'system', content: extractInstruction(fields, String(interpolate(n.prompt, state))) },
+          ...sharedMessages.filter(m => m.role !== 'system'),
+        ];
+        const run = (format: boolean) =>
+          validatedAI(
+            counted,
+            format ? { ...selected, response_format: extractFormat(fields) } : selected,
+            request,
+            300,
+            raw => parseExtraction(fields, raw),
+            'Balas hanya satu objek JSON dengan kunci persis id field; isi null bila tidak disebutkan.',
+          );
+        // Tier Terstruktur memakai Structured Outputs; model yang menolak JSON Schema diulang dengan mode prompt.
+        try {
+          result = await run(n.tier === 'structured');
+        } catch (error) {
+          if (n.tier !== 'structured' || !(error instanceof Error) || error.message !== 'ai_provider_http_400')
+            throw error;
+          config.onTrace?.({ node: n.id, state: 'retry', error: 'structured_output_unsupported' });
+          result = await run(false);
+        }
+      } else if (n.type === 'compute') {
+        const values: Record<string, unknown> = {};
+        for (const step of n.steps ?? []) {
+          const local = { ...state, nodes: { ...(state.nodes as Record<string, unknown>), [n.id]: values } };
+          values[step.name] = compute(
+            step.op,
+            step.args.map(arg => interpolate(arg, local)),
+          );
+        }
+        result = values;
       } else if (n.type === 'context') {
         const selected = {
           ...tierConfig(config, n.tier),

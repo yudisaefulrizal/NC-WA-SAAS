@@ -39,7 +39,7 @@ function renderInspector() {
   const edit = (key, label, type = 'text', options = []) =>
     field(label, n[key], v => mutate(() => (n[key] = v)), type, options);
   host.append(edit('label', 'Nama node'), el('p', 'ID variabel: ' + n.id, 'hint'));
-  if (['router', 'agent', 'context'].includes(n.type)) {
+  if (memoryConsumers.includes(n.type)) {
     host.append(
       field(
         'Shared Memory',
@@ -70,9 +70,11 @@ function renderInspector() {
         ...(n.type === 'router' ? [{ value: 'decision', label: 'Keputusan' }] : []),
       ]),
       edit('model', 'Model khusus (opsional)'),
-      edit('prompt', 'Instruksi', 'textarea'),
+      edit('prompt', n.type === 'extract' ? 'Instruksi tambahan (opsional)' : 'Instruksi', 'textarea'),
     );
   }
+  if (n.type === 'extract') renderExtract(host, n);
+  if (n.type === 'compute') renderCompute(host, n);
   if (n.type === 'context')
     host.append(
       field('Format konteks', n.context_format || 'text', v => mutate(() => (n.context_format = v)), 'select', [
@@ -100,7 +102,7 @@ function renderInspector() {
       ),
     );
     host.append(el('h3', 'Node yang memakai memori'));
-    for (const consumer of state.document.nodes.filter(x => ['router', 'agent', 'context'].includes(x.type)))
+    for (const consumer of state.document.nodes.filter(x => memoryConsumers.includes(x.type)))
       host.append(
         field(
           consumer.label,
@@ -277,7 +279,9 @@ function renderInspector() {
       .filter(
         x =>
           x.id !== n.id &&
-          (x.type === 'memory' ? x.id === n.memory : ['agent', 'context', 'router', 'tool'].includes(x.type)),
+          (x.type === 'memory'
+            ? x.id === n.memory
+            : ['agent', 'context', 'router', 'tool', 'extract', 'compute'].includes(x.type)),
       )
       .flatMap(x =>
         (x.type === 'memory'
@@ -292,7 +296,11 @@ function renderInspector() {
                   send_product_image: ['available', 'product_name', 'image_id'],
                 }[x.capability]
               : recordOutputs(x)
-            : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]]
+            : x.type === 'extract'
+              ? [...(x.fields ?? []).map(f => f.id), 'missing']
+              : x.type === 'compute'
+                ? (x.steps ?? []).map(step => step.name)
+                : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]]
         ).map(key => 'nodes.' + x.id + '.' + key),
       ),
   ])
@@ -675,5 +683,163 @@ function renderRules(host, n) {
       'Nilai yang diperiksa berupa path variabel, misalnya nodes.isian.tanggal atau system.weekday. Pembanding boleh memakai {{variabel}}.',
       'hint',
     ),
+  );
+}
+
+const extractTypes = ['text', 'number', 'boolean', 'date', 'time', 'datetime', 'choice', 'multichoice', 'phone'];
+function renderExtract(host, n) {
+  n.fields ??= [];
+  host.append(
+    el('h3', 'Field yang diambil'),
+    el(
+      'p',
+      'Model mengisi null bila pelanggan tidak menyebutkannya. Field wajib yang kosong masuk ke missing. Tanggal relatif seperti "besok" diubah memakai tanggal hari ini (WIB).',
+      'hint',
+    ),
+  );
+  n.fields.forEach((f, i) => {
+    const box = el('div', undefined, 'rule');
+    box.append(
+      field('ID field', f.id, v => mutate(() => (f.id = v))),
+      field('Label', f.label, v => mutate(() => (f.label = v))),
+      field(
+        'Tipe',
+        f.type,
+        v => {
+          mutate(() => {
+            f.type = v;
+            if (['choice', 'multichoice'].includes(v) && !f.options.length) f.options = ['Pilihan 1'];
+          });
+          renderInspector();
+        },
+        'select',
+        extractTypes.map(t => ({ value: t, label: fieldTypeLabels[t] })),
+      ),
+      field('Wajib', f.required, v => mutate(() => (f.required = v)), 'checkbox'),
+      field('Petunjuk untuk AI', f.hint, v => mutate(() => (f.hint = v))),
+    );
+    if (['choice', 'multichoice'].includes(f.type))
+      box.append(
+        field('Opsi (pisahkan koma)', f.options.join(', '), v =>
+          mutate(
+            () =>
+              (f.options = v
+                .split(',')
+                .map(x => x.trim())
+                .filter(Boolean)),
+          ),
+        ),
+      );
+    box.append(
+      btn('Hapus field', () => {
+        mutate(() => n.fields.splice(i, 1));
+        renderInspector();
+      }),
+    );
+    host.append(box);
+  });
+  host.append(
+    btn('＋ Field', () => {
+      mutate(() =>
+        n.fields.push({
+          id: 'field_' + (n.fields.length + 1),
+          label: 'Field baru',
+          type: 'text',
+          required: false,
+          hint: '',
+          options: [],
+        }),
+      );
+      renderInspector();
+    }),
+  );
+  // Menyalin field koleksi yang bisa diambil dari teks; relasi dan file dilewati.
+  const collections = state.document.collections.filter(c => c.fields.some(f => extractTypes.includes(f.type)));
+  if (collections.length)
+    host.append(
+      field(
+        'Salin field dari koleksi',
+        '',
+        id => {
+          const c = state.document.collections.find(c => c.id === id);
+          if (!c) return;
+          mutate(() => {
+            for (const f of c.fields.filter(f => extractTypes.includes(f.type) && !n.fields.some(x => x.id === f.id)))
+              n.fields.push({
+                id: f.id,
+                label: f.label,
+                type: f.type,
+                required: f.required,
+                hint: '',
+                options: [...f.options],
+              });
+          });
+          renderInspector();
+        },
+        'select',
+        [{ value: '', label: 'Pilih koleksi' }, ...collections.map(c => ({ value: c.id, label: c.name }))],
+      ),
+    );
+}
+const computeOps = [
+  ['value', 'Ambil nilai', ['Nilai']],
+  ['add', 'Tambah', ['Angka', 'Ditambah']],
+  ['subtract', 'Kurang', ['Angka', 'Dikurangi']],
+  ['multiply', 'Kali', ['Angka', 'Dikali']],
+  ['divide', 'Bagi', ['Angka', 'Dibagi']],
+  ['round', 'Bulatkan', ['Angka', 'Jumlah desimal (0–6)']],
+  ['format_rupiah', 'Format rupiah', ['Angka']],
+  ['concat', 'Gabung teks', ['Templat teks']],
+  ['truncate', 'Potong teks', ['Teks', 'Maksimal karakter']],
+  ['add_days', 'Tambah hari', ['Tanggal', 'Jumlah hari (boleh negatif)']],
+  ['days_between', 'Selisih hari', ['Dari tanggal', 'Sampai tanggal']],
+  ['format_date', 'Format tanggal', ['Tanggal']],
+  ['length', 'Jumlah item', ['Daftar atau teks']],
+  ['item_at', 'Ambil item ke-', ['Daftar', 'Urutan (mulai 1)']],
+];
+function renderCompute(host, n) {
+  n.steps ??= [];
+  host.append(
+    el('h3', 'Langkah · dijalankan berurutan'),
+    el(
+      'p',
+      'Setiap hasil dibaca sebagai {{nodes.' +
+        n.id +
+        '.nama_hasil}} dan boleh dipakai langkah sesudahnya. Nilai yang tidak sesuai menghentikan alur dan tercatat di jejak.',
+      'hint',
+    ),
+  );
+  n.steps.forEach((step, i) => {
+    const [, , labels] = computeOps.find(([op]) => op === step.op) ?? computeOps[0];
+    const box = el('div', undefined, 'rule');
+    box.append(
+      field('Nama hasil', step.name, v => mutate(() => (step.name = v))),
+      field(
+        'Operasi',
+        step.op,
+        v => {
+          const arity = computeOps.find(([op]) => op === v)[2].length;
+          mutate(() => {
+            step.op = v;
+            step.args = [...step.args, '', ''].slice(0, arity);
+          });
+          renderInspector();
+        },
+        'select',
+        computeOps.map(([value, label]) => ({ value, label })),
+      ),
+      ...labels.map((label, j) => field(label, step.args[j] ?? '', v => mutate(() => (step.args[j] = v)))),
+      btn('Hapus langkah', () => {
+        mutate(() => n.steps.splice(i, 1));
+        renderInspector();
+      }),
+    );
+    host.append(box);
+  });
+  host.append(
+    btn('＋ Langkah', () => {
+      mutate(() => n.steps.push({ name: 'hasil_' + (n.steps.length + 1), op: 'value', args: [''] }));
+      renderInspector();
+    }),
   );
 }

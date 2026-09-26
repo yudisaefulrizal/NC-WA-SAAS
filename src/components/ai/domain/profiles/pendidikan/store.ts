@@ -9,7 +9,7 @@ import type { Readable } from 'node:stream';
 import type { PoolConnection } from 'mysql2/promise';
 import { db } from '../../../../../libraries/db.js';
 import { ApiError } from '../../../../../libraries/errors.js';
-import { sniffMediaType } from '../../../../../libraries/media-type.js';
+import { documentFileType } from '../../../../../libraries/media-type.js';
 import { storagePaths } from '../../../../../libraries/storage.js';
 import { eduLimits } from './profile.js';
 import * as accountsSql from '../../../data-access/accounts-queries.js';
@@ -68,36 +68,7 @@ export function contactInput(value: unknown) {
 export function documentDescription(value: unknown) {
   return text(value, eduLimits.documentDescription, 'Deskripsi dokumen', false);
 }
-// Gambar dan file PDF/Word/Excel/PowerPoint; file Office lama (.doc/.xls/.ppt) dikenali dari header OLE ditambah
-// ekstensinya, karena wadah itu tidak menyimpan jenis file yang bisa dibaca.
-const legacyOffice: Record<string, string> = {
-  '.doc': 'application/msword',
-  '.xls': 'application/vnd.ms-excel',
-  '.ppt': 'application/vnd.ms-powerpoint',
-};
-export function documentType(head: Buffer, filename: string): { media_type: 'image' | 'document'; mimetype: string } {
-  const sniffed = sniffMediaType(head, filename),
-    extension = /\.[a-z0-9]+$/i.exec(filename)?.[0].toLowerCase() ?? '';
-  if (sniffed?.mediaType === 'image') return { media_type: 'image', mimetype: sniffed.mimetype };
-  if (
-    sniffed?.mediaType === 'document' &&
-    sniffed.mimetype !== 'application/zip' &&
-    sniffed.mimetype !== 'application/octet-stream'
-  )
-    return { media_type: 'document', mimetype: sniffed.mimetype };
-  if (
-    head.length >= 8 &&
-    head.readUInt32BE(0) === 0xd0cf11e0 &&
-    head.readUInt32BE(4) === 0xa1b11ae1 &&
-    legacyOffice[extension]
-  )
-    return { media_type: 'document', mimetype: legacyOffice[extension] };
-  throw new ApiError(
-    400,
-    'unsupported_file_type',
-    'Dokumen harus PDF, Word, Excel, PowerPoint, atau gambar JPG/PNG/WebP',
-  );
-}
+export { documentFileType as documentType };
 export function filename(value: unknown) {
   const name = text(value, 255, 'Nama file', false).replace(/[\\/\0\r\n]/g, '_');
   return name;
@@ -223,7 +194,7 @@ export class EduStore {
     }
     const content = Buffer.concat(chunks);
     if (!content.length) throw invalid('File kosong');
-    const type = documentType(content.subarray(0, 64), name);
+    const type = documentFileType(content.subarray(0, 64), name);
     if (type.media_type === 'image' && content.length > eduLimits.imageBytes)
       throw new ApiError(413, 'document_too_large', 'Ukuran gambar melebihi 5 MB');
     const id = randomUUID(),

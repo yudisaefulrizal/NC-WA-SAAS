@@ -10,7 +10,25 @@ const kinds = {
   context: ['≋', 'Context', 'Ringkas konteks percakapan'],
   output: ['↗', 'Output', 'Kirim jawaban'],
   fallback: ['⇥', 'Fallback', 'Teruskan ke manusia'],
+  extract: ['⌗', 'Ekstrak', 'Ubah kalimat pelanggan menjadi isian terstruktur'],
+  compute: ['∑', 'Set / Hitung', 'Olah nilai dengan aturan pasti, tanpa AI'],
 };
+// Node yang bisa membaca Shared Memory; sama dengan memoryConsumers di definition.ts.
+const memoryConsumers = ['router', 'agent', 'context', 'extract'];
+const fieldTypeLabels = {
+  text: 'Teks',
+  number: 'Angka',
+  boolean: 'Ya / Tidak',
+  date: 'Tanggal',
+  time: 'Jam',
+  datetime: 'Tanggal-jam',
+  choice: 'Pilihan',
+  multichoice: 'Pilihan ganda',
+  phone: 'Telepon',
+  relation: 'Relasi ke koleksi',
+  file: 'File / gambar',
+};
+const uniqueFieldTypes = ['text', 'number', 'date', 'time', 'datetime', 'choice', 'phone'];
 const state = {
   id: null,
   document: null,
@@ -75,8 +93,8 @@ const portLabels = {
 // Kelompok palet; urutan di sini urutan tampil.
 const paletteGroups = [
   ['Alur', ['input', 'router', 'condition', 'output', 'fallback']],
-  ['AI', ['agent', 'context']],
-  ['Data', ['tool', 'memory']],
+  ['AI', ['agent', 'extract', 'context']],
+  ['Data', ['tool', 'compute', 'memory']],
 ];
 function uid(prefix) {
   return prefix + '_' + crypto.randomUUID().replaceAll('-', '').slice(0, 8);
@@ -94,7 +112,7 @@ function newNode(type, x = 120, y = 140) {
         : type === 'context'
           ? 'Ringkas konteks percakapan menjadi Subjek-Predikat-Objek.'
           : '',
-    tier: type === 'router' ? 'decision' : 'medium',
+    tier: type === 'router' ? 'decision' : type === 'extract' ? 'structured' : 'medium',
     model: '',
     tools: [],
     branches:
@@ -115,6 +133,10 @@ function newNode(type, x = 120, y = 140) {
     ...(type === 'condition'
       ? { match: 'all', rules: [{ field: 'input.message', operator: 'contains', compare: '' }] }
       : {}),
+    ...(type === 'extract'
+      ? { fields: [{ id: 'nama', label: 'Nama', type: 'text', required: true, hint: '', options: [] }] }
+      : {}),
+    ...(type === 'compute' ? { steps: [{ name: 'hasil', op: 'value', args: ['{{input.message}}'] }] } : {}),
   };
 }
 async function loadLibrary() {
@@ -390,17 +412,19 @@ function renderCollections() {
           v => {
             mutate(() => {
               f.type = v;
-              if (v === 'choice' && !f.options.length) f.options = ['Pilihan 1'];
+              if (['choice', 'multichoice'].includes(v) && !f.options.length) f.options = ['Pilihan 1'];
               if (v === 'relation') f.collection = c.id;
+              if (!uniqueFieldTypes.includes(v)) delete f.unique;
+              delete f.default;
             });
             renderCollections();
           },
           'select',
-          ['text', 'number', 'boolean', 'date', 'choice', 'relation'],
+          Object.entries(fieldTypeLabels).map(([value, label]) => ({ value, label })),
         ),
         field('Wajib', f.required, v => mutate(() => (f.required = v)), 'checkbox'),
       );
-      if (f.type === 'choice')
+      if (f.type === 'choice' || f.type === 'multichoice')
         row.append(
           field('Opsi (pisahkan koma)', f.options.join(', '), v =>
             mutate(
@@ -426,16 +450,30 @@ function renderCollections() {
           ),
         );
       else row.append(el('span'));
-      row.append(
-        btn(
-          '×',
-          () => {
-            mutate(() => (c.fields = c.fields.filter(x => x !== f)));
-            renderCollections();
-          },
-          'danger',
-        ),
+      const remove = btn(
+        '×',
+        () => {
+          mutate(() => (c.fields = c.fields.filter(x => x !== f)));
+          renderCollections();
+        },
+        'danger',
       );
+      remove.setAttribute('aria-label', 'Hapus field ' + f.label);
+      row.append(remove);
+      if (uniqueFieldTypes.includes(f.type))
+        row.append(
+          field(
+            'Unik',
+            Boolean(f.unique),
+            v =>
+              mutate(() => {
+                if (v) f.unique = true;
+                else delete f.unique;
+              }),
+            'checkbox',
+          ),
+        );
+      if (!['relation', 'file'].includes(f.type)) row.append(defaultField(f));
       card.append(row);
     }
     card.append(
@@ -455,6 +493,36 @@ function renderCollections() {
     );
     host.append(card);
   }
+}
+// Nilai bawaan diisi saat record baru dibuat tanpa nilai; bentuk isiannya mengikuti tipe field.
+function defaultField(f) {
+  const set = v =>
+    mutate(() => {
+      if (v === '' || v === undefined || (Array.isArray(v) && !v.length)) delete f.default;
+      else f.default = v;
+    });
+  const value = Array.isArray(f.default) ? f.default.join(', ') : (f.default ?? '');
+  if (f.type === 'boolean')
+    return field('Nilai bawaan', value === '' ? '' : String(value), v => set(v === '' ? '' : v === 'true'), 'select', [
+      { value: '', label: 'Tidak ada' },
+      { value: 'true', label: 'Ya' },
+      { value: 'false', label: 'Tidak' },
+    ]);
+  if (f.type === 'choice')
+    return field('Nilai bawaan', value, set, 'select', [{ value: '', label: 'Tidak ada' }, ...f.options]);
+  if (f.type === 'multichoice')
+    return field('Nilai bawaan (pisahkan koma)', value, v =>
+      set(
+        v
+          .split(',')
+          .map(x => x.trim())
+          .filter(Boolean),
+      ),
+    );
+  const type = { number: 'number', date: 'date', time: 'time', datetime: 'datetime-local' }[f.type] || 'text';
+  const wrap = field('Nilai bawaan', value, v => set(f.type === 'number' ? (v === '' ? '' : Number(v)) : v), type);
+  if (f.type === 'number') wrap.querySelector('input').step = 'any';
+  return wrap;
 }
 $('add-collection').onclick = () => {
   mutate(() =>

@@ -2,6 +2,8 @@
 import { supportsBusinessTools } from './profiles/registry.js';
 // menggandakan, mengganti nama, menghapus, memasang ke sesi, dan menyimpan bidang-bidangnya.
 import { copyGraphRecords, requireAvailableGraph } from './builder/store.js';
+import { profileFiles, removeRecordFiles } from './builder/record-files.js';
+import { copyCollectionSources } from './builder/collection-sources.js';
 import { profileDefinition, enabledProfiles } from './profiles/registry.js';
 import { publicSources, sourceInput, saveSource, builtinSource } from './profiles/cs/store.js';
 import { eduData } from './profiles/pendidikan/tools.js';
@@ -183,7 +185,8 @@ export async function createDataProfile(svc: AIService, account: string, body: u
     throw fail('Pilihan salin record pelanggan tidak valid');
   const copyCustomer = input.copy_customer_records === true;
   const images = new Map<string, string>(),
-    documents: string[] = [];
+    documents: string[] = [],
+    recordFiles: string[] = [];
   let id: string;
   try {
     id = await transaction(async c => {
@@ -201,7 +204,8 @@ export async function createDataProfile(svc: AIService, account: string, body: u
       if (taken[0]) throw new ApiError(409, 'name_taken', 'Nama data profil sudah dipakai.');
       const created = await insertDataProfile(svc, c, account, type, name, from);
       if (copyFrom) {
-        await copyGraphRecords(c, account, copyFrom, created, copyCustomer);
+        await copyGraphRecords(c, account, copyFrom, created, copyCustomer, recordFiles);
+        await copyCollectionSources(c, account, copyFrom, created);
         // Hasil gandaan punya salinan sendiri untuk setiap foto, jadi menghapus salah satu data profil tidak merusak
         // yang lain.
         const [photos] = await productImagesSql.listByProfile(c, [account, copyFrom]);
@@ -231,6 +235,7 @@ export async function createDataProfile(svc: AIService, account: string, body: u
   } catch (error) {
     for (const copy of images.values()) await svc.productImages.removeFile(account, copy).catch(() => {});
     await eduData.store.removeFiles(account, documents);
+    await removeRecordFiles(account, recordFiles);
     throw error;
   }
   return svc.dataProfile(account, id);
@@ -266,9 +271,11 @@ export async function deleteDataProfile(svc: AIService, account: string, value: 
       );
     const [images] = await productImagesSql.listByProfile(c, [account, id]);
     const documents = await eduData.store.files(c, account, id);
+    const records = await profileFiles(c, account, id);
     await dataProfilesSql.deleteOwned(c, [id, account]);
-    return { images: images.map(image => String(image.id)), documents };
+    return { images: images.map(image => String(image.id)), documents, records };
   });
+  await removeRecordFiles(account, photos.records);
   for (const photo of photos.images) await svc.productImages.removeFile(account, photo).catch(() => {});
   await eduData.store.removeFiles(account, photos.documents);
   return { ok: true };

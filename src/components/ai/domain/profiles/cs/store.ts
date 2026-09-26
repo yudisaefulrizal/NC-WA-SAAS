@@ -1,13 +1,21 @@
 // Data CS Usaha di sebuah data profil: produk, pesanan, dan sumber datanya (bawaan atau endpoint milik klien),
 // beserta tool yang dipakai AI untuk membacanya dan membuat pesanan.
 import { randomUUID } from 'node:crypto';
-import { request } from 'node:https';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { db } from '../../../../../libraries/db.js';
 import { digest } from '../../../../../libraries/security.js';
 import { encrypt, decrypt } from '../../../../../libraries/crypto.js';
 import { ApiError } from '../../../../../libraries/errors.js';
-import { validatePublicUrl } from '../../../../../libraries/download.js';
+import {
+  builtinSource,
+  callEndpoint,
+  endpointUrl,
+  sourceInput,
+  type DataSource,
+  type EndpointTransport,
+} from '../../endpoint.js';
+export { builtinSource, callEndpoint, endpointUrl, sourceInput, type DataSource, type EndpointTransport };
+export type SourceKind = 'products' | 'orders';
 import type { AITools, ToolContext, ToolName } from '../../pipeline/runner.js';
 import { record } from '../../../../../libraries/validation.js';
 import * as accountsSql from '../../../data-access/accounts-queries.js';
@@ -149,13 +157,6 @@ function orderRow(row: RowDataPacket): Order {
     notes: row.notes,
   };
 }
-export interface DataSource {
-  mode: 'builtin' | 'endpoint';
-  endpoint: string;
-  secret: string;
-}
-export type SourceKind = 'products' | 'orders';
-export const builtinSource: DataSource = { mode: 'builtin', endpoint: '', secret: '' };
 // Produk, pesanan, dan sumbernya milik data profil (ai_data_profiles), dipakai bersama oleh semua sesi yang
 // memasangnya.
 export async function source(account: string, profile: string, kind: SourceKind, c = db): Promise<DataSource> {
@@ -167,32 +168,6 @@ export async function publicSources(account: string, profile: string) {
     orders = await source(account, profile, 'orders');
   const safe = ({ secret, ...s }: DataSource) => ({ ...s, has_token: Boolean(secret) });
   return { products_source: safe(products), orders_source: safe(orders) };
-}
-export async function endpointUrl(value: string) {
-  if (value.length > 512) throw invalid('Endpoint terlalu panjang');
-  let u: URL;
-  try {
-    u = new URL(value);
-  } catch {
-    throw invalid('Endpoint tidak valid');
-  }
-  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash)
-    throw invalid('Endpoint wajib HTTPS tanpa kredensial, query atau fragmen');
-  await validatePublicUrl(u.href);
-  return u.href;
-}
-export async function sourceInput(value: unknown) {
-  const s = record(value);
-  if (s.mode !== 'builtin' && s.mode !== 'endpoint') throw invalid('Sumber data tidak valid');
-  const endpoint = s.mode === 'endpoint' ? await endpointUrl(text(s.endpoint, 512, 'Endpoint')) : '';
-  let token: string | undefined;
-  if (s.token !== undefined) {
-    token = text(s.token, 512, 'Token', true);
-    if (/[\r\n]/.test(token)) throw invalid('Token tidak valid');
-  }
-  if (s.clear_token !== undefined && typeof s.clear_token !== 'boolean')
-    throw invalid('Pilihan hapus token tidak valid');
-  return { mode: s.mode as DataSource['mode'], endpoint, token, clear_token: s.clear_token === true };
 }
 export async function saveSource(
   c: PoolConnection,
@@ -212,65 +187,6 @@ export async function saveSource(
           : '';
   await dataSourcesSql.upsert(c, [account, profile, kind, input.mode, input.endpoint, secret]);
 }
-
-// Hanya HTTPS; DNS dikunci di setiap request, tanpa redirect, tanpa kredensial atau body di pesan error.
-export type EndpointTransport = (
-  source: DataSource,
-  payload: Record<string, unknown>,
-  idempotencyKey: string,
-) => Promise<unknown>;
-export const callEndpoint: EndpointTransport = async (config, payload, idempotencyKey) => {
-  const { url, addresses } = await validatePublicUrl(await endpointUrl(config.endpoint));
-  const body = JSON.stringify(payload);
-  return new Promise((resolve, reject) => {
-    const req = request(
-      url,
-      {
-        method: 'POST',
-        agent: false,
-        signal: AbortSignal.timeout(15000),
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          'Idempotency-Key': idempotencyKey,
-          ...(config.secret ? { Authorization: 'Bearer ' + decrypt(config.secret) } : {}),
-        },
-        lookup: (_host, options, callback) => {
-          if (options.all) callback(null, addresses);
-          else callback(null, addresses[0].address, addresses[0].family);
-        },
-      },
-      res => {
-        const chunks: Buffer[] = [];
-        let size = 0;
-        res.on('data', (chunk: Buffer) => {
-          size += chunk.length;
-          if (size > 32000) {
-            res.destroy(Error('endpoint_response_limit'));
-            return;
-          }
-          chunks.push(chunk);
-        });
-        res.on('error', error =>
-          reject(Error(error.message === 'endpoint_response_limit' ? 'endpoint_response_limit' : 'endpoint_failed')),
-        );
-        res.on('end', () => {
-          if (res.statusCode !== 200) {
-            reject(Error('endpoint_http_' + res.statusCode));
-            return;
-          }
-          try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString()));
-          } catch {
-            reject(Error('endpoint_invalid_json'));
-          }
-        });
-      },
-    );
-    req.on('error', () => reject(Error('endpoint_failed')));
-    req.end(body);
-  });
-};
 
 export class AIData implements AITools {
   constructor(private remote: EndpointTransport = callEndpoint) {}

@@ -1,9 +1,15 @@
 // API editor profil bebas, ekspor/impor, simulasi, dan data koleksi milik akun yang login.
-import type express from 'express';
+import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import * as builder from '../domain/builder/store.js';
 import { templates } from '../domain/builder/templates.js';
 import { simulate } from '../domain/builder/simulation.js';
+import { uploadRecordFile, recordFilePath } from '../domain/builder/record-files.js';
+import {
+  listCollectionSources,
+  saveCollectionSource,
+  testCollectionSource,
+} from '../domain/builder/collection-sources.js';
 import { ApiError } from '../../../libraries/errors.js';
 export function builderAdminRoutes(app: express.Express) {
   const base = '/api/admin/ai/builder';
@@ -58,6 +64,52 @@ export function builderAdminRoutes(app: express.Express) {
   });
 }
 export function builderAccountRoutes(app: express.Express) {
+  // File field File/gambar: body mentah, nama file ter-URI-encode di X-Filename. Data profil harus milik akun login.
+  const files = '/api/ai/record-files/:profile';
+  app.post(files, express.raw({ type: '*/*', limit: '11mb' }), async (req, res) => {
+    await builder.recordDefinition(res.locals.account.id, String(req.params.profile));
+    if (!Buffer.isBuffer(req.body)) throw new ApiError(400, 'invalid_request', 'File wajib dikirim');
+    let name: string;
+    try {
+      name = decodeURIComponent(req.get('X-Filename') ?? '');
+    } catch {
+      throw new ApiError(400, 'invalid_request', 'Nama file tidak valid');
+    }
+    res.status(201).json(await uploadRecordFile(res.locals.account.id, String(req.params.profile), name, req.body));
+  });
+  app.get(files + '/:file', async (req, res) => {
+    const file = await recordFilePath(res.locals.account.id, String(req.params.profile), String(req.params.file));
+    const inline = file.media_type === 'image' || file.mimetype === 'application/pdf';
+    res
+      .set('Content-Type', file.mimetype)
+      .set(
+        'Content-Disposition',
+        (inline ? 'inline' : 'attachment') + "; filename*=UTF-8''" + encodeURIComponent(file.filename),
+      )
+      .set('X-Content-Type-Options', 'nosniff')
+      .set('Cache-Control', 'private, no-store')
+      .sendFile(file.path);
+  });
+  // Sumber data per koleksi: tabel aplikasi atau API milik klien.
+  const sources = '/api/ai/record-sources/:profile';
+  app.get(sources, async (req, res) =>
+    res.json(await listCollectionSources(res.locals.account.id, String(req.params.profile))),
+  );
+  app.put(sources + '/:collection', async (req, res) =>
+    res.json(
+      await saveCollectionSource(
+        res.locals.account.id,
+        String(req.params.profile),
+        String(req.params.collection),
+        req.body,
+      ),
+    ),
+  );
+  app.post(sources + '/:collection/test', async (req, res) =>
+    res.json(
+      await testCollectionSource(res.locals.account.id, String(req.params.profile), String(req.params.collection)),
+    ),
+  );
   const base = '/api/ai/records/:profile';
   app.get(base, async (req, res) => {
     const d = await builder.recordDefinition(res.locals.account.id, String(req.params.profile));

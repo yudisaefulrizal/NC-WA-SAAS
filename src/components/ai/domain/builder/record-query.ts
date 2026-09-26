@@ -1,7 +1,7 @@
 // Kontrak pencarian record koleksi: filter per field, kata kunci, urutan, dan batas. Dipakai node Data, dashboard,
 // dan simulasi; versi JavaScript di sini wajib bermakna sama dengan query SQL di graph-profiles-queries.ts.
 import { ApiError } from '../../../../libraries/errors.js';
-import type { Collection, Field } from './definition.js';
+import { normalizePhone, type Collection, type Field } from './definition.js';
 
 export const filterOperators = [
   'equals',
@@ -72,9 +72,21 @@ export function filterGroup(collection: Collection, value: unknown, match: unkno
       const raw = f.value ?? '';
       if (!['string', 'number', 'boolean'].includes(typeof raw) || String(raw).length > 2000)
         throw bad('Nilai filter tidak valid.');
-      return { field: field.id, type: field.type, operator: f.operator as FilterOperator, value: String(raw) };
+      return {
+        field: field.id,
+        type: field.type,
+        operator: f.operator as FilterOperator,
+        value: canonical(field, String(raw)),
+      };
     }),
   };
+}
+// Nilai filter disamakan dengan bentuk tersimpan: opsi persis seperti di skema dan nomor telepon berawalan 62.
+function canonical(field: Field, value: string) {
+  if (field.type === 'choice' || field.type === 'multichoice')
+    return field.options.find(o => o.toLowerCase() === value.trim().toLowerCase()) ?? value;
+  if (field.type === 'phone') return normalizePhone(value) ?? value;
+  return value;
 }
 export function sortSpec(collection: Collection, field: unknown, direction: unknown): RecordQuery['sort'] {
   const dir = direction === 'desc' ? 'desc' : 'asc';
@@ -89,6 +101,12 @@ function compareFilter(value: unknown, f: RecordQuery['groups'][number]['filters
   if (f.operator === 'empty') return missing(value);
   if (missing(value)) return false;
   if (f.operator === 'exists') return true;
+  // Pilihan ganda: sama dengan berarti daftarnya memuat opsi itu.
+  if (f.type === 'multichoice' && (f.operator === 'equals' || f.operator === 'not_equals')) {
+    const has = Array.isArray(value) && value.includes(f.value);
+    return f.operator === 'equals' ? has : !has;
+  }
+  if (f.type === 'multichoice' && !['contains', 'not_contains'].includes(f.operator)) return false;
   if (f.type === 'boolean') {
     if (!['equals', 'not_equals'].includes(f.operator)) return false;
     const want = ['true', 'ya', '1'].includes(f.value.trim().toLowerCase());
