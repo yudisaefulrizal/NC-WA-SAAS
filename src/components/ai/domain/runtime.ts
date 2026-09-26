@@ -20,6 +20,8 @@ import { text } from './input-validation.js';
 import { countWords, aiFallback, creditCost } from './metering.js';
 import { profileFields, ProfileField, composeKnowledge } from './profiles/cs/knowledge.js';
 import { transaction, lockAccount } from './transaction.js';
+import { recordFilePath } from './builder/record-files.js';
+import type { QueuedMedia } from './builder/media.js';
 import { parseMemory } from './memory.js';
 import type { AIService } from './service.js';
 import * as conversations from './conversations.js';
@@ -274,6 +276,8 @@ export async function handleMessage(
     // pengiriman ulang.
     const alreadySent = sentDocuments(prepared.messages),
       pendingDocuments: { id: string; filename: string }[] = [];
+    // File dari node Kirim media profil dinamis; dikirim hanya bila jawaban berhasil dan tidak diteruskan ke tim.
+    let queuedMedia: QueuedMedia[] = [];
     config.onTrace = event => {
       trace?.(event);
       if (event.node === 'router' && event.state === 'routed')
@@ -350,6 +354,7 @@ export async function handleMessage(
         pipeline,
       );
       fallback = result.fallback;
+      if ('media' in result && result.media) queuedMedia = result.media;
       answer = fallback ? 'Baik, saya konfirmasi dulu dan akan melanjutkan jawaban segera.' : result.answer;
       agent = result.agent;
     } catch (error) {
@@ -508,6 +513,44 @@ export async function handleMessage(
             }).catch(() => {});
           }
         }
+      // Satu pesan berbayar per file; gagal mengirim media tidak pernah menahan jawaban teks.
+      const sendMedia = async (when: QueuedMedia['when']) => {
+        if (generationFailed || fallback) return;
+        for (const [index, item] of queuedMedia.entries()) {
+          if (item.when !== when) continue;
+          await guard();
+          const readFile = async () => {
+            const file = await recordFilePath(account, prepared.profileId, item.ref);
+            return { path: file.path, mimetype: file.mimetype, cleanup: async () => {} };
+          };
+          const sent = await sendBilled(
+            account,
+            manager,
+            session,
+            'media',
+            {
+              to: message.from,
+              type: item.type,
+              url: item.ref,
+              ...(item.type === 'document' ? { filename: item.filename } : {}),
+              ...(item.caption ? { caption: item.caption } : {}),
+            },
+            'ai_media_' + index + '_' + id,
+            item.kind === 'file' ? readFile : undefined,
+            guard,
+          ).catch(() => undefined);
+          if (sent)
+            await recordOutgoing(account, session, {
+              customer: message.from,
+              messageId: sent.messageId,
+              origin: 'ai',
+              type: item.type,
+              // Riwayat chat menampilkan keterangan media, atau nama filenya bila tanpa keterangan.
+              text: item.caption || item.filename,
+            }).catch(() => {});
+        }
+      };
+      await sendMedia('before');
       await guard();
       const confirmation = await sendBilled(
         account,
@@ -526,6 +569,7 @@ export async function handleMessage(
         text: answer,
       }).catch(() => {});
       if (fallbackId) await fallbacksSql.setConfirmationMessage(db, [confirmation.messageId, fallbackId]);
+      await sendMedia('after');
     } catch (error) {
       status =
         error instanceof ApiError && error.code === 'ai_cancelled'

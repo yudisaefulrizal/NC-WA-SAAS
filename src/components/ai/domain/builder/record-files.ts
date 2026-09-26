@@ -74,6 +74,12 @@ export async function uploadRecordFile(account: string, profile: string, name: u
   }
   return { id, filename: file, mimetype: type.mimetype, media_type: type.media_type, size_bytes: content.length };
 }
+// Metadata tanpa membuka file; dipakai node Kirim media untuk memastikan file milik data profil ini.
+export async function recordFileInfo(account: string, profile: string, id: string) {
+  if (!fileId(id)) return null;
+  const [rows] = await filesSql.find(db, [account, profile, id]);
+  return rows[0] ? recordFile(rows[0]) : null;
+}
 export async function recordFilePath(account: string, profile: string, id: string) {
   const missing = new ApiError(404, 'file_not_found', 'File tidak ditemukan.');
   if (!fileId(id)) throw missing;

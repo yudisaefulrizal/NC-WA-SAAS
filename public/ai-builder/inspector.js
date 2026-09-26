@@ -75,6 +75,7 @@ function renderInspector() {
   }
   if (n.type === 'extract') renderExtract(host, n);
   if (n.type === 'compute') renderCompute(host, n);
+  if (n.type === 'media') renderMedia(host, n);
   if (n.type === 'context')
     host.append(
       field('Format konteks', n.context_format || 'text', v => mutate(() => (n.context_format = v)), 'select', [
@@ -281,7 +282,7 @@ function renderInspector() {
           x.id !== n.id &&
           (x.type === 'memory'
             ? x.id === n.memory
-            : ['agent', 'context', 'router', 'tool', 'extract', 'compute'].includes(x.type)),
+            : ['agent', 'context', 'router', 'tool', 'extract', 'compute', 'media'].includes(x.type)),
       )
       .flatMap(x =>
         (x.type === 'memory'
@@ -300,7 +301,9 @@ function renderInspector() {
               ? [...(x.fields ?? []).map(f => f.id), 'missing']
               : x.type === 'compute'
                 ? (x.steps ?? []).map(step => step.name)
-                : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]]
+                : x.type === 'media'
+                  ? ['files', 'count', 'skipped']
+                  : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]]
         ).map(key => 'nodes.' + x.id + '.' + key),
       ),
   ])
@@ -841,5 +844,30 @@ function renderCompute(host, n) {
       mutate(() => n.steps.push({ name: 'hasil_' + (n.steps.length + 1), op: 'value', args: [''] }));
       renderInspector();
     }),
+  );
+}
+function renderMedia(host, n) {
+  host.append(
+    nodeField(n, 'value', 'File yang dikirim', 'textarea'),
+    el(
+      'p',
+      'Isi dengan variabel field File/gambar, misalnya {{nodes.cari.first.data.brosur}}, URL HTTPS dari koleksi API, atau daftar keduanya. Nilai kosong berarti tidak ada file yang dikirim.',
+      'hint',
+    ),
+    nodeField(n, 'caption', 'Keterangan (opsional)'),
+    field('Waktu kirim', n.send_when || 'before', v => mutate(() => (n.send_when = v)), 'select', [
+      { value: 'before', label: 'Sebelum jawaban teks' },
+      { value: 'after', label: 'Sesudah jawaban teks' },
+    ]),
+    field('Kirim sebagai', n.media_as || 'auto', v => mutate(() => (n.media_as = v)), 'select', [
+      { value: 'auto', label: 'Otomatis (gambar tampil sebagai foto)' },
+      { value: 'image', label: 'Gambar' },
+      { value: 'document', label: 'Dokumen' },
+    ]),
+    el(
+      'p',
+      'Dikirim setelah alur selesai dan tidak dikirim bila percakapan diteruskan ke tim. Maksimal 3 file per balasan, 1 kredit WhatsApp per file. Simulasi dan Uji Coba hanya menampilkan daftarnya.',
+      'hint',
+    ),
   );
 }

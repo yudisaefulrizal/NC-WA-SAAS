@@ -26,6 +26,7 @@ Profil bawaan dan AI Studio lamanya tetap tersedia. Template Katalog sederhana/P
 | Data (tipe `tool`) | Cari, Ambil, Buat, Ubah, Hapus, atau Hitung isi koleksi; atau kemampuan bisnis: knowledge, katalog, pesanan pelanggan, buat pesanan, foto produk |
 | Ekstrak | Mengubah pesan (dan riwayat bila memori terhubung) menjadi field terstruktur; lihat **Ekstrak** |
 | Set / Hitung | Mengolah nilai dengan operasi tetap tanpa model; lihat **Set / Hitung** |
+| Kirim media | Mengantrekan file dari field File/gambar atau URL HTTPS untuk dikirim bersama jawaban; lihat **Kirim media** |
 | Context | Menyimpan ringkasan untuk percakapan berikutnya, maksimal 200 karakter |
 | Output | Mengambil teks/variabel sebagai jawaban akhir |
 | Fallback | Meneruskan kebutuhan ke mekanisme tiket tim yang sudah ada; memerlukan konfigurasi fallback sesi |
@@ -82,6 +83,12 @@ Keluaran: satu nilai per field, ditambah `missing` (ID field wajib yang kosong).
 | `item_at` | daftar, urutan mulai 1 | item atau `null` |
 
 Angka dari teks diterima bila seluruhnya angka (`"2"`), bukan format ribuan (`"1.500"`). Nilai yang tidak sesuai menghentikan alur dengan `ai_compute_failed` di jejak eksekusi.
+
+## Kirim media
+
+`value` berisi variabel yang menghasilkan ID file field File/gambar pada data profil sesi, URL HTTPS (misalnya dari koleksi yang bersumber API klien), atau daftar keduanya. Nilai kosong berarti tidak ada file. ID file milik data profil lain ditolak (`ai_media_not_found`); nilai lain yang bukan ID atau URL ditolak (`ai_media_invalid`). `caption` (opsional, boleh variabel), `send_when` (`before`/`after` jawaban teks, bawaan `before`), dan `media_as` (`auto`/`image`/`document`; otomatis memakai jenis file tersimpan, atau ekstensi URL).
+
+Keluaran `files`, `count`, dan `skipped`. Maksimal tiga file per balasan untuk seluruh node; sisanya dicatat di `skipped`. File dikirim runtime setelah alur selesai, masing-masing satu pesan WhatsApp berbayar dengan kunci idempotensi sendiri, dan tidak dikirim bila alur berakhir di Fallback atau gagal. Media yang gagal terkirim tidak menahan jawaban teks. URL diunduh dengan pemeriksaan alamat publik yang sama seperti kirim media API. Riwayat chat mencatat keterangan media, atau nama file bila tanpa keterangan. Simulasi dan Uji Coba hanya menampilkan daftar file.
 
 ## Kondisi
 
@@ -183,6 +190,7 @@ Pencarian dan filter membaca JSON dalam cakupan akun/profil/koleksi (dan pelangg
 - `test/components/ai/builder-data.test.ts`: kontrak dan normalisasi, isolasi record per pelanggan, paritas filter/kata kunci/urutan/batas antara MySQL dan simulasi, operasi node Data di alur, Kondisi dan variabel WIB, simulasi, duplikasi, dan konflik kepemilikan saat publikasi.
 - `test/components/ai/builder-sources.test.ts`: pengaturan sumber dan token, penolakan SSRF, penulisan dashboard ke koleksi API, keenam operasi ke API tiruan beserta isi `query`/`context`, validasi balasan, error HTTP, uji dari dashboard, dan simulasi yang tidak memanggil API.
 - `scripts/checks/browser-ai-builder-sources-check.ts`: ganti koleksi ke API, simpan-buka ulang, uji API, dan kembali ke tabel pada 1280/390 px.
+- `test/components/ai/builder-media.test.ts`: kontrak Kirim media, file milik data profil sendiri, URL, nilai kosong, dan batas tiga file lintas node di simulasi; `profiles.test.ts` memeriksa urutan kirim gambar lalu teks di engine WhatsApp tiruan dan tidak ada media saat Fallback.
 - `test/components/ai/builder-fields.test.ts`: tipe field baru dan normalisasinya, nilai bawaan, keunikan (store, simulasi, publikasi), paritas filter pilihan ganda/telepon, siklus file, dan rute file HTTP.
 - `test/components/ai/builder-extract-compute.test.ts`: kontrak dan urutan langkah, Ekstrak dengan riwayat, JSON Schema dan fallback-nya, nilai hilang/tidak valid, serta semua operasi Set / Hitung.
 - `scripts/checks/browser-ai-builder-fields-check.ts`: Ekstrak, Set / Hitung, tipe field baru, nilai bawaan, unik, simpan-buka ulang, dan unggah file di formulir klien pada 1280/390 px.

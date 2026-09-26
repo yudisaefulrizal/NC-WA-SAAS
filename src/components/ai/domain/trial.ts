@@ -71,6 +71,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
     agent: string | null = null,
     generationFailed = false;
   const documents: string[] = [];
+  const media: { name: string; type: string; when: string }[] = [];
   try {
     // Uji Coba tidak pernah mengirim WhatsApp; dokumen yang dipilih AI dicantumkan bersama jawabannya.
     const result = await runAgents(
@@ -103,6 +104,9 @@ export async function trial(svc: AIService, account: string, body: unknown) {
     );
     answer = result.answer;
     agent = result.agent;
+    // Uji Coba tidak mengirim WhatsApp; media dari node Kirim media hanya dicantumkan.
+    if ('media' in result && result.media)
+      media.push(...result.media.map(m => ({ name: m.filename, type: m.type, when: m.when })));
   } catch {
     generationFailed = true;
     answer = aiFallback;
@@ -125,5 +129,5 @@ export async function trial(svc: AIService, account: string, body: unknown) {
   });
   if (generationFailed)
     throw new ApiError(502, 'ai_provider_failed', 'AI belum berhasil menjawab; periksa konfigurasi AI.');
-  return { answer, agent, balance: wallet, documents };
+  return { answer, agent, balance: wallet, documents, media };
 }

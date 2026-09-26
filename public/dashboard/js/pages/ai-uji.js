@@ -11,10 +11,18 @@ form('ai-trial-form', async data => {
         : { session: data.session, question: data.question },
     );
     $('ai-trial-answer-text').textContent = result.answer;
-    $('ai-trial-documents').hidden = !result.documents?.length;
-    $('ai-trial-documents').textContent = result.documents?.length
-      ? 'Dokumen yang akan dikirim lebih dulu: ' + result.documents.join(', ')
-      : '';
+    // Uji Coba tidak mengirim WhatsApp: dokumen dan media hanya dicantumkan.
+    const media = result.media ?? [];
+    $('ai-trial-documents').hidden = !result.documents?.length && !media.length;
+    $('ai-trial-documents').textContent = [
+      result.documents?.length ? 'Dokumen yang akan dikirim lebih dulu: ' + result.documents.join(', ') : '',
+      media.length
+        ? 'Media yang akan dikirim: ' +
+          media.map(m => m.name + (m.when === 'after' ? ' (sesudah jawaban)' : ' (sebelum jawaban)')).join(', ')
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
     $('ai-trial-answer').hidden = false;
     await loadAI();
   } catch (e) {

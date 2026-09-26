@@ -922,3 +922,7 @@ th {
   width: auto;
   margin: 0;
 }
+.bubble.media {
+  border-style: dashed;
+  font-weight: 600;
+}

@@ -8,6 +8,7 @@ import type { AIMessage, AITransport } from '../provider.js';
 import { parseDefinition, validateRecord, text, type Collection } from './definition.js';
 import { keywords, queryMemory, sumMemory, filterGroup, type StoredRecord } from './record-query.js';
 import { runRecordTool, type RecordAdapter } from './record-tools.js';
+import { previewMedia } from './media.js';
 import { businessSimulation, simulationCustomer } from './business-simulation.js';
 import { runGraph } from './engine.js';
 import { transientAIError } from '../pipeline/retry.js';
@@ -98,6 +99,7 @@ export async function simulate(
     (n, v, key) => runRecordTool(memoryRecords(records), d, n, v, key),
     300,
     business.tools,
+    previewMedia,
   );
   emit({
     node: 'output',

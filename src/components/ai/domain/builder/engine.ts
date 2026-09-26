@@ -15,6 +15,16 @@ import { runRecordTool, recordToolGuide, type RecordAdapter } from './record-too
 import { sourcedRecords } from './collection-sources.js';
 import { compute } from './compute.js';
 import { extractInstruction, extractFormat, parseExtraction } from './extract.js';
+import {
+  maxMediaPerReply,
+  mediaRefs,
+  urlMedia,
+  fileRef,
+  urlRef,
+  type MediaResolver,
+  type QueuedMedia,
+} from './media.js';
+import { recordFileInfo } from './record-files.js';
 export type GraphTool = (node: GraphNode, value: unknown, key: string) => Promise<unknown>;
 export function lookup(path: string, state: Record<string, unknown>): unknown {
   let v: unknown = state;
@@ -37,6 +47,16 @@ function softLookup(path: string, state: Record<string, unknown>) {
   } catch {
     return undefined;
   }
+}
+// File harus milik data profil sesi ini; URL diperiksa lagi (alamat publik, ukuran) saat diunduh untuk dikirim.
+function databaseMedia(scope: ToolContext): MediaResolver {
+  return async (ref, as) => {
+    if (urlRef(ref)) return urlMedia(ref, as);
+    if (!fileRef(ref)) throw Error('ai_media_invalid');
+    const file = await recordFileInfo(scope.account, scope.profile, ref);
+    if (!file) throw Error('ai_media_not_found');
+    return { kind: 'file', ref, type: as === 'auto' ? file.media_type : as, filename: file.filename };
+  };
 }
 // Record milik pelanggan selalu dibatasi ke pelanggan dari sesi, bukan dari argumen model.
 function databaseRecords(scope: ToolContext, d: GraphDefinition): RecordAdapter {
@@ -76,7 +96,9 @@ export async function runGraph(
   toolOverride?: GraphTool,
   maxWords = 300,
   business: AITools = aiData,
+  resolveMedia: MediaResolver = databaseMedia(scope),
 ) {
+  const media: QueuedMedia[] = [];
   assertRunnable(d);
   const input = messages.filter(m => m.role === 'user').at(-1)?.content;
   if (!input) throw Error('ai_missing_input');
@@ -427,6 +449,21 @@ export async function runGraph(
           );
         }
         result = values;
+      } else if (n.type === 'media') {
+        const refs = mediaRefs(interpolate(n.value, state)),
+          caption = String(interpolate(n.caption ?? '', state) ?? '').slice(0, 1000);
+        const files: { name: string; type: string }[] = [];
+        let skipped = 0;
+        for (const ref of refs) {
+          if (media.length >= maxMediaPerReply) {
+            skipped++;
+            continue;
+          }
+          const item = await resolveMedia(ref, n.media_as ?? 'auto');
+          media.push({ ...item, caption, when: n.send_when ?? 'before' });
+          files.push({ name: item.filename, type: item.type });
+        }
+        result = { files, count: files.length, skipped };
       } else if (n.type === 'context') {
         const selected = {
           ...tierConfig(config, n.tier),
@@ -454,7 +491,7 @@ export async function runGraph(
         if (!answer.trim() || answer.length > 8000 || answer.split(/\s+/).length > Math.min(300, maxWords))
           throw Error('ai_output_limit');
         emit(n.id, 'done', { answer });
-        return { answer, agent: agent || n.id };
+        return { answer, agent: agent || n.id, ...(media.length ? { media } : {}) };
       } else {
         if (!scope.fallbackEnabled) throw Error('ai_fallback_disabled');
         const question = n.value ? String(interpolate(n.value, state)) : (pendingFallback?.question ?? input);

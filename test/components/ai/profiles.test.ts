@@ -2,6 +2,9 @@
 // menggandakan, dan profil yang dimatikan pemilik.
 import { blankDefinition } from '../../../src/components/ai/domain/builder/definition.js';
 import { createGraph, saveGraph } from '../../../src/components/ai/domain/builder/store.js';
+import { uploadRecordFile } from '../../../src/components/ai/domain/builder/record-files.js';
+import * as recordStore from '../../../src/components/ai/domain/builder/store.js';
+import { storagePaths } from '../../../src/libraries/storage.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -48,6 +51,8 @@ class FixtureAI extends AIService {
 }
 const service = new FixtureAI(transport, async () => {});
 const updates = new Map<string, (event: Update) => void>();
+// Isi setiap kiriman engine tiruan, berurutan, untuk memeriksa urutan media dan teks.
+const outbox: { to: string; content: any }[] = [];
 let sequence = 0;
 const gateway = createGateway(
   account => async (session, update) => {
@@ -58,7 +63,8 @@ const gateway = createGateway(
       async logout() {},
       async typing() {},
       async read() {},
-      async send() {
+      async send(to: string, content: unknown) {
+        outbox.push({ to, content });
         const id = 'OUT' + ++sequence;
         await service.registerSystemMessage(account, session, id);
         return id;
@@ -502,4 +508,81 @@ test('A WhatsApp session executes the published dynamic graph, ignores draft edi
   const second = (await chatMessages(t.id, 'shop', customer)).messages.filter(m => m.origin === 'ai');
   assert.equal(second.length, 2);
   assert.equal(second.at(-1)!.text, 'Jawaban versi berikutnya');
+});
+
+test('Kirim media sends a collection file before the text answer and skips it when the flow falls back', async () => {
+  const t = await tenant();
+  const d = blankDefinition('Graph media');
+  d.collections = [
+    {
+      id: 'katalog',
+      name: 'Katalog',
+      owner: 'shared',
+      fields: [
+        { id: 'nama', label: 'Nama', type: 'text', required: true, options: [], collection: '' },
+        { id: 'foto', label: 'Foto', type: 'file', required: false, options: [], collection: '' },
+      ],
+    },
+  ];
+  const base = d.nodes[2];
+  d.nodes = [
+    d.nodes[0],
+    { ...base, id: 'cari', type: 'tool', collection: 'katalog', operation: 'search', query: '', value: '' },
+    {
+      ...base,
+      id: 'kirim',
+      type: 'media',
+      value: '{{nodes.cari.first.data.foto}}',
+      caption: '{{nodes.cari.first.data.nama}}',
+    },
+    { ...base, id: 'output', value: 'Ini fotonya' },
+    { ...base, id: 'tim', type: 'fallback', value: 'Tidak ada katalog' },
+  ];
+  d.edges = [
+    { id: 'e1', source: 'input', port: 'next', target: 'cari' },
+    { id: 'e2', source: 'cari', port: 'found', target: 'kirim' },
+    { id: 'e3', source: 'cari', port: 'empty', target: 'tim' },
+    { id: 'e4', source: 'kirim', port: 'next', target: 'output' },
+  ];
+  const g = await createGraph(owner, d);
+  graphs.push(g.id);
+  await saveGraph(owner, g.id, { revision: 1 }, true);
+  await setProfileEnabled(owner, g.id, true);
+  const p = await service.createDataProfile(t.id, { profile_type: g.id, name: 'Graf media' });
+  await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: p.id, enabled: true }).expect(200);
+  await t
+    .api('patch', '/ai/data-profiles/' + p.id + '/field')
+    .send({ field: 'fallback_number', value: '628111222333' });
+  // Tanpa katalog alur berakhir di Fallback: tidak ada media yang dikirim.
+  const before = outbox.length;
+  t.send('shop', 'MEDIA0', 'Ada foto?');
+  await eventually(
+    () => answers(t.id, 'shop'),
+    n => n === 1,
+  );
+  assert.equal(
+    outbox.slice(before).some(o => o.content.type),
+    false,
+  );
+  const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#0a0' } })
+    .png()
+    .toBuffer();
+  const file = await uploadRecordFile(t.id, p.id, 'kopi.png', png);
+  await recordStore.writeRecord(t.id, p.id, 'katalog', 'create', { data: { nama: 'Kopi Susu', foto: file.id } });
+  const start = outbox.length;
+  t.send('shop', 'MEDIA1', 'Ada foto?');
+  await eventually(
+    () => answers(t.id, 'shop'),
+    n => n === 3,
+  );
+  const sentNow = outbox.slice(start).filter(o => o.to.startsWith(customer));
+  assert.deepEqual(
+    sentNow.map(o => o.content.type ?? 'text'),
+    ['image', 'text'],
+  );
+  assert.equal(sentNow[0].content.caption, 'Kopi Susu');
+  assert.equal(sentNow[1].content.text, 'Ini fotonya');
+  const ai = (await chatMessages(t.id, 'shop', customer)).messages.filter(m => m.origin === 'ai');
+  assert.ok(ai.some(m => m.type === 'image' && m.text === 'Kopi Susu'));
+  await rm(join(storagePaths().recordFiles, t.id), { recursive: true, force: true });
 });

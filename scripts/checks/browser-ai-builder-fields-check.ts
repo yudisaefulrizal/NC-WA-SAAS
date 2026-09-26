@@ -1,4 +1,4 @@
-// Pemeriksaan browser Tahap 2 pada 1280/390 px: node Ekstrak dan Set / Hitung, tipe field baru dengan nilai bawaan dan
+// Pemeriksaan browser Tahap 2–3 pada 1280/390 px: node Ekstrak, Set / Hitung, dan Kirim media, tipe field baru dengan nilai bawaan dan
 // unik, simpan-buka ulang, serta formulir record klien (jam, tanggal-jam, pilihan ganda, telepon, unggah file).
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
@@ -126,6 +126,12 @@ try {
     await inspector.getByLabel('Operasi', { exact: true }).last().selectOption('format_rupiah');
     await inspector.getByLabel('Angka', { exact: true }).last().fill('{{input.message}}');
 
+    // Kirim media: file dari variabel, keterangan, sesudah jawaban, sebagai dokumen.
+    await page.locator('#node-types').getByRole('button', { name: 'Kirim media', exact: true }).click();
+    await inspector.getByLabel('File yang dikirim', { exact: true }).fill('{{input.message}}');
+    await inspector.getByLabel('Keterangan (opsional)', { exact: true }).fill('Brosur terbaru');
+    await inspector.getByLabel('Waktu kirim', { exact: true }).selectOption('after');
+    await inspector.getByLabel('Kirim sebagai', { exact: true }).selectOption('document');
     await page.locator('#save').click();
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.reload();
@@ -145,6 +151,11 @@ try {
     const computeNode = definition.nodes.find((n: any) => n.type === 'compute');
     assert.deepEqual(computeNode.steps[0], { name: 'total', op: 'multiply', args: ['150000', '2'] });
     assert.equal(computeNode.steps[1].op, 'format_rupiah');
+    const media = definition.nodes.find((n: any) => n.type === 'media');
+    assert.deepEqual(
+      [media.value, media.caption, media.send_when, media.media_as],
+      ['{{input.message}}', 'Brosur terbaru', 'after', 'document'],
+    );
     const produkDef = definition.collections.find((c: any) => c.id === 'produk');
     assert.deepEqual(produkDef.fields.find((f: any) => f.id === 'kategori').default, ['Reguler']);
     assert.equal(produkDef.fields.find((f: any) => f.id === 'kontak').unique, true);
@@ -191,7 +202,7 @@ try {
     await context.close();
   }
   console.log(
-    'Tahap 2: Ekstrak, Set / Hitung, tipe field baru, nilai bawaan, unik, dan unggah file lulus pada 1280 dan 390px.',
+    'Tahap 2–3: Ekstrak, Set / Hitung, Kirim media, tipe field baru, nilai bawaan, unik, dan unggah file lulus pada 1280 dan 390px.',
   );
 } finally {
   await browser?.close();

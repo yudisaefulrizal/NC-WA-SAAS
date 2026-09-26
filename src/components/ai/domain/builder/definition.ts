@@ -26,6 +26,7 @@ export const nodeTypes = [
   'fallback',
   'extract',
   'compute',
+  'media',
 ] as const;
 export type NodeType = (typeof nodeTypes)[number];
 export const fieldTypes = [
@@ -178,6 +179,10 @@ export interface GraphNode {
   // Node Ekstrak dan node Set / Hitung.
   fields?: ExtractField[];
   steps?: ComputeStep[];
+  // Node Kirim media: file dari `value`, keterangan, dikirim sebelum atau sesudah jawaban, dan jenisnya.
+  caption?: string;
+  send_when?: 'before' | 'after';
+  media_as?: 'auto' | 'image' | 'document';
   context_format?: 'text' | 'spo';
   capability?: BusinessTool;
   fallback?: boolean;
@@ -316,6 +321,9 @@ export function parseDefinition(value: unknown): GraphDefinition {
       ...(n.rules !== undefined ? { rules: list(n.rules, 20).map(rule) } : {}),
       ...(n.fields !== undefined ? { fields: list(n.fields, 30).map(extractField) } : {}),
       ...(n.steps !== undefined ? { steps: list(n.steps, 20).map(computeStep) } : {}),
+      ...(n.caption !== undefined ? { caption: text(n.caption, 1000) } : {}),
+      ...(n.send_when !== undefined ? { send_when: choice(n.send_when, ['before', 'after'] as const) } : {}),
+      ...(n.media_as !== undefined ? { media_as: choice(n.media_as, ['auto', 'image', 'document'] as const) } : {}),
       ...(n.memory !== undefined ? { memory: n.memory === '' ? '' : id(n.memory) } : {}),
       ...(n.memory_limit !== undefined ? { memory_limit: Number(n.memory_limit) } : {}),
     };
@@ -451,6 +459,7 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
         if (['choice', 'multichoice'].includes(f.type) && !f.options.length)
           add('Field pilihan ' + f.id + ' membutuhkan opsi.', n.id);
     }
+    if (n.type === 'media' && !n.value.trim()) add('Isi file yang dikirim, misalnya variabel field File.', n.id);
     if (n.type === 'compute') {
       const steps = n.steps ?? [];
       if (!steps.length) add('Tambahkan minimal satu langkah.', n.id);
@@ -535,6 +544,7 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
       [n.prompt, -1],
       [n.query, -1],
       [n.value, -1],
+      [n.caption ?? '', -1],
       ...(n.filters ?? []).map(f => [f.value, -1] as [string, number]),
       ...(n.type === 'condition'
         ? conditionRules(n).flatMap(r => [
@@ -578,6 +588,7 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
               fallback: [],
               extract: [...(source.fields ?? []).map(f => f.id), 'missing'],
               compute: (source.steps ?? []).map(s => s.name),
+              media: ['files', 'count', 'skipped'],
             };
             if (!fields[source.type].includes(path[2])) add('Field keluaran ' + match[1] + ' tidak dikenal.', n.id);
           }

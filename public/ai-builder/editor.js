@@ -12,6 +12,7 @@ const kinds = {
   fallback: ['⇥', 'Fallback', 'Teruskan ke manusia'],
   extract: ['⌗', 'Ekstrak', 'Ubah kalimat pelanggan menjadi isian terstruktur'],
   compute: ['∑', 'Set / Hitung', 'Olah nilai dengan aturan pasti, tanpa AI'],
+  media: ['▣', 'Kirim media', 'Kirim gambar atau dokumen ke pelanggan'],
 };
 // Node yang bisa membaca Shared Memory; sama dengan memoryConsumers di definition.ts.
 const memoryConsumers = ['router', 'agent', 'context', 'extract'];
@@ -95,6 +96,7 @@ const paletteGroups = [
   ['Alur', ['input', 'router', 'condition', 'output', 'fallback']],
   ['AI', ['agent', 'extract', 'context']],
   ['Data', ['tool', 'compute', 'memory']],
+  ['Kirim', ['media']],
 ];
 function uid(prefix) {
   return prefix + '_' + crypto.randomUUID().replaceAll('-', '').slice(0, 8);
@@ -137,6 +139,7 @@ function newNode(type, x = 120, y = 140) {
       ? { fields: [{ id: 'nama', label: 'Nama', type: 'text', required: true, hint: '', options: [] }] }
       : {}),
     ...(type === 'compute' ? { steps: [{ name: 'hasil', op: 'value', args: ['{{input.message}}'] }] } : {}),
+    ...(type === 'media' ? { value: '', caption: '', send_when: 'before', media_as: 'auto' } : {}),
   };
 }
 async function loadLibrary() {
@@ -598,7 +601,16 @@ async function runTest() {
           { role: 'assistant', content: result.answer || '[Diteruskan ke manusia]' },
         );
         state.history = state.history.slice(-60);
+        // Simulasi tidak mengirim WhatsApp; media dari node Kirim media ditampilkan sebagai daftar.
+        for (const m of (result.media ?? []).filter(m => m.when === 'before'))
+          $('chat').append(
+            el('div', '▣ ' + m.filename + (m.caption ? ' — ' + m.caption : ''), 'bubble assistant media'),
+          );
         $('chat').append(el('div', result.answer || 'Percakapan diteruskan ke manusia.', 'bubble assistant'));
+        for (const m of (result.media ?? []).filter(m => m.when === 'after'))
+          $('chat').append(
+            el('div', '▣ ' + m.filename + (m.caption ? ' — ' + m.caption : ''), 'bubble assistant media'),
+          );
         $('samples').value = JSON.stringify(result.records, null, 2);
         $('business-samples').value = JSON.stringify(result.business, null, 2);
         $('test-message').value = '';
