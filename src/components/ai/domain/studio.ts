@@ -128,6 +128,7 @@ export class AIStudio {
       base.model_medium,
       base.model_smart,
       base.model_structured,
+      base.model_decision,
       base.memory_limit,
     ]);
     let id: string, sandbox: Sandbox;

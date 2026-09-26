@@ -218,6 +218,7 @@ const tierLabels = {
   medium: 'Model sedang',
   smart: 'Model cerdas',
   structured: 'Model terstruktur',
+  decision: 'Model keputusan',
 };
 // Di tier Terstruktur skema selalu dikirim, jadi kotaknya tampil tercentang dan terkunci; nilai yang tersimpan tidak
 // diubah supaya saat node dipindah ke tier lain, pilihan pemilik kembali seperti semula.
@@ -413,7 +414,9 @@ function selectNode(id) {
   $('node-form').hidden = !node;
   $('node-readonly').hidden = Boolean(node);
   $('node-kind').textContent = node ? 'Agent' : 'Komponen tetap';
-  $('structured-settings').hidden = !['router', 'pesanan'].includes(id);
+  $('structured-settings').hidden =
+    !['router', 'pesanan'].includes(id) || (id === 'router' && node?.tier === 'decision');
+  $('node-tier').querySelector('option[value="decision"]').disabled = id !== 'router';
   $('structured-hint').textContent =
     'Selalu aktif bila node memakai tingkat Terstruktur. Di tingkat lain, centang hanya jika modelnya mendukung JSON Schema strict.' +
     (id === 'pesanan'
@@ -446,7 +449,7 @@ function selectNode(id) {
   } else
     $('node-readonly').textContent =
       id === 'models'
-        ? `Murah: ${models.model_cheap} · Sedang: ${models.model_medium} · Cerdas: ${models.model_smart} · Terstruktur: ${models.model_structured}`
+        ? `Murah: ${models.model_cheap} · Sedang: ${models.model_medium} · Cerdas: ${models.model_smart} · Terstruktur: ${models.model_structured} · Keputusan: ${models.model_decision}`
         : 'Komponen dikelola otomatis oleh NC-WA.';
   $('node-output').textContent = nodeEvents[id] ? pretty(nodeEvents[id]) : 'Belum dijalankan.';
 }
@@ -468,6 +471,7 @@ function updateNode() {
     node.structured_output = $('node-structured-output').checked;
   node.prompt = $('node-prompt').value;
   node.tier = $('node-tier').value;
+  $('structured-settings').hidden = selected === 'router' && node.tier === 'decision';
   node.model = $('node-model').value;
   node.tools = [...$('node-tools').querySelectorAll('input:checked')].map(i => i.value);
   nodeButton(selected).querySelector('small').textContent = tierLabels[node.tier];

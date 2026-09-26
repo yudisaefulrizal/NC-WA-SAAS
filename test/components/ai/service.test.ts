@@ -1068,14 +1068,16 @@ test('Owner model configuration persists, legacy fallback works, tests select ea
       model_cheap: 'cheap-fixture',
       model_medium: 'medium-fixture',
       model_smart: 'smart-fixture',
+      model_decision: 'decision-fixture',
     });
     const config = await new AIService().configuration();
     assert.equal(config.model_cheap, 'cheap-fixture');
     assert.equal(config.model_medium, 'medium-fixture');
     assert.equal(config.model_smart, 'smart-fixture');
+    assert.equal(config.model_decision, 'decision-fixture');
     assert.ok(!JSON.stringify(config).includes('fixture-only'));
-    for (const tier of ['cheap', 'medium', 'smart']) await service.test(tier);
-    assert.deepEqual(calls, ['cheap-fixture', 'medium-fixture', 'smart-fixture']);
+    for (const tier of ['cheap', 'medium', 'smart', 'decision']) await service.test(tier);
+    assert.deepEqual(calls, ['cheap-fixture', 'medium-fixture', 'smart-fixture', 'decision-fixture']);
     await assert.rejects(service.test('invalid'));
     await assert.rejects(
       service.configure(f.id, { ...defaults, model_medium: '', model_cheap: 'x', model_smart: 'z' }),

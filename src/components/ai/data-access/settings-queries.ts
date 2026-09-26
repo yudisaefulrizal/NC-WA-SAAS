@@ -13,7 +13,7 @@ export function enableProfileRouting(c: Executor) {
 }
 export function upsert(c: Executor, params: SqlValue[]) {
   return c.execute(
-    'INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,context_memory_limit,trace_enabled,credit_price,model_cheap,model_medium,model_smart,model_structured,tidy_prompt) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),context_memory_limit=VALUES(context_memory_limit),trace_enabled=VALUES(trace_enabled),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart),model_structured=VALUES(model_structured),tidy_prompt=VALUES(tidy_prompt)',
+    'INSERT INTO ai_settings(id,endpoint,model,secret,input_rate,output_rate,memory_limit,context_memory_limit,trace_enabled,credit_price,model_cheap,model_medium,model_smart,model_structured,model_decision,tidy_prompt) VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE endpoint=VALUES(endpoint),model=VALUES(model),secret=VALUES(secret),input_rate=VALUES(input_rate),output_rate=VALUES(output_rate),memory_limit=VALUES(memory_limit),context_memory_limit=VALUES(context_memory_limit),trace_enabled=VALUES(trace_enabled),credit_price=VALUES(credit_price),model_cheap=VALUES(model_cheap),model_medium=VALUES(model_medium),model_smart=VALUES(model_smart),model_structured=VALUES(model_structured),model_decision=VALUES(model_decision),tidy_prompt=VALUES(tidy_prompt)',
     params,
   );
 }

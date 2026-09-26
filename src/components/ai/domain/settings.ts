@@ -7,7 +7,8 @@ import { encrypt } from '../../../libraries/crypto.js';
 import { ApiError } from '../../../libraries/errors.js';
 import { validatePublicUrl } from '../../../libraries/download.js';
 import { object } from '../../../libraries/validation.js';
-import { AIProvider, AIConfig, defaults, provider, chatEndpoint } from './provider.js';
+import { AIProvider, AIConfig, defaults, provider, chatEndpoint, jevConnectionProbe } from './provider.js';
+import { isJevModel } from './pipeline/jev-router.js';
 import { fail, integer, text } from './input-validation.js';
 import { transaction } from './transaction.js';
 import { parseMemory } from './memory.js';
@@ -33,7 +34,7 @@ export async function loadConfig(svc: AIService): Promise<AIConfig> {
   if (stored?.profile_routing_enabled) {
     try {
       // p.* menjaga routing tetap jalan bila kode berjalan sebelum `npm run migrate` menambah kolom tier baru; rute atau
-      // model Terstruktur yang belum ada lalu memakai Murah, persis seperti yang akan diatur migrasi.
+      // model Terstruktur atau Keputusan yang belum ada lalu memakai Murah, seperti pada migrasi.
       const [routes] = await providerRoutesSql.listWithProfiles(db);
       const profiles: NonNullable<AIConfig['tier_profiles']> = Object.fromEntries(
         routes.map(r => [
@@ -48,6 +49,7 @@ export async function loadConfig(svc: AIService): Promise<AIConfig> {
         ]),
       );
       if (!profiles.structured && profiles.cheap) profiles.structured = profiles.cheap;
+      if (!profiles.decision && profiles.cheap) profiles.decision = profiles.cheap;
       config.tier_profiles = profiles;
     } catch (error) {
       console.error(
@@ -106,6 +108,7 @@ export async function saveProviderProfile(svc: AIService, body: unknown) {
     models.medium,
     models.smart,
     models.structured,
+    models.decision,
     active,
   ]);
   return { id: profileId };
@@ -145,7 +148,14 @@ export async function testProviderProfile(svc: AIService, body: unknown) {
   const model = text(input.model, 100, 'Model');
   if (!model) throw fail('Model wajib diisi');
   await svc.transport(
-    { ...defaults, provider: rows[0].provider, endpoint: rows[0].endpoint, secret: rows[0].secret, model },
+    {
+      ...defaults,
+      provider: rows[0].provider,
+      endpoint: rows[0].endpoint,
+      secret: rows[0].secret,
+      model,
+      ...(isJevModel(model) ? { call_role: 'router', decision_request: jevConnectionProbe(model) } : {}),
+    },
     [{ role: 'user', content: 'Balas hanya OK.' }],
     10,
   );
@@ -207,6 +217,7 @@ export async function configure(svc: AIService, actor: string, body: unknown) {
       config.model_medium ?? config.model,
       config.model_smart ?? config.model,
       config.model_structured ?? config.model,
+      config.model_decision ?? config.model,
       config.tidy_prompt ?? '',
     ]);
     // Pemotongan JSON memangkas memori semua akun seketika tanpa membuka isi percakapan.
@@ -227,7 +238,13 @@ export async function testTier(svc: AIService, tier: unknown = 'medium') {
   const config = tierConfig(await svc.config(), tier as ModelTier);
   if (!config.secret) throw fail('AI belum dikonfigurasi');
   try {
-    await svc.transport(config, [{ role: 'user', content: 'Balas hanya OK.' }], 10);
+    await svc.transport(
+      tier === 'decision' && isJevModel(config.model)
+        ? { ...config, call_role: 'router', decision_request: jevConnectionProbe(config.model) }
+        : config,
+      [{ role: 'user', content: 'Balas hanya OK.' }],
+      10,
+    );
     return {
       ok: true,
       tier,

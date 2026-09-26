@@ -80,6 +80,7 @@
                   <option value="medium">Sedang</option>
                   <option value="smart">Cerdas</option>
                   <option value="structured">Terstruktur</option>
+                  <option value="decision">Keputusan</option>
                 </select></label
               ><label
                 >Model khusus <small>Opsional, kosongkan untuk mengikuti tingkat</small
@@ -91,8 +92,12 @@
                 <p class="muted" id="structured-hint"></p>
               </div>
               <div id="router-settings" hidden>
+                <p class="muted">
+                  JEV di tingkat Keputusan memakai pilihan specialist dan penilaian tiket bertipe. Schema JSON berikut
+                  dipakai model chat.
+                </p>
                 <details>
-                  <summary>Schema output router (tetap)</summary>
+                  <summary>Schema output router untuk model chat</summary>
                   <pre id="router-schema"></pre>
                 </details>
               </div>

@@ -1,7 +1,7 @@
-// Tier model per node (Murah, Sedang, Cerdas, Terstruktur) dan kapan skema JSON dikirim ke provider.
+// Tier model per node (Murah, Sedang, Cerdas, Terstruktur, Keputusan) dan kapan skema JSON dikirim ke provider.
 import type { AIConfig } from '../provider.js';
 // "structured" berisi model yang mendukung JSON Schema ketat, untuk sedikit node yang butuh keluaran persis.
-export const modelTiers = ['cheap', 'medium', 'smart', 'structured'] as const;
+export const modelTiers = ['cheap', 'medium', 'smart', 'structured', 'decision'] as const;
 export type ModelTier = (typeof modelTiers)[number];
 // Id node berbeda per pipeline profil (CS Usaha: layanan, pesanan…; CS Lembaga Pendidikan: program, jadwal…).
 export type ModelRole = string;
@@ -54,5 +54,6 @@ export function roleConfig(config: AIConfig, role: ModelRole): AIConfig {
 // structured_output dinyalakan secara eksplisit.
 export function schemaEnabled(config: AIConfig, role: 'router' | 'pesanan'): boolean {
   const node = config.workflow?.nodes[role];
+  if (role === 'router' && node?.tier === 'decision') return false;
   return node?.structured_output === true || (node?.tier ?? roleTier[role]) === 'structured';
 }

@@ -64,6 +64,7 @@ export function workflowInput(value: unknown, pipeline: Pipeline = csPipeline): 
       !node.prompt.trim() ||
       node.prompt.length > 8000 ||
       !modelTiers.includes(node.tier as any) ||
+      (node.tier === 'decision' && role !== 'router') ||
       typeof node.model !== 'string' ||
       node.model.length > 100 ||
       !Array.isArray(node.tools)

@@ -42,6 +42,7 @@ const aiTiers = [
   ['medium', 'Sedang'],
   ['smart', 'Cerdas'],
   ['structured', 'Terstruktur'],
+  ['decision', 'Keputusan'],
 ];
 {
   const panel = document.createElement('section'),
@@ -197,6 +198,7 @@ async function loadAIConfig() {
     'model_medium',
     'model_smart',
     'model_structured',
+    'model_decision',
     'input_rate',
     'output_rate',
     'memory_limit',
@@ -285,7 +287,7 @@ admin = async () => {
   routesHeading.textContent = 'Model per tingkat';
   routes.prepend(routesHeading);
   routes.querySelector('p').textContent =
-    'Cukup pilih profil yang sudah dibuat untuk setiap tingkat; API key tetap aman tersimpan di server. Tingkat Terstruktur dipakai node yang butuh output JSON pasti (Pesanan, dan Router bila dipindah ke tingkat ini), jadi isi dengan model yang mendukung JSON Schema.';
+    'Pilih profil untuk setiap tingkat; API key tersimpan di server. Terstruktur memerlukan model dengan JSON Schema. Untuk memakai JEV pada Router, atur Keputusan ke profil OpenRouter dengan model typesafe/jev-1.13 lalu pilih tingkat Keputusan di AI Studio.';
   panels.provider.append($('ai-config-status'), page.querySelector('.ai-provider-panel'));
   panels.model.append(routes, config, ...page.querySelectorAll('[data-ai-test]'));
   panels.tidy.append(tidy, saver('Simpan prompt rapikan'));

@@ -7,7 +7,9 @@ import {
   validateRouterOutput,
 } from '../../../src/components/ai/domain/pipeline/router-schema.js';
 import { runAgents } from '../../../src/components/ai/domain/pipeline/runner.js';
-import { agents } from '../../../src/components/ai/domain/profiles/cs/pipeline.js';
+import { agents, csPipeline } from '../../../src/components/ai/domain/profiles/cs/pipeline.js';
+import { eduPipeline } from '../../../src/components/ai/domain/profiles/pendidikan/pipeline.js';
+import { parseJevRoute } from '../../../src/components/ai/domain/pipeline/jev-router.js';
 import { aiRequestPayload, defaults } from '../../../src/components/ai/domain/provider.js';
 import { defaultWorkflow, workflowInput } from '../../../src/components/ai/domain/pipeline/workflow.js';
 import { roleConfig } from '../../../src/components/ai/domain/pipeline/models.js';
@@ -98,4 +100,95 @@ test('Router sends its schema when moved to the Terstruktur tier, and uses that 
   assert.equal(layanan.model, 'structured-test');
   assert.equal(aiRequestPayload(layanan, []).response_format, undefined);
   assert.ok(workflowInput(workflow).nodes.router.tier === 'structured');
+});
+test('Decision tier is selectable without changing the default router or forcing a chat JSON schema', () => {
+  const workflow = defaultWorkflow();
+  assert.equal(workflow.nodes.router.tier, 'cheap');
+  workflow.nodes.router.tier = 'decision';
+  const loaded = workflowInput(workflow);
+  const selected = roleConfig({ ...defaults, workflow: loaded, model_decision: 'decision-test' }, 'router');
+  assert.equal(selected.model, 'decision-test');
+  assert.equal(aiRequestPayload(selected, []).response_format, undefined);
+});
+test('JEV routes both CS profiles through typed decisions and relates only matching pending tickets', async () => {
+  for (const [pipeline, specialist] of [
+    [csPipeline, 'layanan'],
+    [eduPipeline, 'program'],
+  ] as const) {
+    const workflow = defaultWorkflow(pipeline);
+    workflow.nodes.router.tier = 'decision';
+    const pendingFallbacks = [
+      { id: 'ticket-a', question: 'Harga program?' },
+      { id: 'ticket-b', question: 'Alamat kantor?' },
+    ];
+    const routed: unknown[] = [];
+    const result = await runAgents(
+      async (selected, messages) => {
+        if (selected.call_role !== 'router') return '{"answer":"Baik"}';
+        const request = selected.decision_request!;
+        assert.equal(request.model, 'typesafe/jev-1.13');
+        assert.equal(request.state.pesan_terbaru, 'Berapa harganya?');
+        assert.equal(request.state.konteks_sebelumnya, 'pelanggan-menanyakan-program-biaya');
+        assert.deepEqual(Object.keys(request.questions), ['specialist', 'ticket_0', 'ticket_1']);
+        assert.deepEqual(Object.keys(request.questions.specialist.criteria), Object.keys(pipeline.agents));
+        assert.deepEqual(messages, [{ role: 'user', content: 'Berapa harganya?' }]);
+        return JSON.stringify({
+          specialist: { type: 'choice', choice: specialist, confidence: 0.9 },
+          ticket_0: { type: 'noul', noul: 0.91 },
+          ticket_1: { type: 'noul', noul: 0.2 },
+        });
+      },
+      {
+        ...defaults,
+        provider: 'openrouter',
+        model_decision: 'typesafe/jev-1.13',
+        workflow,
+        onTrace: event => {
+          if (event.node === 'router' && event.state === 'routed') routed.push(event.output);
+        },
+      },
+      [{ role: 'user', content: 'Berapa harganya?' }],
+      300,
+      {
+        account: 'test',
+        profile: 'test',
+        session: 'test',
+        customer: 'test',
+        requestId: 'test',
+        knowledge: '',
+        pendingFallbacks,
+      },
+      undefined,
+      'pelanggan-menanyakan-program-biaya',
+      pipeline,
+    );
+    assert.equal(result.agent, specialist);
+    assert.deepEqual(routed, [{ sub_agent: specialist, fallback_terkait: ['ticket-a'] }]);
+  }
+});
+test('JEV rejects unknown specialists, malformed ticket decisions, and use outside Decision tier', async () => {
+  const names = Object.keys(csPipeline.agents);
+  for (const answers of [
+    { specialist: { type: 'choice', choice: 'unknown' }, ticket_0: { type: 'noul', noul: 0.8 } },
+    { specialist: { type: 'choice', choice: 'layanan' }, ticket_0: { type: 'noul', noul: 2 } },
+    { specialist: { type: 'choice', choice: 'layanan' } },
+  ])
+    assert.throws(
+      () => parseJevRoute(JSON.stringify(answers), names, [{ id: 'ticket-a', question: 'Harga?' }]),
+      /ai_invalid_route/,
+    );
+  const workflow = defaultWorkflow();
+  assert.throws(() =>
+    workflowInput({ nodes: { ...workflow.nodes, layanan: { ...workflow.nodes.layanan, tier: 'decision' } } }),
+  );
+  await assert.rejects(
+    runAgents(
+      async () => '{"answer":"Baik"}',
+      { ...defaults, model_cheap: 'typesafe/jev-1.13', workflow },
+      [{ role: 'user', content: 'Halo' }],
+      300,
+      { account: 'test', profile: 'test', session: 'test', customer: 'test', requestId: 'test', knowledge: '' },
+    ),
+    /ai_jev_requires_decision_tier/,
+  );
 });

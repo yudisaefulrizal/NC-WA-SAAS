@@ -513,16 +513,28 @@ test('Terstruktur tier: every provider profile and route carries it, runtime use
       model_smart: 'm-smart',
     };
     await assert.rejects(assistant.saveProviderProfile(base), { code: 'invalid_request' });
-    const { id } = await assistant.saveProviderProfile({ ...base, model_structured: 'm-structured' });
+    const { id } = await assistant.saveProviderProfile({
+      ...base,
+      model_structured: 'm-structured',
+      model_decision: 'm-decision',
+    });
     assert.equal(
       (await assistant.providerProfiles()).profiles.find((p: any) => p.id === id)?.model_structured,
       'm-structured',
     );
     const routes = { cheap: { profileId: id }, medium: { profileId: id }, smart: { profileId: id } };
     await assert.rejects(assistant.setProviderRoutes(routes), { code: 'invalid_request' });
-    await assistant.setProviderRoutes({ ...routes, structured: { profileId: id } });
+    await assert.rejects(assistant.setProviderRoutes({ ...routes, structured: { profileId: id } }), {
+      code: 'invalid_request',
+    });
+    await assistant.setProviderRoutes({
+      ...routes,
+      structured: { profileId: id },
+      decision: { profileId: id },
+    });
     const config = await assistant.config();
     assert.equal(config.tier_profiles?.structured?.model, 'm-structured');
+    assert.equal(config.tier_profiles?.decision?.model, 'm-decision');
     assert.equal(config.tier_profiles?.cheap?.model, 'm-cheap');
     // Kode baru berjalan sebelum `npm run migrate`: kolom dan rutenya belum ada. Routing harus tetap memakai profil untuk
     // setiap tier, dan Terstruktur memakai Murah alih-alih seluruh konfigurasi kembali ke cara lama.
@@ -559,6 +571,16 @@ test('Terstruktur tier: every provider profile and route carries it, runtime use
       'm-cheap',
     );
     assert.equal((await assistant.config()).tier_profiles?.structured?.model, 'm-cheap');
+    // Simulasikan data sebelum tier Keputusan ada; migrasi harus menyalin model dan rute Murah.
+    await db.execute("UPDATE ai_provider_profiles SET model_decision='' WHERE id=?", [id]);
+    await db.query("DELETE FROM ai_provider_routes WHERE tier='decision'");
+    await db.query('UPDATE ai_settings SET model_decision=NULL WHERE id=1');
+    await migrateAI();
+    const [decisionRoute] = await db.query<any[]>(
+      "SELECT profile_id,model FROM ai_provider_routes WHERE tier='decision'",
+    );
+    assert.deepEqual({ ...decisionRoute[0] }, { profile_id: id, model: 'm-cheap' });
+    assert.equal((await assistant.config()).tier_profiles?.decision?.model, 'm-cheap');
   } finally {
     // Routing bersifat global; tes berikutnya dibiarkan dengan konfigurasi tanpa rute yang diharapkannya.
     await db.query('DELETE FROM ai_provider_routes');

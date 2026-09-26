@@ -1,6 +1,7 @@
 // Memanggil provider AI (SumoPod, OpenRouter, atau yang kompatibel OpenAI): konfigurasi, bentuk request, dan
 // pembatasan ukuran jawaban.
 import { routerResponseFormat } from './pipeline/router-schema.js';
+import { isJevModel } from './pipeline/jev-router.js';
 import {
   schemaEnabled,
   type ModelRole,
@@ -16,6 +17,11 @@ import { fail } from './input-validation.js';
 
 export type AIMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 export type AIProvider = 'sumopod' | 'compatible' | 'openrouter';
+export interface DecisionRequest {
+  model: string;
+  state: Record<string, unknown>;
+  questions: Record<string, { type: 'choice' | 'noul'; instructions: string; criteria: Record<string, string> }>;
+}
 export interface AIConfig {
   signal?: AbortSignal;
   workflow?: AgentWorkflow;
@@ -24,12 +30,14 @@ export interface AIConfig {
   model_medium?: string;
   model_smart?: string;
   model_structured?: string;
+  model_decision?: string;
   tier_profiles?: Partial<
     Record<ModelTier, { id: string; provider: AIProvider; endpoint: string; secret: string; model: string }>
   >;
   call_role?: ModelRole;
   router_agents?: readonly string[];
   response_format?: Record<string, unknown>;
+  decision_request?: DecisionRequest;
   provider: AIProvider;
   endpoint: string;
   model: string;
@@ -75,6 +83,19 @@ export function chatEndpoint(value: string) {
   return url.href;
 }
 export type AITransport = (config: AIConfig, messages: AIMessage[], maxWords: number) => Promise<string>;
+export function jevConnectionProbe(model: string): DecisionRequest {
+  return {
+    model,
+    state: { pesan: 'Halo' },
+    questions: {
+      specialist: {
+        type: 'choice',
+        instructions: 'Pilih kategori pesan.',
+        criteria: { pembuka: 'Sapaan atau salam.', lainnya: 'Pesan lain.' },
+      },
+    },
+  };
+}
 // DNS diperiksa dan dikunci. Redirect tidak pernah diikuti karena membawa kredensial provider.
 export function aiRequestPayload(config: AIConfig, messages: AIMessage[]) {
   return {
@@ -90,8 +111,19 @@ export function aiRequestPayload(config: AIConfig, messages: AIMessage[]) {
   };
 }
 export const callAI: AITransport = async (config, messages, maxWords) => {
-  const { url, addresses } = await validatePublicUrl(config.endpoint);
-  const payload = JSON.stringify(aiRequestPayload(config, messages));
+  const decision = config.decision_request;
+  if (isJevModel(config.model) && !decision) throw Error('ai_jev_requires_decision');
+  if (
+    decision &&
+    (config.call_role !== 'router' ||
+      config.provider !== 'openrouter' ||
+      new URL(config.endpoint).hostname !== 'openrouter.ai')
+  )
+    throw Error('ai_jev_requires_openrouter');
+  const { url, addresses } = await validatePublicUrl(
+    decision ? 'https://openrouter.ai/api/alpha/decisions' : config.endpoint,
+  );
+  const payload = JSON.stringify(decision ?? aiRequestPayload(config, messages));
   return new Promise<string>((resolve, reject) => {
     const openRouterHeaders =
       config.provider === 'openrouter'
@@ -140,6 +172,14 @@ export const callAI: AITransport = async (config, messages, maxWords) => {
           }
           try {
             const data = JSON.parse(Buffer.concat(chunks).toString());
+            if (decision) {
+              if (!data.answers || typeof data.answers !== 'object' || Array.isArray(data.answers)) {
+                reject(new Error('ai_provider_empty_content'));
+                return;
+              }
+              resolve(JSON.stringify(data.answers));
+              return;
+            }
             const content = data.choices?.[0]?.message?.content;
             if (typeof content !== 'string' || !content.trim()) {
               reject(new Error('ai_provider_empty_content'));

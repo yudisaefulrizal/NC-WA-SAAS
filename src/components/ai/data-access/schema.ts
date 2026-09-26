@@ -24,7 +24,7 @@ export async function migrateAI() {
   ];
   for (const sql of tables) await db.query(sql);
   await db.query(
-    `CREATE TABLE IF NOT EXISTS ai_provider_profiles (id CHAR(36) PRIMARY KEY,name VARCHAR(100) NOT NULL,provider VARCHAR(20) NOT NULL,endpoint VARCHAR(512) NOT NULL,secret TEXT NOT NULL,model_cheap VARCHAR(100) NOT NULL DEFAULT '',model_medium VARCHAR(100) NOT NULL DEFAULT '',model_smart VARCHAR(100) NOT NULL DEFAULT '',model_structured VARCHAR(100) NOT NULL DEFAULT '',active BOOLEAN NOT NULL DEFAULT TRUE,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`,
+    `CREATE TABLE IF NOT EXISTS ai_provider_profiles (id CHAR(36) PRIMARY KEY,name VARCHAR(100) NOT NULL,provider VARCHAR(20) NOT NULL,endpoint VARCHAR(512) NOT NULL,secret TEXT NOT NULL,model_cheap VARCHAR(100) NOT NULL DEFAULT '',model_medium VARCHAR(100) NOT NULL DEFAULT '',model_smart VARCHAR(100) NOT NULL DEFAULT '',model_structured VARCHAR(100) NOT NULL DEFAULT '',model_decision VARCHAR(100) NOT NULL DEFAULT '',active BOOLEAN NOT NULL DEFAULT TRUE,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS ai_provider_routes (tier VARCHAR(16) PRIMARY KEY,profile_id CHAR(36) NOT NULL,model VARCHAR(100) NOT NULL,FOREIGN KEY(profile_id) REFERENCES ai_provider_profiles(id) ON DELETE RESTRICT) ENGINE=InnoDB`,
@@ -127,10 +127,12 @@ export async function migrateAI() {
     ['ai_settings', 'model_medium', 'VARCHAR(100) NULL'],
     ['ai_settings', 'model_smart', 'VARCHAR(100) NULL'],
     ['ai_settings', 'model_structured', 'VARCHAR(100) NULL'],
+    ['ai_settings', 'model_decision', 'VARCHAR(100) NULL'],
     ['ai_provider_profiles', 'model_cheap', "VARCHAR(100) NOT NULL DEFAULT ''"],
     ['ai_provider_profiles', 'model_medium', "VARCHAR(100) NOT NULL DEFAULT ''"],
     ['ai_provider_profiles', 'model_smart', "VARCHAR(100) NOT NULL DEFAULT ''"],
     ['ai_provider_profiles', 'model_structured', "VARCHAR(100) NOT NULL DEFAULT ''"],
+    ['ai_provider_profiles', 'model_decision', "VARCHAR(100) NOT NULL DEFAULT ''"],
     ['ai_settings', 'context_memory_limit', 'INT UNSIGNED NOT NULL DEFAULT 6'],
     ['ai_settings', 'trace_enabled', 'BOOLEAN NOT NULL DEFAULT FALSE'],
     ['ai_usage', 'model_calls', 'JSON NULL'],
@@ -161,6 +163,12 @@ export async function migrateAI() {
   await db.query("UPDATE ai_provider_profiles SET model_structured=model_cheap WHERE model_structured=''");
   await db.query(
     "INSERT IGNORE INTO ai_provider_routes(tier,profile_id,model) SELECT 'structured',r.profile_id,p.model_structured FROM ai_provider_routes r JOIN ai_provider_profiles p ON p.id=r.profile_id WHERE r.tier='cheap'",
+  );
+  // Tier Keputusan disiapkan dari rute Murah tanpa memindahkan node Router secara otomatis.
+  await db.query('UPDATE ai_settings SET model_decision=COALESCE(model_cheap,model) WHERE model_decision IS NULL');
+  await db.query("UPDATE ai_provider_profiles SET model_decision=model_cheap WHERE model_decision=''");
+  await db.query(
+    "INSERT IGNORE INTO ai_provider_routes(tier,profile_id,model) SELECT 'decision',r.profile_id,p.model_decision FROM ai_provider_routes r JOIN ai_provider_profiles p ON p.id=r.profile_id WHERE r.tier='cheap'",
   );
   // Pemindahan sekali jalan: knowledge teks bebas yang ada dipindah ke "Lainnya" dulu, lalu digabung ke FAQ di bawah.
   if (addedProfilLainnya)
