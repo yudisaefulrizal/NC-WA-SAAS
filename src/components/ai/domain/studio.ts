@@ -59,7 +59,7 @@ export class AIStudio {
     if (!message) throw bad('Isi pesan pengujian.');
     // body.profile_type memilih pipeline; setiap profil membawa data simulasinya sendiri (CS: knowledge body.profile
     // dan body.products; CS Lembaga Pendidikan: body.edu; Tester AI: hanya body.behavior).
-    const pipeline = profileDefinition(body.profile_type ?? 'cs'),
+    const pipeline = await profileDefinition(body.profile_type ?? 'cs'),
       edu = pipeline.id === 'pendidikan';
     let knowledge = '',
       products: ReturnType<typeof productInput>[] = [],

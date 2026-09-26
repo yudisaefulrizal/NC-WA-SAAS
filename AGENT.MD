@@ -17,7 +17,7 @@ Baca sebelum mengerjakan proyek ini. Gambaran produk ada di [README.md](README.m
 - **Tes integrasi** (`test/**/*.test.ts`, strukturnya mengikuti `src/`) memakai MySQL dan akun tiruan. Jalankan di MySQL sementara yang terisolasi, supaya tidak bersaing dengan scheduler server dev: `npm run test:isolated`. Runner menjalankan migrasi lalu seluruh tes secara serial. Dengan argumen, runner hanya menjalankan tes atau skrip itu, berurutan: `npm run test:isolated -- test/components/ai/edu.test.ts scripts/checks/browser-ai-edu-check.ts`. Atur `MYSQLD_PATH` bila binary MySQL berbeda.
 - **Pemeriksaan browser** (`scripts/checks/browser-*-check.ts`, Playwright) diperiksa pada lebar 1280 px dan 390 px. Jalankan lewat runner terisolasi yang sama; `CHROMIUM_PATH` opsional. Tangkapan layarnya disimpan di luar proyek, di `$TMPDIR/ncwa-browser-check/` (biasanya `/tmp/ncwa-browser-check/`).
   - Masih gagal sejak sebelum refactor struktur: `browser-check.ts` (menunggu `#stat-credit` yang kini tersembunyi), `browser-template-source-check.ts`, dan `browser-auto-share-check.ts` (belum mengikuti wizard template tiga tahap).
-- **Belum pernah diuji otomatis:** HP WhatsApp nyata, n8n nyata, QRIS merchant nyata, dan model AI sungguhan. Tulis "belum diuji" bila belum dilakukan.
+- **Belum pernah diuji otomatis:** HP WhatsApp nyata, n8n nyata, dan QRIS merchant nyata. Model AI sungguhan sudah diuji terbatas untuk salam, pencarian produk, pembuatan pesanan, dan pemilihan foto pada sandbox builder dengan data dummy (`scripts/checks/ai-cs-parity-live-check.ts`); pengiriman ke HP WhatsApp nyata belum diuji, lihat `docs/cs-builder-parity-report.md`. Tulis "belum diuji" untuk alur yang belum dilakukan.
 - Setelah perubahan skema, jalankan `npm run migrate` di database dev. Migrasi harus idempoten dan aman dijalankan ulang.
 
 ## Peta kode
@@ -91,14 +91,18 @@ Komentar pembuka, import, tipe, fungsi yang diekspor, lalu helper internal.
 - **Kredit WhatsApp** dipesan dulu (reservasi) dengan idempotency key sebelum pesan dikirim (`billing/domain/outbound.ts`, `billing/domain/credits.ts`). Hasil kirim yang belum pasti tidak pernah dikirim ulang otomatis.
 - **Engine** (`whatsapp/domain/sessions.ts`): satu pemilik aktif per session. Login disimpan di `storage/whatsapp/<akun>/<sesi>/`, dan semua session dipulihkan saat startup.
 - **Asisten AI**:
-  - Profil adalah pipeline di kode (`ai/domain/profiles/registry.ts` + `Pipeline` di `ai/domain/pipeline/runner.ts`): router, specialist, context, tool, dan tier model. Data profil (`ai_data_profiles`) adalah isi milik akun yang dipasang ke sesi lewat `ai_assistants.data_profile_id`.
+  - Profil dinamis dibuat melalui `/dashboard/admin/ai-builder`: definisi graf/skema disimpan di `ai_graph_profiles`, versi terbit di `ai_graph_versions`, dan record tenant di `ai_data_records`. Runtime di `domain/builder/engine.ts`; panduan kontrak ada di `docs/dynamic-ai-profiles-design.md`. Tidak perlu menambah tabel atau kode per profil.
+  - Operasi node Data berjalan lewat satu adapter (`builder/record-tools.ts`): database di runtime dan Uji Coba, memori di simulasi. Semantik filter/kata kunci/urutan ada dua kali, di SQL (`graph-profiles-queries.ts`) dan JavaScript (`record-query.ts`); ubah keduanya bersamaan dan jalankan tes paritas di `builder-data.test.ts`.
+  - Koleksi milik pelanggan dibatasi ke `ToolContext.customer` dari sesi, tidak pernah dari argumen model.
+  - Profil bawaan adalah pipeline di kode (`ai/domain/profiles/registry.ts` + `Pipeline` di `ai/domain/pipeline/runner.ts`): router, specialist, context, tool, dan tier model. Data profil (`ai_data_profiles`) adalah isi milik akun yang dipasang ke sesi lewat `ai_assistants.data_profile_id`.
   - Alur AI Studio disimpan per profil di `ai_workflow`, dengan draft dan publish masing-masing.
   - Kredit AI dihitung per kata, dipesan dulu, lalu diselesaikan setelah jawaban. Memori dan konteks S-P-O disimpan per sesi dan per pelanggan. Riwayat chat (`ai_chat_messages`) terpisah dari memori AI.
   - Mengganti atau mencabut data profil mengosongkan memori AI sesi itu.
   - Profil baru selalu mulai nonaktif sampai pemilik menyalakannya.
   - Pipeline dengan satu specialist (Tester AI) tidak memakai router maupun node Context, karena ringkasan Context hanya dibaca router (`usesRouter` di `pipeline/runner.ts`).
   - **Tester AI** menyimpan Peran pelanggan di kolom `behavior`. Pesan manual (dari HP atau dashboard) di sesi Tester AI tidak menjeda AI: pesan itu masuk memori sebagai ucapan tester dan membatalkan balasan yang sedang dibuat, sedangkan status Jeda tidak diubah (`applyManualReply` di `conversations.ts`). Tester AI menunggu 3–8 detik sebelum membalas supaya dua bot tidak saling membalas secepat kilat.
-- **Menambah profil baru** butuh:
+- **Menambah profil dinamis** dilakukan melalui editor, template, atau impor JSON. Menambah jenis node/operasi baru harus memperbarui kontrak, validator, runtime, UI, dan tes.
+- **Menambah pipeline bawaan khusus** (bila graf umum tidak memenuhi kebutuhan) butuh:
   - folder `ai/domain/profiles/<profil>/` berisi `pipeline.ts` dan tool-nya, lalu daftarkan di `profiles/registry.ts`;
   - tabel di `ai/data-access/schema.ts`, query di `ai/data-access/<profil>-queries.ts`, dan endpoint di `ai/entry-points/routes.ts`;
   - tool yang didaftarkan di `defaultTools` (`pipeline/runner.ts`);

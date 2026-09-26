@@ -545,7 +545,7 @@ function busy(value) {
   versions();
 }
 async function loadProfiles() {
-  const profiles = await api('/api/admin/ai/profiles');
+  const profiles = (await api('/api/admin/ai/profiles')).filter(p => !p.dynamic);
   $('profile-select').replaceChildren(
     ...profiles.map(p => new Option(p.name.toUpperCase(), p.id, false, p.id === profile)),
   );
@@ -567,6 +567,10 @@ $('profile-select').onchange = async e => {
   }
 };
 async function load() {
+  if (profile.startsWith('g_')) {
+    location.replace('/dashboard/admin/ai-builder?profile=' + encodeURIComponent(profile));
+    return;
+  }
   const result = await api(studioUrl());
   state = result;
   useLayout(result.profile);

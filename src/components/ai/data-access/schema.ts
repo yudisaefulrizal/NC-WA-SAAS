@@ -1,5 +1,6 @@
 // Tabel Asisten AI dan migrasinya. Semua langkah aman dijalankan ulang oleh npm run migrate; migrasi lama tetap
 // disimpan karena database yang belum diperbarui masih melewatinya.
+import { migrateGraphs } from './graph-schema.js';
 import { db } from '../../../libraries/db.js';
 import { defaultWorkflow } from '../domain/pipeline/workflow.js';
 import { profileDefinitions, enabledByDefault } from '../domain/profiles/registry.js';
@@ -316,6 +317,7 @@ export async function migrateAI() {
     "UPDATE ai_workflow SET draft=IF(JSON_CONTAINS(JSON_EXTRACT(draft,'$.nodes.layanan.tools'),'\"send_product_image\"'),draft,JSON_ARRAY_APPEND(draft,'$.nodes.layanan.tools','send_product_image')),active=IF(active IS NULL,NULL,IF(JSON_CONTAINS(JSON_EXTRACT(active,'$.nodes.layanan.tools'),'\"send_product_image\"'),active,JSON_ARRAY_APPEND(active,'$.nodes.layanan.tools','send_product_image'))),tool_defaults_version=2 WHERE id=1 AND tool_defaults_version<2",
   );
   await migrateProfiles();
+  await migrateGraphs();
 }
 
 const hasColumn = async (table: string, column: string) => {

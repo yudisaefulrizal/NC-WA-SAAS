@@ -1,0 +1,179 @@
+<!-- Editor profil AI: daftar, kanvas, struktur koleksi, dan simulasi pemilik. -->
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Editor Profil · NC-WA</title>
+    <link rel="stylesheet" href="/ai-builder/builder.css" />
+    <script defer src="/ai-builder/common.js"></script>
+    <script defer src="/ai-builder/editor.js"></script>
+    <script defer src="/ai-builder/canvas.js"></script>
+    <script defer src="/ai-builder/inspector.js"></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/dashboard/admin/ai">NC<span>WA</span></a
+      ><span class="divider"></span><strong>Editor profil</strong><span class="badge">Alur AI</span
+      ><a class="back" href="/dashboard/admin/ai">Dashboard ↗</a>
+    </header>
+    <main id="library">
+      <div class="hero">
+        <div>
+          <span class="eyebrow">RUANG KERJA AI</span>
+          <h1>Rancang cara AI bekerja.</h1>
+          <p>Susun alur, tentukan data, lalu uji sebelum diterbitkan.</p>
+        </div>
+        <div class="actions">
+          <button id="import">Impor JSON</button><button id="create" class="primary">＋ Profil baru</button>
+        </div>
+      </div>
+      <h2>Mulai dari template</h2>
+      <div id="templates" class="cards"></div>
+      <div class="section-heading">
+        <h2>Profil Anda</h2>
+        <input id="profile-search" type="search" placeholder="Cari profil…" aria-label="Cari profil" />
+      </div>
+      <div id="profiles" class="cards"></div>
+    </main>
+    <main id="editor" hidden>
+      <section class="editor-heading">
+        <div>
+          <button id="all-profiles" class="link">← Semua profil</button>
+          <h1 id="profile-title"></h1>
+          <span id="revision" class="muted"></span>
+        </div>
+        <div class="actions">
+          <span id="dirty" class="badge"></span><button id="export">Ekspor</button><button id="duplicate">Salin</button
+          ><button id="save">Simpan draft</button><button id="publish" class="primary">Terbitkan</button>
+        </div>
+      </section>
+      <nav class="tabs" aria-label="Editor profil">
+        <button data-tab="flow" class="active">Alur</button><button data-tab="schema">Struktur data</button
+        ><button data-tab="test">Pengujian</button><button data-tab="settings">Ringkasan</button>
+      </nav>
+      <section id="flow" class="tab-panel">
+        <div class="workspace">
+          <aside id="palette">
+            <div class="section-label">TAMBAH NODE</div>
+            <p class="hint">Klik atau tarik ke kanvas.</p>
+            <div id="node-types"></div>
+            <div class="legend">
+              Hubungkan port keluar ke port masuk node tujuan. Tarik latar untuk menggeser kanvas.
+            </div>
+          </aside>
+          <div id="node-picker" class="node-picker"></div>
+          <div id="viewport" tabindex="0" aria-label="Kanvas alur">
+            <div id="world">
+              <svg id="connections" width="4000" height="4000" aria-label="Koneksi antar node"></svg>
+              <div id="nodes"></div>
+            </div>
+            <div class="canvas-controls">
+              <button id="undo" title="Urungkan (Ctrl+Z)">↶</button
+              ><button id="redo" title="Ulangi (Ctrl+Shift+Z)">↷</button><span></span
+              ><button id="zoom-out" aria-label="Perkecil">−</button><button id="fit">100%</button
+              ><button id="zoom-in" aria-label="Perbesar">＋</button><button id="layout">Rapikan</button>
+            </div>
+            <div id="connection-hint" class="canvas-hint">Pilih node untuk mengatur perilakunya.</div>
+          </div>
+          <aside id="inspector">
+            <div class="empty">
+              <span class="large-icon">◇</span>
+              <h3>Setiap langkah punya peran</h3>
+              <p>Pilih node di kanvas atau tambahkan dari panel kiri.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+      <section id="schema" class="tab-panel" hidden>
+        <div class="section-heading">
+          <div>
+            <h2>Struktur data profil</h2>
+            <p class="muted">Tentukan koleksi dan field. Isi data dikelola terpisah oleh setiap akun.</p>
+          </div>
+          <button id="add-collection" class="primary">＋ Koleksi</button>
+        </div>
+        <div id="collections"></div>
+      </section>
+      <section id="test" class="tab-panel" hidden>
+        <div class="test-grid">
+          <section class="panel">
+            <h2>Uji percakapan</h2>
+            <p class="muted">Memakai draft saat ini. Data contoh hanya berlaku di pengujian ini.</p>
+            <label
+              >Data contoh per koleksi (JSON)<textarea
+                id="samples"
+                rows="6"
+                placeholder='{"produk":[{"nama":"Basic","biaya":150000}]}'
+              >
+{}</textarea>
+            </label>
+            <label
+              >Data contoh bisnis (JSON)<textarea
+                id="business-samples"
+                rows="6"
+                placeholder='{"knowledge":"Profil usaha uji","products":[],"orders":[],"pending":[]}'
+              >
+{}</textarea>
+            </label>
+            <p class="hint">
+              Pelanggan simulasi: 628000000001. Foto hanya dipratinjau sebagai hasil tool; tidak dikirim ke WhatsApp.
+            </p>
+            <div id="chat" aria-live="polite"></div>
+            <form id="test-form">
+              <label
+                >Pesan pengujian<textarea
+                  id="test-message"
+                  required
+                  rows="3"
+                  placeholder="Tulis pesan pelanggan…"
+                ></textarea>
+              </label>
+              <div class="actions">
+                <button type="button" id="reset-test">Mulai ulang</button
+                ><button type="button" id="stop-test" hidden>Hentikan</button
+                ><button class="primary" id="run-test">▶ Jalankan</button>
+              </div>
+            </form>
+          </section>
+          <section class="panel">
+            <h2>Jejak eksekusi</h2>
+            <p class="muted">Klik langkah untuk melihat input dan hasilnya.</p>
+            <div id="trace" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+      <section id="settings" class="tab-panel" hidden>
+        <div class="panel narrow">
+          <h2>Ringkasan profil</h2>
+          <label>Nama profil<input id="profile-name" maxlength="100" required /></label
+          ><label>Deskripsi<textarea id="profile-description" rows="4" maxlength="1000"></textarea></label>
+          <h3>Pemeriksaan alur</h3>
+          <div id="issues"></div>
+          <h3>Riwayat versi terbit</h3>
+          <div id="versions"></div>
+          <hr />
+          <h3>Hapus profil</h3>
+          <p class="hint">
+            Hanya profil yang belum dipakai data akun yang dapat dihapus. Versi terbit dan draft akan dihapus.
+          </p>
+          <button id="delete-profile" class="danger">Hapus profil ini</button>
+          <p class="hint">
+            Terbitkan setelah pengujian selesai. Aktifkan profil melalui daftar Profil AI di dashboard agar tersedia
+            untuk akun.
+          </p>
+        </div>
+      </section>
+    </main>
+    <input id="import-file" type="file" accept="application/json,.json" hidden />
+    <dialog id="import-preview">
+      <h2>Impor profil</h2>
+      <div id="import-summary"></div>
+      <p>Hanya definisi profil, alur, dan struktur koleksi yang diimpor. Profil baru dimulai sebagai draft.</p>
+      <div class="actions">
+        <button id="cancel-import">Batal</button><button id="confirm-import" class="primary">Buat profil</button>
+      </div>
+    </dialog>
+    <div id="notice" role="status" popover="manual"></div>
+  </body>
+</html>

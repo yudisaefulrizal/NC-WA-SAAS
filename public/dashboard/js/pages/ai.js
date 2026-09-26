@@ -13,6 +13,7 @@ function aiTab(tab) {
 }
 document.querySelectorAll('[data-ai-tab]').forEach(b => (b.onclick = () => aiTab(b.dataset.aiTab)));
 const knowledgeTabNames = [
+  'records',
   'usaha',
   'products',
   'behavior',
@@ -31,15 +32,20 @@ const knowledgeTabNames = [
 // lembaga; Perilaku AI, FAQ, dan Fallback Tim dimiliki keduanya. Tester AI hanya punya Peran pelanggan, yang disimpan
 // di bidang Perilaku AI.
 const knowledgeTabsFor = type =>
-  type === 'tester'
-    ? ['behavior']
-    : type === 'pendidikan'
-      ? ['behavior', 'lembaga', 'program', 'jadwal', 'dokumen', 'kontak', 'faq', 'fallback']
-      : ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'fallback'];
+  type?.startsWith('g_')
+    ? profileType(type)?.business_tools
+      ? ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'records', 'fallback']
+      : ['behavior', 'records', 'fallback']
+    : type === 'tester'
+      ? ['behavior']
+      : type === 'pendidikan'
+        ? ['behavior', 'lembaga', 'program', 'jadwal', 'dokumen', 'kontak', 'faq', 'fallback']
+        : ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'fallback'];
 // Bagian yang dibuka pertama: bagian isi utama profil, atau satu-satunya bagian bila hanya ada satu.
 const firstKnowledgeTab = type => knowledgeTabsFor(type)[1] ?? knowledgeTabsFor(type)[0];
 function renderKnowledgeTabs() {
   const allowed = knowledgeTabsFor(aiTargetType());
+  $('ai-records-link').href = '/dashboard/ai-data?profile=' + encodeURIComponent(aiTarget());
   document
     .querySelectorAll('[data-knowledge-tab]')
     .forEach(b => (b.hidden = !allowed.includes(b.dataset.knowledgeTab)));
@@ -254,6 +260,10 @@ $('ai-manage-back').onclick = () => {
   run(loadDataProfiles);
 };
 function manageProfile(profile, tab = 'knowledge') {
+  if (profile.profile_type.startsWith('g_') && !profileType(profile.profile_type)?.business_tools) {
+    location.href = '/dashboard/ai-data?profile=' + encodeURIComponent(profile.id);
+    return;
+  }
   aiManaged = profile;
   renderAIView();
   aiTab(tab);

@@ -388,7 +388,9 @@ async function loadAdminProfiles() {
       });
     toggle.append(input, element('span'), state);
     const studio = element('a', 'button secondary', 'Buka di AI Studio');
-    studio.href = '/dashboard/admin/ai-studio?profile=' + encodeURIComponent(p.id);
+    studio.href = p.dynamic
+      ? '/dashboard/admin/ai-builder?profile=' + encodeURIComponent(p.id)
+      : '/dashboard/admin/ai-studio?profile=' + encodeURIComponent(p.id);
     studio.dataset.studio = '';
     return [name, flow, usage, toggle, studio];
   });

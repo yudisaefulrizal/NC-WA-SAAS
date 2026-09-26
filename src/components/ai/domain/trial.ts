@@ -1,6 +1,6 @@
 // Uji Coba: menjalankan satu pertanyaan lewat pipeline data profil tanpa WhatsApp, dengan menagih kredit AI.
 import { type AgentWorkflow } from './pipeline/models.js';
-import { activeWorkflow, enabledProfiles } from './profiles/registry.js';
+import { activeWorkflow, enabledProfiles, profileDefinition } from './profiles/registry.js';
 import { runAgents } from './pipeline/runner.js';
 import { csPipeline } from './profiles/cs/pipeline.js';
 import { sentDocuments } from './profiles/pendidikan/tools.js';
@@ -12,7 +12,6 @@ import { object } from '../../../libraries/validation.js';
 import { AIMessage } from './provider.js';
 import { fail, text } from './input-validation.js';
 import { countWords, aiFallback, creditCost } from './metering.js';
-import { pipelines } from './profile-pipelines.js';
 import { transaction, lockAccount } from './transaction.js';
 import type { AIService } from './service.js';
 import * as usageSql from '../data-access/usage-queries.js';
@@ -38,7 +37,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
   if (!(await enabledProfiles()).has(profile.profile_type))
     throw new ApiError(409, 'profile_disabled', 'Profil AI ini sedang dinonaktifkan admin.');
   config.workflow = (await activeWorkflow(profile.profile_type)) as AgentWorkflow;
-  const pipeline = pipelines[profile.profile_type] ?? csPipeline,
+  const pipeline = (await profileDefinition(profile.profile_type)).pipeline,
     identity = profile.profile_type === 'pendidikan' ? eduIdentity(profile.name) : undefined;
   const id = digest(JSON.stringify(['trial', account, session, randomUUID()]));
   const messages: AIMessage[] = [{ role: 'user', content: question }];
@@ -84,6 +83,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
         profile: profile.id,
         session,
         customer: '628000000000',
+        serviceName: profile.name,
         requestId: id,
         knowledge: assistant.knowledge,
         behavior: assistant.behavior,

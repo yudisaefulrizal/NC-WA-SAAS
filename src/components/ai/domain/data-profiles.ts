@@ -1,5 +1,7 @@
 // Data profil (isi milik klien untuk satu profil) dan data profil mana yang dijalankan setiap sesi: membuat,
+import { supportsBusinessTools } from './profiles/registry.js';
 // menggandakan, mengganti nama, menghapus, memasang ke sesi, dan menyimpan bidang-bidangnya.
+import { copyGraphRecords, requireAvailableGraph } from './builder/store.js';
 import { profileDefinition, enabledProfiles } from './profiles/registry.js';
 import { publicSources, sourceInput, saveSource, builtinSource } from './profiles/cs/store.js';
 import { eduData } from './profiles/pendidikan/tools.js';
@@ -69,6 +71,7 @@ export async function insertDataProfile(
   name: string,
   from?: RowDataPacket,
 ) {
+  await requireAvailableGraph(c, type);
   const [count] = await dataProfilesSql.countByAccount(c, [account]);
   if (Number(count[0].n) >= 100) throw new ApiError(409, 'data_profile_limit', 'Maksimal 100 data profil per akun.');
   const id = randomUUID(),
@@ -124,7 +127,7 @@ export function profileView(svc: AIService, row: RowDataPacket) {
   ) as Record<ProfileField, string>;
   return {
     profile,
-    knowledge: row.profile_type === 'cs' ? composeKnowledge(profile) : '',
+    knowledge: row.profile_type === 'cs' || String(row.profile_type).startsWith('g_') ? composeKnowledge(profile) : '',
     behavior: String(row.behavior ?? ''),
     fallback_number: String(row.fallback_number ?? ''),
     fallback_notify: Boolean(row.fallback_notify),
@@ -136,20 +139,22 @@ export async function dataProfiles(svc: AIService, account: string) {
   const [rows] = await dataProfilesSql.listWithCounts(db, [account]);
   const [attached] = await assistantsSql.listAttachments(db, [account]);
   const enabled = await enabledProfiles();
-  return rows.map(row => ({
-    id: String(row.id),
-    profile_type: String(row.profile_type),
-    profile_name: profileDefinition(row.profile_type).name,
-    profile_enabled: enabled.has(row.profile_type),
-    name: String(row.name),
-    products: Number(row.products),
-    orders: Number(row.orders),
-    programs: Number(row.programs),
-    documents: Number(row.documents),
-    contacts: Number(row.contacts),
-    updated_at: row.updated_at,
-    sessions: attached.filter(a => a.data_profile_id === row.id).map(a => String(a.session_id)),
-  }));
+  return Promise.all(
+    rows.map(async row => ({
+      id: String(row.id),
+      profile_type: String(row.profile_type),
+      profile_name: (await profileDefinition(row.profile_type)).name,
+      profile_enabled: enabled.has(row.profile_type),
+      name: String(row.name),
+      products: Number(row.products),
+      orders: Number(row.orders),
+      programs: Number(row.programs),
+      documents: Number(row.documents),
+      contacts: Number(row.contacts),
+      updated_at: row.updated_at,
+      sessions: attached.filter(a => a.data_profile_id === row.id).map(a => String(a.session_id)),
+    })),
+  );
 }
 export async function dataProfile(svc: AIService, account: string, value: unknown) {
   const id = dataProfileId(svc, value);
@@ -160,7 +165,7 @@ export async function dataProfile(svc: AIService, account: string, value: unknow
   return {
     id,
     profile_type: String(row.profile_type),
-    profile_name: profileDefinition(row.profile_type).name,
+    profile_name: (await profileDefinition(row.profile_type)).name,
     profile_enabled: (await enabledProfiles()).has(row.profile_type),
     name: String(row.name),
     sessions: attached.map(a => String(a.session_id)),
@@ -173,6 +178,10 @@ export async function createDataProfile(svc: AIService, account: string, body: u
     name = text(input.name, 100, 'Nama data profil');
   if (!name) throw fail('Nama data profil wajib diisi');
   const copyFrom = input.copy_from === undefined ? undefined : dataProfileId(svc, input.copy_from);
+  // Klien memilih sendiri apakah record milik pelanggan (booking, pendaftaran, dll.) ikut digandakan.
+  if (input.copy_customer_records !== undefined && typeof input.copy_customer_records !== 'boolean')
+    throw fail('Pilihan salin record pelanggan tidak valid');
+  const copyCustomer = input.copy_customer_records === true;
   const images = new Map<string, string>(),
     documents: string[] = [];
   let id: string;
@@ -185,13 +194,14 @@ export async function createDataProfile(svc: AIService, account: string, body: u
         from = rows[0];
         if (!from) throw new ApiError(404, 'data_profile_not_found', 'Data profil tidak ditemukan');
         type = String(from.profile_type);
-      } else type = profileDefinition(input.profile_type).id;
+      } else type = (await profileDefinition(input.profile_type)).id;
       if (!(await enabledProfiles()).has(type))
         throw new ApiError(409, 'profile_disabled', 'Profil AI ini sedang dinonaktifkan admin.');
       const [taken] = await dataProfilesSql.lockByName(c, [account, name]);
       if (taken[0]) throw new ApiError(409, 'name_taken', 'Nama data profil sudah dipakai.');
       const created = await insertDataProfile(svc, c, account, type, name, from);
       if (copyFrom) {
+        await copyGraphRecords(c, account, copyFrom, created, copyCustomer);
         // Hasil gandaan punya salinan sendiri untuk setiap foto, jadi menghapus salah satu data profil tidak merusak
         // yang lain.
         const [photos] = await productImagesSql.listByProfile(c, [account, copyFrom]);
@@ -334,7 +344,7 @@ export async function saveProfileField(
       return;
     }
   }
-  if (type === 'cs' && profileFields.includes(field as ProfileField)) {
+  if ((await supportsBusinessTools(type)) && profileFields.includes(field as ProfileField)) {
     await dataProfilesSql.updateProfileField(
       db,
       [text(value, 2000, profileLabels[field as ProfileField]), profile, account],
@@ -365,7 +375,7 @@ export async function saveProfileField(
     ]);
     return;
   }
-  if (type === 'cs' && (field === 'products_source' || field === 'orders_source')) {
+  if ((await supportsBusinessTools(type)) && (field === 'products_source' || field === 'orders_source')) {
     const kind = field === 'products_source' ? 'products' : 'orders';
     const input = await sourceInput(value);
     await transaction(async c => {

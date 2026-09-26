@@ -1,0 +1,50 @@
+<!-- Pengelolaan record: formulir mengikuti struktur koleksi aktif dan identitas akun login. -->
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Data Profil · NC-WA</title>
+    <link rel="stylesheet" href="/ai-builder/builder.css" />
+    <script defer src="/ai-builder/common.js"></script>
+    <script defer src="/ai-builder/records.js"></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/dashboard/ai">NC<span>WA</span></a
+      ><strong>Data profil</strong><a class="back" href="/dashboard/ai">← Asisten AI</a>
+    </header>
+    <main id="library">
+      <div class="hero">
+        <div>
+          <span class="eyebrow">DATA ANDA</span>
+          <h1 id="data-title">Memuat profil…</h1>
+          <p>Kelola isi koleksi yang digunakan asisten Anda.</p>
+        </div>
+        <button class="primary" id="new-record">＋ Record</button>
+      </div>
+      <div class="actions">
+        <label>Koleksi<select id="collection"></select></label
+        ><label>Cari data<input type="search" id="search" placeholder="Kata pencarian" /></label
+        ><label id="customer-filter-label" hidden
+          >Pelanggan<input id="customer-filter" inputmode="numeric" placeholder="Nomor WhatsApp" /></label
+        ><button id="search-button">Cari</button>
+      </div>
+      <p id="owner-note" class="hint" hidden>
+        Milik pelanggan: record dibuat AI dari chat dan terikat ke nomor pengirim. Setiap pelanggan hanya bisa melihat
+        miliknya sendiri melalui AI; Anda melihat semuanya di sini.
+      </p>
+      <section class="panel">
+        <div id="records" class="data-table"></div>
+        <div class="actions">
+          <button id="prev">← Sebelumnya</button><span id="page"></span><button id="next">Berikutnya →</button>
+        </div>
+      </section>
+    </main>
+    <dialog id="record-dialog">
+      <h2 id="record-title"></h2>
+      <form id="record-form" class="record-form"></form>
+    </dialog>
+    <div id="notice" role="status" popover="manual"></div>
+  </body>
+</html>

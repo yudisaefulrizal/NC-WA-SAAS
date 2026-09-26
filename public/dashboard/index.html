@@ -585,6 +585,27 @@
               </div>
             </form>
           </dialog>
+          <dialog id="ai-profile-duplicate-dialog" aria-labelledby="ai-profile-duplicate-title">
+            <div class="modal-heading">
+              <h2 id="ai-profile-duplicate-title">Duplikat data profil</h2>
+              <p>Salinan berisi isi data profil ini dan belum dipasang ke sesi mana pun.</p>
+            </div>
+            <form id="ai-profile-duplicate-form">
+              <label>Nama salinan<input name="name" required maxlength="100" /></label>
+              <label id="ai-profile-duplicate-customer" hidden
+                ><input type="checkbox" name="copy_customer_records" /> Salin juga record milik pelanggan
+                <small
+                  >Booking, pendaftaran, atau data lain yang terikat ke nomor pelanggan. Tanpa centang, hanya data umum
+                  yang disalin.</small
+                ></label
+              >
+              <p class="form-error" role="alert" id="ai-profile-duplicate-error"></p>
+              <div class="modal-actions">
+                <button type="button" data-close="ai-profile-duplicate-dialog" class="secondary">Batal</button
+                ><button>Duplikat</button>
+              </div>
+            </form>
+          </dialog>
           <!-- Field Asisten AI terhubung ke #ai-form lewat atribut form, karena tata letak ini juga memuat form lain (dialog,
      chat, uji coba) yang tidak boleh bersarang di dalam form. -->
           <form id="ai-form" hidden></form>
@@ -659,6 +680,7 @@
                     <option value="jadwal">Jadwal</option>
                     <option value="dokumen">Dokumen</option>
                     <option value="kontak">Kontak</option>
+                    <option value="records">Koleksi data</option>
                     <option value="usaha">Profil Usaha</option>
                     <option value="products">Produk</option>
                     <option value="cara_pemesanan">Cara Pemesanan</option>
@@ -669,6 +691,7 @@
                   </select></label
                 >
                 <div class="row-actions ai-knowledge-tabs">
+                  <button type="button" data-knowledge-tab="records" hidden>Koleksi data</button>
                   <button type="button" data-knowledge-tab="behavior">Perilaku AI</button
                   ><button type="button" data-knowledge-tab="lembaga">Profil Lembaga</button
                   ><button type="button" data-knowledge-tab="program">Program</button
@@ -683,6 +706,11 @@
                   ><button type="button" data-knowledge-tab="faq">FAQ</button
                   ><button type="button" data-knowledge-tab="fallback">Fallback Tim</button>
                 </div>
+                <section id="ai-knowledge-tab-records" hidden>
+                  <h3>Koleksi data profil</h3>
+                  <p>Kelola record menggunakan struktur koleksi yang ditentukan pada profil.</p>
+                  <a id="ai-records-link" href="/dashboard/ai-data">Buka data koleksi ↗</a>
+                </section>
                 <section id="ai-knowledge-tab-lembaga" class="edu-lembaga" hidden>
                   <label class="ai-field-label"
                     >Profil lembaga<textarea
@@ -2303,6 +2331,7 @@ X-API-Key: KUNCI_ANDA   # header bebas, opsional
               kode. Di sini Anda mengatur ketersediaannya untuk semua klien; prompt dan model setiap node diatur di AI
               Studio.
             </p>
+            <p><a class="button" href="/dashboard/admin/ai-builder">Buat profil · Editor alur · Impor JSON</a></p>
             <div id="admin-profiles-list" class="table-wrap"></div>
             <p class="ai-warning">
               Menonaktifkan profil menghentikan AI di semua sesi yang memakainya dan menyembunyikannya dari pilihan

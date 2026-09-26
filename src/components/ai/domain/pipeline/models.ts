@@ -6,6 +6,7 @@ export type ModelTier = (typeof modelTiers)[number];
 // Id node berbeda per pipeline profil (CS Usaha: layanan, pesanan…; CS Lembaga Pendidikan: program, jadwal…).
 export type ModelRole = string;
 export interface AgentWorkflow {
+  graph?: import('../builder/definition.js').GraphDefinition;
   nodes: Record<
     ModelRole,
     { prompt: string; tier: ModelTier; model: string; tools: string[]; structured_output?: boolean }

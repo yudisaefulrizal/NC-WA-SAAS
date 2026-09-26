@@ -12,3 +12,5 @@ export { ai } from './domain/service.js';
 export { studio } from './domain/studio.js';
 export { aiAccountRoutes, aiAdminRoutes } from './entry-points/account-routes.js';
 export { aiRoutes } from './entry-points/routes.js';
+
+export { builderAdminRoutes, builderAccountRoutes } from './entry-points/builder-routes.js';

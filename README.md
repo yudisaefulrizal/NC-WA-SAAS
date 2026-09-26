@@ -13,6 +13,7 @@ Cara kerja dan arsitektur ada di [AGENT.MD](AGENT.MD).
   - **CS Lembaga Pendidikan:** profil lembaga, program, jadwal, dokumen yang dikirim ke WhatsApp, dan kontak. Profil ini tidak menyimpan data pribadi.
   - **Tester AI:** AI berperan sebagai pelanggan sesuai Peran pelanggan untuk menguji nomor CS mana pun. Obrolan dimulai dari pesan manual di HP nomor tester dan berjalan sampai dijeda.
   - Juga tersedia: riwayat chat gaya WhatsApp dengan balasan manual, jeda, dan full auto; fallback ke tim; Uji Coba.
+  - **Profil dinamis:** editor alur drag-and-drop, Router/Agent/Tool/Kondisi/Context/Output/Fallback, koleksi dengan struktur sendiri, impor/ekspor JSON, simulasi, draft dan riwayat versi terbit. Mulai dari **Profil AI → Buat profil**. [Panduan dan arsitektur](docs/dynamic-ai-profiles-design.md).
   - Pemilik menyetel prompt dan model tiap node di **AI Studio**, dan menyalakan atau mematikan profil di **Profil AI**.
 - **Auto Share.** Kontak dan kelompok, template (teks atau media, bisa mengambil data dari endpoint, bisa dirapikan AI), serta pengiriman sekali atau berulang dengan rotasi template dan riwayat per tujuan.
 - **Referral**, audit dan status layanan, serta backup dan restore.

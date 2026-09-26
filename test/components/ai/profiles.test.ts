@@ -1,5 +1,7 @@
 // Tes multi-profil: data profil dipakai bersama beberapa sesi, ganti/cabut, isolasi akun, integrasi lama,
 // menggandakan, dan profil yang dimatikan pemilik.
+import { blankDefinition } from '../../../src/components/ai/domain/builder/definition.js';
+import { createGraph, saveGraph } from '../../../src/components/ai/domain/builder/store.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -27,6 +29,7 @@ import { basicWallet } from '../../../src/components/billing/domain/plans.js';
 
 const root = await mkdtemp(join(tmpdir(), 'ncwa-profiles-'));
 const accounts: string[] = [];
+const graphs: string[] = [];
 // AI menjawab setiap pesan; Router selalu mengarahkan ke profil_perusahaan, yang langsung menjawab.
 const transport: AITransport = async (config, messages) => {
   if (config.call_role === 'router')
@@ -86,6 +89,10 @@ after(async () => {
   for (const id of accounts) {
     await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
     await db.execute('DELETE FROM accounts WHERE id=?', [id]);
+  }
+  for (const id of graphs) {
+    await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [id]);
+    await db.execute('DELETE FROM ai_profile_types WHERE id=?', [id]);
   }
   await db.end();
   await rm(root, { recursive: true, force: true });
@@ -461,4 +468,38 @@ test('Uji Coba runs a data profile directly, even one not attached to any sessio
   await assert.rejects(service.trial(t.id, { question: 'Halo', data_profile: randomUUID() }), {
     code: 'data_profile_not_found',
   });
+});
+
+test('A WhatsApp session executes the published dynamic graph, ignores draft edits and switches on publication', async () => {
+  const t = await tenant();
+  const d = blankDefinition('Graph WhatsApp');
+  d.nodes = d.nodes.filter(n => n.type !== 'agent');
+  d.nodes[1].value = 'Jawaban dari graf terbit';
+  d.edges = [{ id: 'e1', source: 'input', port: 'next', target: 'output' }];
+  const g = await createGraph(owner, d);
+  graphs.push(g.id);
+  await saveGraph(owner, g.id, { revision: 1 }, true);
+  await setProfileEnabled(owner, g.id, true);
+  const p = await service.createDataProfile(t.id, { profile_type: g.id, name: 'Graf sesi' });
+  await service.attachProfile(t.id, 'shop', { data_profile_id: p.id, enabled: true });
+  const draft = structuredClone(d);
+  draft.nodes[1].value = 'Jawaban versi berikutnya';
+  const saved = await saveGraph(owner, g.id, { revision: 1, definition: draft });
+  t.send('shop', 'GRAPH1', 'Halo');
+  await eventually(
+    () => answers(t.id, 'shop'),
+    n => n === 1,
+  );
+  const first = (await chatMessages(t.id, 'shop', customer)).messages.filter(m => m.origin === 'ai');
+  assert.equal(first.length, 1);
+  assert.equal(first[0].text, 'Jawaban dari graf terbit');
+  await saveGraph(owner, g.id, { revision: saved.revision }, true);
+  t.send('shop', 'GRAPH2', 'Lanjut');
+  await eventually(
+    () => answers(t.id, 'shop'),
+    n => n === 2,
+  );
+  const second = (await chatMessages(t.id, 'shop', customer)).messages.filter(m => m.origin === 'ai');
+  assert.equal(second.length, 2);
+  assert.equal(second.at(-1)!.text, 'Jawaban versi berikutnya');
 });

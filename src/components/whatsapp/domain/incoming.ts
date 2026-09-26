@@ -15,6 +15,8 @@ export interface IncomingMessage {
   timestamp: number;
   quotedMessageId?: string;
   mimetype?: string;
+  // Nama profil WhatsApp pengirim; hanya dibaca Asisten AI dan tidak ikut event/webhook.
+  pushName?: string;
   download?: () => Promise<Readable>;
 }
 function address(jid: string) {
@@ -45,6 +47,7 @@ export function parseIncoming(message: WAMessage): IncomingMessage | undefined {
     sender: address(sender),
     timestamp: Number(message.messageTimestamp ?? Math.floor(Date.now() / 1000)),
     quotedMessageId: content.extendedTextMessage?.contextInfo?.stanzaId ?? undefined,
+    ...(message.pushName ? { pushName: message.pushName.slice(0, 100) } : {}),
   };
   if (content.conversation != null || content.extendedTextMessage?.text != null) {
     return { ...common, type: 'text', text: content.conversation ?? content.extendedTextMessage!.text! };

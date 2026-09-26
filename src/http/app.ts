@@ -1,6 +1,13 @@
 // Aplikasi HTTP: middleware, urutan pendaftaran rute semua komponen, halaman dashboard dan AI Studio dengan aset
 // berhash, file statis, 404, dan penanganan error.
-import { ai, studio as defaultStudio, aiAccountRoutes, aiAdminRoutes } from '../components/ai/index.js';
+import {
+  ai,
+  studio as defaultStudio,
+  aiAccountRoutes,
+  aiAdminRoutes,
+  builderAdminRoutes,
+  builderAccountRoutes,
+} from '../components/ai/index.js';
 import { payments as defaultPayments } from './services.js';
 import express from 'express';
 import helmet from 'helmet';
@@ -41,7 +48,7 @@ export function createApp(
     assistantJson = express.json({ limit: '64kb' }),
     studioJson = express.json({ limit: '128kb' });
   app.use((req, res, next) =>
-    (req.path.startsWith('/api/admin/ai/studio')
+    (req.path.startsWith('/api/admin/ai/studio') || req.path.startsWith('/api/admin/ai/builder')
       ? studioJson
       : (req.method === 'PUT' && /^\/sessions\/[A-Za-z0-9_-]+\/ai$/.test(req.path)) || largeText.test(req.path)
         ? assistantJson
@@ -80,6 +87,7 @@ export function createApp(
   accountRoutes(app, { gateway });
   billingRoutes(app, { payments, gateway });
   aiAccountRoutes(app, {});
+  builderAccountRoutes(app);
   referralRoutes(app, { referral });
   app.use('/api/admin', (_req, res, next) => {
     if (res.locals.account.role !== 'owner') {
@@ -92,6 +100,9 @@ export function createApp(
   billingAdminRoutes(app, { payments });
   app.get('/dashboard/admin/ai-studio', (_req, res) => res.type('html').send(page('ai-studio/index.html')));
   aiAdminRoutes(app, { studio });
+  builderAdminRoutes(app);
+  app.get('/dashboard/admin/ai-builder', (_req, res) => res.type('html').send(page('ai-builder/index.html')));
+  app.get('/dashboard/ai-data', (_req, res) => res.type('html').send(page('ai-builder/data.html')));
   referralAdminRoutes(app, { referral });
   // Browser senang terus memakai skrip lama setelah deploy, dan itu terlihat persis seperti fitur rusak. Setiap
   // halaman ditulis ulang supaya asetnya membawa hash isi; file yang berubah mendapat URL baru, file yang tidak

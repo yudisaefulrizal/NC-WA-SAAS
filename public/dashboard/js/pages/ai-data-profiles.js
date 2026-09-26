@@ -49,16 +49,7 @@ function renderDataProfiles() {
       }),
       button('Duplikat', async () => {
         menu.open = false;
-        const name = prompt('Nama untuk salinan data profil ini:', 'Salinan ' + p.name);
-        if (!name?.trim()) return;
-        await api('/ai/data-profiles', 'POST', { name: name.trim(), copy_from: p.id });
-        await loadDataProfiles();
-        $('message').textContent =
-          p.profile_type === 'tester'
-            ? 'Data profil diduplikat beserta peran pelanggannya.'
-            : p.profile_type === 'pendidikan'
-              ? 'Data profil diduplikat beserta program, dokumen, dan kontaknya.'
-              : 'Data profil diduplikat beserta produk dan fotonya.';
+        await openDuplicate(p);
       }),
       button('Hapus', async () => {
         menu.open = false;
@@ -359,3 +350,50 @@ function renderAISessionFilters() {
     filters.append(choice);
   }
 }
+// Dialog duplikat: pilihan salin record milik pelanggan hanya muncul bila profil dinamisnya punya koleksi seperti itu.
+let duplicating = null;
+async function openDuplicate(p) {
+  duplicating = p;
+  const form = $('ai-profile-duplicate-form');
+  form.reset();
+  form.elements.name.value = ('Salinan ' + p.name).slice(0, 100);
+  $('ai-profile-duplicate-error').textContent = '';
+  let owned = false;
+  if (p.profile_type.startsWith('g_'))
+    owned = await api('/api/ai/records/' + encodeURIComponent(p.id))
+      .then(d => d.collections.some(c => c.owner === 'customer'))
+      .catch(() => false);
+  $('ai-profile-duplicate-customer').hidden = !owned;
+  $('ai-profile-duplicate-dialog').showModal();
+}
+$('ai-profile-duplicate-form').onsubmit = e => {
+  e.preventDefault();
+  const form = e.currentTarget,
+    p = duplicating;
+  run(async () => {
+    try {
+      await api('/ai/data-profiles', 'POST', {
+        name: form.elements.name.value.trim(),
+        copy_from: p.id,
+        ...(!$('ai-profile-duplicate-customer').hidden
+          ? { copy_customer_records: form.elements.copy_customer_records.checked }
+          : {}),
+      });
+    } catch (error) {
+      $('ai-profile-duplicate-error').textContent = error.message;
+      return;
+    }
+    $('ai-profile-duplicate-dialog').close();
+    await loadDataProfiles();
+    $('message').textContent =
+      p.profile_type === 'tester'
+        ? 'Data profil diduplikat beserta peran pelanggannya.'
+        : p.profile_type === 'pendidikan'
+          ? 'Data profil diduplikat beserta program, dokumen, dan kontaknya.'
+          : p.profile_type.startsWith('g_')
+            ? form.elements.copy_customer_records.checked && !$('ai-profile-duplicate-customer').hidden
+              ? 'Data profil diduplikat beserta seluruh record, termasuk milik pelanggan.'
+              : 'Data profil diduplikat beserta data umumnya.'
+            : 'Data profil diduplikat beserta produk dan fotonya.';
+  });
+};

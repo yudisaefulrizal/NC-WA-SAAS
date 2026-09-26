@@ -23,6 +23,8 @@ export interface DecisionRequest {
   questions: Record<string, { type: 'choice' | 'noul'; instructions: string; criteria: Record<string, string> }>;
 }
 export interface AIConfig {
+  graph_context?: string | null;
+  trace_node?: string;
   signal?: AbortSignal;
   workflow?: AgentWorkflow;
   onTrace?: (event: AITraceEvent) => void;

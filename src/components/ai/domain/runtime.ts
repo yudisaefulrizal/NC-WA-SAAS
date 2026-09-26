@@ -1,7 +1,7 @@
 // Runtime WhatsApp: mengantrekan pesan masuk per pelanggan, menjalankan pipeline profil, menagih kredit, mengirim
 // jawaban (beserta foto produk dan dokumen), dan menyimpan memori.
 import { type ModelRole, type AgentWorkflow, type AITraceEvent } from './pipeline/models.js';
-import { activeWorkflow } from './profiles/registry.js';
+import { activeWorkflow, profileDefinition } from './profiles/registry.js';
 import { transientAIError } from './pipeline/retry.js';
 import { runAgents, updateRouterContext } from './pipeline/runner.js';
 import { eduData, documentMarker, sentDocuments } from './profiles/pendidikan/tools.js';
@@ -19,7 +19,6 @@ import { AIMessage, defaults, provider, AITransport } from './provider.js';
 import { text } from './input-validation.js';
 import { countWords, aiFallback, creditCost } from './metering.js';
 import { profileFields, ProfileField, composeKnowledge } from './profiles/cs/knowledge.js';
-import { pipelines } from './profile-pipelines.js';
 import { transaction, lockAccount } from './transaction.js';
 import { parseMemory } from './memory.js';
 import type { AIService } from './service.js';
@@ -85,7 +84,7 @@ export async function handleMessage(
   if (!config.secret) return;
   const assistant = await svc.assistant(account, session),
     type = assistant.data_profile?.profile_type ?? '',
-    pipeline = pipelines[type];
+    pipeline = type ? (await profileDefinition(type)).pipeline : undefined;
   if (!assistant.enabled || !pipeline || !assistant.profile_enabled) return;
   manager.connected(session);
   if ((await basicWallet(account)).balance < 1) return;
@@ -98,7 +97,7 @@ export async function handleMessage(
     if (!current[0]?.enabled) return;
     // Knowledge CS diambil sekali di sini; tool pendidikan membaca data profil saat dijalankan.
     const knowledge =
-      type === 'cs'
+      type === 'cs' || type.startsWith('g_')
         ? composeKnowledge(
             Object.fromEntries(
               profileFields.map(field => [field, String(current[0]['profil_' + field] ?? '')]),
@@ -161,6 +160,7 @@ export async function handleMessage(
       fallbackNumber,
       fallbackNotify: Boolean(current[0].fallback_notify),
       profileId: String(current[0].data_profile_id),
+      serviceName: String(current[0].name ?? ''),
     };
   });
   if (!prepared) return;
@@ -217,7 +217,7 @@ export async function handleMessage(
               session,
               id,
               type,
-              event.node.slice(0, 20),
+              event.node.slice(0, 32),
               event.state.slice(0, 20),
               event.model?.slice(0, 100) ?? null,
               event.attempt ?? null,
@@ -232,11 +232,16 @@ export async function handleMessage(
     const trackedTransport: AITransport = async (selected, messages, maxWords) => {
       lastMessages = messages;
       lastModel = selected.model;
-      const node = selected.call_role ?? 'model';
+      const node = selected.trace_node ?? selected.call_role ?? 'model';
       for (let attempt = 0; attempt < 3; attempt++) {
         await guard();
         if (modelCalls.length >= 20 || Date.now() >= deadline) throw Error('ai_retry_limit');
-        const entry = { role: selected.call_role, model: selected.model, status: 'failed', attempt: attempt + 1 };
+        const entry = {
+          role: selected.trace_node ?? selected.call_role,
+          model: selected.model,
+          status: 'failed',
+          attempt: attempt + 1,
+        };
         modelCalls.push(entry);
         trace?.({ node, state: 'running', input: messages, model: selected.model, attempt: attempt + 1 });
         try {
@@ -290,6 +295,8 @@ export async function handleMessage(
           profile: prepared.profileId,
           session,
           customer: message.from,
+          customerName: message.pushName ?? '',
+          serviceName: prepared.serviceName,
           requestId: id,
           knowledge: prepared.knowledge,
           behavior: prepared.behavior,

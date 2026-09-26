@@ -1,5 +1,7 @@
 // Menjalankan pipeline sebuah profil untuk satu pesan: router memilih specialist, specialist menjawab dengan
 // bantuan tool, lalu node context meringkas percakapan untuk giliran berikutnya.
+import { summarizeSPO } from './context.js';
+import { runGraph } from '../builder/engine.js';
 import { routerSchema, validateRouterOutput } from './router-schema.js';
 import { isJevModel, jevRouterRequest, parseJevRoute } from './jev-router.js';
 import { roleConfig, roleTier, type ModelTier } from './models.js';
@@ -23,6 +25,9 @@ export interface ToolContext {
   readonly profile: string;
   readonly session: string;
   readonly customer: string;
+  // Nama WhatsApp pelanggan dan nama data profil, untuk variabel customer.name dan service.name profil dinamis.
+  readonly customerName?: string;
+  readonly serviceName?: string;
   readonly requestId: string;
   readonly knowledge: string;
   readonly behavior?: string;
@@ -83,6 +88,18 @@ export async function runAgents(
   routerContext: string | null = null,
   pipeline: Pipeline = csPipeline,
 ) {
+  if (config.workflow?.graph)
+    return runGraph(
+      config.workflow.graph,
+      transport,
+      config,
+      messages,
+      context,
+      routerContext,
+      undefined,
+      maxWords,
+      tools,
+    );
   const input = messages.filter(m => m.role === 'user').at(-1)?.content;
   if (!input) throw Error('ai_missing_input');
   const pending = context.pendingFallbacks ?? [];
@@ -265,28 +282,14 @@ export async function updateRouterContext(
   history: readonly AIMessage[] = [],
   pipeline: Pipeline = csPipeline,
 ): Promise<string | null> {
+  if (config.workflow?.graph) return config.graph_context ?? null;
   if (!usesRouter(pipeline)) return null;
-  return validatedAI(
+  return summarizeSPO(
     transport,
     roleConfig(config, 'context'),
-    [
-      { role: 'system', content: config.workflow?.nodes.context?.prompt ?? pipeline.contextPrompt },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          riwayat_sebelumnya: history.map(m => ({ peran: m.role, isi: m.content })),
-          pesan_pelanggan: userMessage,
-          jawaban_agent: answer,
-        }),
-      },
-    ],
-    30,
-    raw => {
-      const result = raw.trim();
-      if (result.length > 200 || !/^[\p{L}\p{N}_ ]+(-[\p{L}\p{N}_ ]+){2,}$/u.test(result))
-        throw Error('ai_invalid_context');
-      return result;
-    },
-    'Kembalikan satu baris Subjek-Predikat-Objek dipisahkan tanda hubung, minimal tiga kata, tanpa penjelasan atau JSON.',
+    config.workflow?.nodes.context?.prompt ?? pipeline.contextPrompt,
+    userMessage,
+    answer,
+    history,
   );
 }

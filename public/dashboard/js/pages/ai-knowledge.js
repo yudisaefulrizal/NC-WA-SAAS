@@ -155,7 +155,9 @@ async function loadAssistant() {
       sessions && id ? loadConversations() : null,
       // Tester AI tidak punya data selain Peran pelanggan, yang sudah dimuat bersama pengaturan asisten.
       target && aiTargetType() === 'pendidikan' ? loadEduData(generation) : null,
-      target && aiTargetType() === 'cs' ? loadAIData(generation) : null,
+      target && (aiTargetType() === 'cs' || profileType(aiTargetType())?.business_tools)
+        ? loadAIData(generation)
+        : null,
     ]);
     if (!target) for (const name of ['ai-products', 'ai-orders', 'ai-fallbacks']) $(name).replaceChildren();
   } finally {
