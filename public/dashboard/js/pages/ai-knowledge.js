@@ -1,5 +1,5 @@
 // Asisten AI, Knowledge: Perilaku AI dan Fallback Tim (simpan otomatis per bidang), tiket fallback sesi, dan memuat
-// pengaturan asisten. Isi bisnis ada di koleksi data profil, dikelola di halaman data koleksi.
+// pengaturan asisten. Isi koleksi data profil dikelola di sub-menu koleksi (ai-records.js).
 let assistantLoad = 0;
 // Simpan otomatis: setiap bidang menyimpan dirinya sendiri dengan jeda, bukan satu tombol "Simpan semua tab". Timer
 // per elemen membuat mengetik di satu kolom tidak pernah mengulang simpanan kolom lain yang sedang menunggu.
@@ -100,7 +100,11 @@ async function loadAssistant() {
       renderChatList();
       renderChatView();
     }
-    await Promise.all([sessions && id ? loadConversations() : null, sessions && target ? loadFallbacks() : null]);
+    await Promise.all([
+      sessions && id ? loadConversations() : null,
+      sessions && target ? loadFallbacks() : null,
+      loadKnowledgeCollections(),
+    ]);
     if (!sessions || !target) $('ai-fallbacks').replaceChildren();
   } finally {
     if (generation === assistantLoad) for (const control of controls) control.disabled = !target;

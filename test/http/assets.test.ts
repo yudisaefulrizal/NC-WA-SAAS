@@ -51,5 +51,5 @@ test('pages reference assets by content hash and hashed URLs are cached immutabl
 test('the profile editor page is versioned with its own assets', async () => {
   const page = (await request(app).get('/dashboard/admin/ai-builder').expect(200)).text;
   assert.match(page, new RegExp('/ai-builder/editor\\.js\\?v=' + hashOf('ai-builder/editor.js')));
-  assert.match(page, new RegExp('/ai-builder/builder\\.css\\?v=' + hashOf('ai-builder/builder.css')));
+  assert.match(page, new RegExp('/ai-builder/editor\\.css\\?v=' + hashOf('ai-builder/editor.css')));
 });

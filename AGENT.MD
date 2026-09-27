@@ -35,7 +35,7 @@ Struktur mengikuti Node.js Best Practices: kode dikelompokkan per komponen bisni
 | `storage/` (tidak di git) | Data runtime: `whatsapp/<akun>/<sesi>/` berisi login Baileys (jangan dihapus, nomor akan logout), `files/{media,record-files,share-assets}/<akun>/` berisi file klien. Path-nya dari `src/libraries/storage.ts`. Instalasi lama dengan `auth/` dipindah otomatis saat start pertama. |
 | `src/server.ts`, `src/migrate.ts` | Titik masuk aplikasi dan migrasi. Skema fondasi ada di `migrate.ts`, skema lain di `data-access/schema.ts` tiap komponen. |
 | `public/dashboard/` | Dashboard: `index.html`, `css/*.css`, `js/core.js`, `js/pages/*.js`, `js/start.js`. |
-| `public/ai-builder/` | Editor profil pemilik (`index.html`) dan halaman data koleksi klien (`data.html`). |
+| `public/ai-builder/` | Editor profil pemilik (`index.html`, gaya `editor.css`). Isi koleksi klien dikelola di Asisten AI › Knowledge (`public/dashboard/js/pages/ai-records.js`). |
 | `test/` | Tes, dengan jalur yang sama seperti `src/` (`test/components/ai/profiles.test.ts` menguji `src/components/ai`); `test/components/ai/graph-fixture.ts` berisi graf uji bersama untuk tes runtime. |
 | `scripts/test/`, `scripts/checks/`, `scripts/tools/` | Runner tes terisolasi, pemeriksaan browser, dan utilitas (`owner`, `backup`, `restore-check`, `setup-*`, `bench`). |
 
@@ -92,17 +92,17 @@ Komentar pembuka, import, tipe, fungsi yang diekspor, lalu helper internal.
 - **Engine** (`whatsapp/domain/sessions.ts`): satu pemilik aktif per session. Login disimpan di `storage/whatsapp/<akun>/<sesi>/`, dan semua session dipulihkan saat startup.
 - **Asisten AI**:
   - Semua profil AI adalah graf yang dibuat pemilik melalui Editor profil `/dashboard/admin/ai-builder` (profil statis CS Usaha, CS Lembaga Pendidikan, Tester AI, dan AI Studio sudah dihapus): definisi graf/skema disimpan di `ai_graph_profiles`, versi terbit di `ai_graph_versions`, dan record tenant di `ai_data_records`. Runtime di `domain/builder/engine.ts`; panduan kontrak ada di `docs/dynamic-ai-profiles-design.md`. Tidak perlu menambah tabel atau kode per profil.
-  - Operasi node Data berjalan lewat satu adapter (`builder/record-tools.ts`): database di runtime dan Uji Coba, memori di simulasi. Semantik filter/kata kunci/urutan ada dua kali, di SQL (`graph-profiles-queries.ts`) dan JavaScript (`record-query.ts`); ubah keduanya bersamaan dan jalankan tes paritas di `builder-data.test.ts`.
+  - Node data ada tiga: Data tabel (`data_table`, dulu `tool`), Data teks (`data_text`), dan Data isian (`data_form`), masing-masing untuk koleksi `kind` `list`, `text`, dan `form`; teks/isian disimpan sebagai satu record. Operasinya berjalan lewat satu adapter (`builder/record-tools.ts`): database di runtime dan Uji Coba, memori di simulasi. Semantik filter/kata kunci/urutan ada dua kali, di SQL (`graph-profiles-queries.ts`) dan JavaScript (`record-query.ts`); ubah keduanya bersamaan dan jalankan tes paritas di `builder-data.test.ts`.
   - Koleksi milik pelanggan dibatasi ke `ToolContext.customer` dari sesi, tidak pernah dari argumen model.
   - Koleksi bisa diganti API milik klien per data profil (`builder/collection-sources.ts`, tabel `ai_collection_sources`); pemanggil HTTPS-nya ada di `ai/domain/endpoint.ts`.
   - File field File/gambar ada di `storage/files/record-files/` dan tabel `ai_record_files` (`builder/record-files.ts`). Setiap jalur yang menyalin atau menghapus record/data profil harus ikut menyalin atau menghapus filenya.
   - Daftar profil ada di `ai/domain/profiles/registry.ts`; WhatsApp (`runtime.ts`) dan Uji Coba (`trial.ts`) menjalankan graf terbit lewat `runGraph`. Data profil (`ai_data_profiles`) adalah isi milik akun (perilaku, nomor fallback, record koleksi) yang dipasang ke sesi lewat `ai_assistants.data_profile_id`. Data profil tidak pernah dibuat otomatis; menyalakan AI sesi butuh data profil terpasang.
   - Runtime memanggil `config.checkpoint` sebelum setiap node Data, supaya tidak ada record yang ditulis setelah percakapan dijeda, diambil alih admin, atau asistennya berubah.
-  - Kredit AI dihitung per kata, dipesan dulu, lalu diselesaikan setelah jawaban. Memori dan konteks S-P-O disimpan per sesi dan per pelanggan. Riwayat chat (`ai_chat_messages`) terpisah dari memori AI.
+  - Kredit AI dihitung per kata, dipesan dulu, lalu diselesaikan setelah jawaban. Memori dan konteks S-P-O disimpan per sesi dan per pelanggan. Di graf, riwayat dibaca lewat node Memori percakapan (`memory`) dan ringkasan lewat node Memori konteks (`context_memory`, hanya ditulis Context); profil tanpa Memori konteks memakai cara lama. Riwayat chat (`ai_chat_messages`) terpisah dari memori AI.
   - Mengganti atau mencabut data profil mengosongkan memori AI sesi itu.
   - Profil baru selalu mulai nonaktif sampai pemilik menyalakannya.
   - Tabel profil statis lama (`ai_products`, `ai_orders`, `ai_product_images`, `ai_data_sources`, `ai_edu_*`, `ai_workflow`) dikosongkan oleh migrasi karena user database aplikasi tidak punya hak DROP; migrasi mencetak perintah `DROP TABLE` untuk dijalankan sekali dengan akun admin MySQL.
-- **Menambah profil** dilakukan melalui Editor profil, template, atau impor JSON, tanpa kode per profil. Menambah jenis node/operasi baru harus memperbarui kontrak, validator, runtime, UI, dan tes.
+- **Menambah profil** dilakukan melalui Editor profil, impor/tempel JSON, atau skill AI, tanpa kode per profil. Menambah jenis node/operasi baru harus memperbarui kontrak, validator, runtime, UI, deskripsi skill AI (`domain/builder/skill.ts`, dipaksa `tsc`), dan tes.
 - **Auto Share**: konten dan tujuan disalin ke run saat dijadwalkan. Worker memproses satu run sekaligus, dengan jeda acak 1–3 detik antar tujuan.
 
 ## Pelajaran dari kegagalan sebelumnya

@@ -16,9 +16,9 @@ import {
   type GraphNode,
 } from '../../../src/components/ai/domain/builder/definition.js';
 import * as store from '../../../src/components/ai/domain/builder/store.js';
-import { templates } from '../../../src/components/ai/domain/builder/templates.js';
 import { runGraph, interpolate } from '../../../src/components/ai/domain/builder/engine.js';
 import { simulate } from '../../../src/components/ai/domain/builder/simulation.js';
+import { catalogGraph } from './graph-fixture.js';
 import { setProfileEnabled, activeGraph } from '../../../src/components/ai/domain/profiles/registry.js';
 const owner = randomUUID(),
   client = randomUUID(),
@@ -71,18 +71,17 @@ after(async () => {
   await db.end();
 });
 async function graph() {
-  const d = templates()[0].definition;
+  const d = catalogGraph();
   const g = await store.createGraph(owner, d);
   ids.push(g.id);
   await store.saveGraph(owner, g.id, { revision: g.revision }, true);
   await setProfileEnabled(owner, g.id, true);
   return g;
 }
-test('All templates round-trip and validate; cycles, dangling ports, missing variables and code paths fail', () => {
-  for (const t of templates()) {
-    assertRunnable(t.definition);
-    assert.deepEqual(parseDefinition(JSON.parse(JSON.stringify(t.definition))), t.definition);
-  }
+test('Catalog graph round-trips and validates; cycles, dangling ports, missing variables and code paths fail', () => {
+  const catalog = catalogGraph();
+  assertRunnable(catalog);
+  assert.deepEqual(parseDefinition(JSON.parse(JSON.stringify(catalog))), catalog);
   const cycle = blankDefinition();
   cycle.edges[1].target = 'agent';
   assert.throws(() => assertRunnable(cycle), /Siklus/);
@@ -96,6 +95,12 @@ test('All templates round-trip and validate; cycles, dangling ports, missing var
   d.edges = [];
   assert.throws(() => assertRunnable(d), /Hubungkan/);
   assert.throws(() => parseDefinition({ ...d, version: 99 }));
+  // Nama node wajib unik tanpa membedakan huruf besar/kecil dan spasi, dan tidak boleh kosong.
+  const named = blankDefinition();
+  named.nodes[2].label = '  asisten ';
+  assert.throws(() => assertRunnable(named), /sudah dipakai node lain/);
+  named.nodes[2].label = ' ';
+  assert.throws(() => assertRunnable(named), /Nama node wajib diisi/);
 });
 test('Field types reject invalid calendar dates, unknown fields and required values', () => {
   const c = {
@@ -205,9 +210,16 @@ test('Relations stay within a data profile; cloning remaps references and delete
 });
 test('A graph run leaves the Context summary in the config for the next message', async () => {
   const d = blankDefinition();
-  const context: GraphNode = { ...d.nodes[1], id: 'context', type: 'context', prompt: 'Ringkas', x: 600 };
+  const context: GraphNode = {
+    ...d.nodes[1],
+    id: 'context',
+    label: 'context',
+    type: 'context',
+    prompt: 'Ringkas',
+    x: 600,
+  };
   context.memory = 'memory';
-  d.nodes.push({ ...d.nodes[0], id: 'memory', type: 'memory' }, context);
+  d.nodes.push({ ...d.nodes[0], id: 'memory', label: 'memory', type: 'memory' }, context);
   d.edges[1].target = 'context';
   d.edges.push({ id: 'e3', source: 'context', port: 'next', target: 'output' });
   const calls: string[] = [];
@@ -230,7 +242,7 @@ test('A graph run leaves the Context summary in the config for the next message'
   assert.equal(config.graph_context, 'pelanggan-selesai-bertanya');
 });
 test('JEV router follows choice and invokes only tools granted to the selected agent', async () => {
-  const d = templates()[0].definition;
+  const d = catalogGraph();
   const router = d.nodes.find(n => n.id === 'router')!;
   router.tier = 'decision';
   router.model = 'typesafe/jev-1.13';
@@ -272,7 +284,7 @@ test('JEV router follows choice and invokes only tools granted to the selected a
   );
 });
 test('Router links only the pending tickets it selects, and only those reach the agent', async () => {
-  const d = templates()[0].definition;
+  const d = catalogGraph();
   const pendingFallbacks = [
     { id: 'FB-A', question: 'Persetujuan diskon khusus' },
     { id: 'FB-B', question: 'Penggantian bingkai rusak' },
@@ -315,7 +327,7 @@ test('Condition branches and abort signal bypass model calls', async () => {
   const d = blankDefinition();
   d.nodes[1] = { ...d.nodes[1], type: 'condition', field: 'input.message', operator: 'contains', compare: 'ya' };
   d.nodes[2].value = 'Benar';
-  d.nodes.push({ ...d.nodes[2], id: 'no', value: 'Salah' });
+  d.nodes.push({ ...d.nodes[2], id: 'no', label: 'no', value: 'Salah' });
   d.edges[1].port = 'yes';
   d.edges.push({ id: 'e3', source: 'agent', port: 'no', target: 'no' });
   const transport: AITransport = async () => {
@@ -337,7 +349,7 @@ test('Condition branches and abort signal bypass model calls', async () => {
   );
 });
 test('Simulation data survives a second turn but never touches client records', async () => {
-  const d = templates()[0].definition;
+  const d = catalogGraph();
   let output: any;
   const emit = (e: any) => {
     if (e.state === 'completed') output = e.output;
@@ -396,8 +408,8 @@ test('HTTP protects admin operations and export only includes definition; record
 });
 
 test('Agent repairs malformed JSON and repeated identical mutations do not create duplicate records', async () => {
-  const d = templates()[0].definition;
-  const tool = d.nodes.find(n => n.type === 'tool')!;
+  const d = catalogGraph();
+  const tool = d.nodes.find(n => n.type === 'data_table')!;
   tool.operation = 'create';
   tool.value = '{"data":{"nama":"Basic"}}';
   let calls = 0,
@@ -437,8 +449,8 @@ test('Deleting an unused graph removes versions; graphs with client data are pro
 
 test('Shared Memory exposes the same bounded conversation to downstream agents without model calls of its own', async () => {
   const d = blankDefinition();
-  const memory = { ...d.nodes[0], id: 'memory', type: 'memory' as const, memory_limit: 2 };
-  const second = { ...d.nodes[1], id: 'second' };
+  const memory = { ...d.nodes[0], id: 'memory', label: 'memory', type: 'memory' as const, memory_limit: 2 };
+  const second = { ...d.nodes[1], id: 'second', label: 'second' };
   d.nodes[1].memory = 'memory';
   second.memory = 'memory';
   d.nodes.push(memory, second);
@@ -503,7 +515,7 @@ test('Shared Memory exposes the same bounded conversation to downstream agents w
 
 test('Memory resources cannot enter execution flow; missing or incompatible attachments and unconnected references fail', () => {
   const d = blankDefinition();
-  d.nodes.push({ ...d.nodes[0], id: 'memory', type: 'memory' });
+  d.nodes.push({ ...d.nodes[0], id: 'memory', label: 'memory', type: 'memory' });
   assertRunnable(d);
   d.nodes[1].memory = 'missing';
   assert.throws(() => assertRunnable(d), /Sambungan memori/);
@@ -518,7 +530,7 @@ test('Memory resources cannot enter execution flow; missing or incompatible atta
 });
 test('Legacy sequential memory imports become resource connections without changing execution order', () => {
   const d = blankDefinition();
-  d.nodes.push({ ...d.nodes[0], id: 'memory', type: 'memory', memory_limit: 7 });
+  d.nodes.push({ ...d.nodes[0], id: 'memory', label: 'memory', type: 'memory', memory_limit: 7 });
   d.edges[0].target = 'memory';
   d.edges.push({ id: 'mem_next', source: 'memory', port: 'next', target: 'agent' });
   const migrated = parseDefinition(d);

@@ -95,7 +95,7 @@ function flow(active: GraphDefinition, steps: GraphNode[], output: string) {
   const chain = ['input', ...steps.map(s => s.id), 'output'];
   d.edges = chain.slice(1).flatMap((target, i) => {
     const source = d.nodes.find(n => n.id === chain[i])!;
-    const lookup = source.type === 'tool' && ['search', 'get'].includes(source.operation);
+    const lookup = source.type === 'data_table' && ['search', 'get'].includes(source.operation);
     return lookup
       ? [
           { id: 'f' + i, source: chain[i], port: 'found', target },
@@ -180,7 +180,7 @@ test('Every Data node operation reaches the client API with collection, query, a
   const d = flow(
     active,
     [
-      node('cari', 'tool', {
+      node('cari', 'data_table', {
         collection: 'pesanan',
         operation: 'search',
         query: 'kopi',
@@ -189,15 +189,15 @@ test('Every Data node operation reaches the client API with collection, query, a
         sort_direction: 'desc',
         limit: 5,
       }),
-      node('hitung', 'tool', { collection: 'pesanan', operation: 'count', query: '', sum_field: 'jumlah' }),
-      node('buat', 'tool', { collection: 'pesanan', operation: 'create', value: '{"data":{"produk":"Kopi"}}' }),
-      node('ubah', 'tool', {
+      node('hitung', 'data_table', { collection: 'pesanan', operation: 'count', query: '', sum_field: 'jumlah' }),
+      node('buat', 'data_table', { collection: 'pesanan', operation: 'create', value: '{"data":{"produk":"Kopi"}}' }),
+      node('ubah', 'data_table', {
         collection: 'pesanan',
         operation: 'update',
         value: '{"id":"{{nodes.cari.first.id}}","data":{"status":"batal"}}',
       }),
-      node('ambil', 'tool', { collection: 'pesanan', operation: 'get', query: '{{nodes.buat.id}}' }),
-      node('hapus', 'tool', { collection: 'pesanan', operation: 'delete', query: '{{nodes.ambil.first.id}}' }),
+      node('ambil', 'data_table', { collection: 'pesanan', operation: 'get', query: '{{nodes.buat.id}}' }),
+      node('hapus', 'data_table', { collection: 'pesanan', operation: 'delete', query: '{{nodes.ambil.first.id}}' }),
     ],
     '{{nodes.cari.count}}|{{nodes.cari.first.data.produk}}|{{nodes.hitung.total}}|{{nodes.buat.data.jumlah}}|{{nodes.ubah.data.status}}|{{nodes.hapus.deleted}}',
   );
@@ -235,7 +235,7 @@ test('Invalid API responses and HTTP errors stop the flow with clear trace codes
   await saveCollectionSource(client, profile.id, 'pesanan', { mode: 'endpoint', endpoint: 'https://8.8.8.8/orders' });
   const d = flow(
     active,
-    [node('cari', 'tool', { collection: 'pesanan', operation: 'search', query: '' })],
+    [node('cari', 'data_table', { collection: 'pesanan', operation: 'search', query: '' })],
     '{{nodes.cari.count}}',
   );
   for (const [response, code] of [
@@ -267,7 +267,7 @@ test('Simulation never calls the client API', async () => {
   const before = calls.length;
   const d = flow(
     active,
-    [node('cari', 'tool', { collection: 'pesanan', operation: 'search', query: '' })],
+    [node('cari', 'data_table', { collection: 'pesanan', operation: 'search', query: '' })],
     '{{nodes.cari.count}}',
   );
   let output: any;

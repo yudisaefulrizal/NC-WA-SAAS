@@ -5,7 +5,7 @@ import { ApiError } from '../../../../libraries/errors.js';
 import { ai } from '../service.js';
 import type { AITraceEvent } from '../pipeline/models.js';
 import type { AIMessage, AITransport } from '../provider.js';
-import { parseDefinition, validateRecord, text, type Collection } from './definition.js';
+import { collectionKind, parseDefinition, validateRecord, text, type Collection } from './definition.js';
 import { keywords, queryMemory, sumMemory, filterGroup, type StoredRecord } from './record-query.js';
 import { runRecordTool, type RecordAdapter } from './record-tools.js';
 import { previewMedia } from './media.js';
@@ -53,7 +53,14 @@ export async function simulate(
   const sample = record(body.records ?? {}),
     records: Record<string, StoredRecord[]> = {};
   for (const c of d.collections) {
-    const rows = sample[c.id] ?? [];
+    // Contoh koleksi teks boleh berupa string, dan isian berupa satu objek; keduanya disimpan sebagai satu record.
+    const given = sample[c.id],
+      rows =
+        collectionKind(c) === 'text' && typeof given === 'string'
+          ? [{ text: given }]
+          : collectionKind(c) === 'form' && given && typeof given === 'object' && !Array.isArray(given)
+            ? [given]
+            : (given ?? []);
     if (!Array.isArray(rows) || rows.length > 100)
       throw new ApiError(400, 'invalid_request', 'Maksimal 100 record simulasi per koleksi.');
     records[c.id] = rows.map(v => {

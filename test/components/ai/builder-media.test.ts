@@ -63,7 +63,7 @@ function graph(value: string, extra: Partial<GraphNode> = {}): GraphDefinition {
   d.nodes = [
     d.nodes[0],
     { ...base, id: 'kirim', type: 'media', label: 'Kirim', value, ...extra },
-    { ...base, id: 'output', value: 'ok {{nodes.kirim.count}}/{{nodes.kirim.skipped}}' },
+    { ...base, id: 'output', label: 'output', value: 'ok {{nodes.kirim.count}}/{{nodes.kirim.skipped}}' },
   ];
   d.edges = [
     { id: 'e1', source: 'input', port: 'next', target: 'kirim' },
@@ -136,6 +136,7 @@ test('Three-file cap applies across nodes and simulation only lists media', asyn
     ...['a', 'b', 'c', 'd'].map(id => ({
       ...base,
       id,
+      label: 'Kirim ' + id,
       send_when: id === 'b' ? ('after' as const) : ('before' as const),
     })),
     {
@@ -183,17 +184,17 @@ test('Terima media routes by attachment and accepted type, and simulation can st
   const base = d.nodes[2];
   d.nodes = [
     d.nodes[0],
-    { ...base, id: 'terima', type: 'receive', accept: ['image'], value: '' },
+    { ...base, id: 'terima', label: 'terima', type: 'receive', accept: ['image'], value: '' },
     {
       ...base,
       id: 'simpan',
-      type: 'tool',
+      type: 'data_table',
       collection: 'bukti',
       operation: 'create',
       value: '{"data":{"foto":"{{nodes.terima.file}}"}}',
     },
-    { ...base, id: 'ok', value: 'Diterima {{nodes.terima.filename}} ({{nodes.terima.caption}})' },
-    { ...base, id: 'minta', value: 'Kirim fotonya ya' },
+    { ...base, id: 'ok', label: 'ok', value: 'Diterima {{nodes.terima.filename}} ({{nodes.terima.caption}})' },
+    { ...base, id: 'minta', label: 'minta', value: 'Kirim fotonya ya' },
   ];
   d.edges = [
     { id: 'e1', source: 'input', port: 'next', target: 'terima' },

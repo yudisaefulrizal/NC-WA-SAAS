@@ -11,7 +11,7 @@ import { transaction, lockAccount } from '../transaction.js';
 import { builtinSource, callEndpoint, sourceInput, type DataSource, type EndpointTransport } from '../endpoint.js';
 import * as sourcesSql from '../../data-access/collection-sources-queries.js';
 import { recordDefinition, type RecordSearch } from './store.js';
-import { fieldValue, validateRecord, type Collection } from './definition.js';
+import { collectionKind, fieldValue, validateRecord, type Collection } from './definition.js';
 import type { RecordAdapter } from './record-tools.js';
 import type { StoredRecord } from './record-query.js';
 import type { ToolContext } from '../pipeline/scope.js';
@@ -46,9 +46,11 @@ export async function listCollectionSources(account: string, profile: string) {
 // Token lama tetap dipakai bila URL sama dan token tidak diisi ulang.
 export async function saveCollectionSource(account: string, profile: string, collection: string, body: unknown) {
   const d = await recordDefinition(account, profile);
-  if (!d.collections.some(c => c.id === collection))
-    throw new ApiError(404, 'collection_not_found', 'Koleksi tidak ditemukan.');
+  const schema = d.collections.find(c => c.id === collection);
+  if (!schema) throw new ApiError(404, 'collection_not_found', 'Koleksi tidak ditemukan.');
   const input = await sourceInput(body);
+  if (input.mode === 'endpoint' && collectionKind(schema) !== 'list')
+    throw new ApiError(400, 'invalid_request', 'Hanya koleksi tabel yang bisa memakai API sendiri.');
   await transaction(async c => {
     await lockAccount(c, account);
     if (input.mode === 'builtin') {

@@ -44,7 +44,7 @@ before(async () => {
       fields: [{ id: 'isi', label: 'Isi', type: 'text', required: true, options: [], collection: '' }],
     },
   ];
-  const tool = { ...blankDefinition().nodes[1], type: 'tool' as const, collection: 'catatan', x: 500 };
+  const tool = { ...blankDefinition().nodes[1], type: 'data_table' as const, collection: 'catatan', x: 500 };
   data.nodes.push(
     { ...tool, id: 'cari', label: 'Cari', operation: 'search' },
     { ...tool, id: 'simpan', label: 'Simpan', operation: 'create' },

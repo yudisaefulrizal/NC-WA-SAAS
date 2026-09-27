@@ -147,6 +147,8 @@ try {
   const dialog = page.locator('#ai-attach-dialog');
   await dialog.waitFor();
   assert.equal(await dialog.locator('#ai-attach-title').innerText(), 'Pasang profil ke promo-baru');
+  // Database bisa memuat profil aktif lain; pilih Kafe secara eksplisit.
+  await dialog.locator('label.ai-choice', { hasText: /^\s*Kafe\s*$/ }).click();
   await dialog.locator('label.ai-choice', { hasText: 'Toko Kopi Senja' }).click();
   assert.match(await dialog.locator('#ai-attach-warning').innerText(), /dipakai juga oleh cabang-dago, toko-utama/);
   await dialog.locator('label.ai-choice', { hasText: 'Buat data profil baru' }).click();
@@ -189,9 +191,9 @@ try {
   await page.locator('#ai-manage-name', { hasText: 'Promo Lebaran' }).waitFor();
   assert.deepEqual(await page.locator('[data-ai-tab]:visible').allTextContents(), ['Knowledge', 'Uji Coba']);
   assert.equal(await page.locator('#ai-session-picker').isHidden(), true);
-  // Isi bisnis dikelola di halaman data koleksi milik data profil ini.
-  await page.locator('[data-knowledge-tab="records"]').click();
-  assert.equal(await page.locator('#ai-records-link').getAttribute('href'), '/dashboard/ai-data?profile=' + promo.id);
+  // Profil tanpa koleksi: sub-menu Knowledge hanya Perilaku AI (terbuka) dan Fallback Tim.
+  assert.equal(await page.locator('#ai-knowledge-data').isHidden(), true);
+  assert.equal(await page.locator('[data-knowledge-tab="behavior"]').getAttribute('aria-pressed'), 'true');
   await page.locator('#ai-manage-back').click();
   await card.filter({ hasText: '0 record' }).waitFor();
   // Buat dari daftar.
@@ -211,7 +213,8 @@ try {
       .evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().top)));
     assert.equal(new Set(links).size, 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-    assert.equal(await page.locator('#ai-knowledge-select').isVisible(), true);
+    // Sub-menu Knowledge tetap tampil di ponsel sebagai deretan yang digeser ke samping.
+    assert.equal(await page.locator('#ai-tab-knowledge .ai-knowledge-tabs').isVisible(), true);
     await page.screenshot({ path: join(screenshots, 'profiles-mobile.png'), fullPage: true });
     await page.locator('[data-ai-view="profiles"]').click();
     await page.locator('.ai-profile-card').first().waitFor();
@@ -244,7 +247,8 @@ try {
   {
     const { page, errors, context } = await open(ownerToken, '/dashboard/admin/profiles', 390, 844);
     await page.locator('#admin-menu-toggle').click();
-    await page.locator('#adminsubmenu a', { hasText: 'Editor profil' }).waitFor();
+    await page.locator('#adminsubmenu a', { hasText: 'Profil AI' }).waitFor();
+    assert.equal(await page.locator('#adminsubmenu a', { hasText: 'Editor profil' }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.deepEqual(errors, []);
     await context.close();

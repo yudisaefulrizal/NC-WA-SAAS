@@ -394,7 +394,6 @@ async function loadAdminProfiles() {
     toggle.append(input, element('span'), state);
     const editor = element('a', 'button secondary', 'Buka di Editor profil');
     editor.href = '/dashboard/admin/ai-builder?profile=' + encodeURIComponent(p.id);
-    editor.dataset.editor = '';
     return [name, flow, usage, toggle, editor];
   });
 }

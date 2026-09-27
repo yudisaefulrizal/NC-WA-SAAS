@@ -208,12 +208,12 @@ test('Unique fields reject duplicates across the collection in store, simulation
     {
       ...d.nodes[2],
       id: 'buat',
-      type: 'tool',
+      type: 'data_table',
       collection: 'daftar',
       operation: 'create',
       value: '{"data":{"kode":"{{input.message}}"}}',
     },
-    { ...d.nodes[2], id: 'output', value: 'ok' },
+    { ...d.nodes[2], id: 'output', label: 'output', value: 'ok' },
   ];
   d.edges = [
     { id: 'e1', source: 'input', port: 'next', target: 'buat' },

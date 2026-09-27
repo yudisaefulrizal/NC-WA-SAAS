@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/dashboard/css/paket.css" />
     <link rel="stylesheet" href="/dashboard/css/shared-pages.css" />
     <link rel="stylesheet" href="/dashboard/css/ai.css" />
+    <link rel="stylesheet" href="/dashboard/css/ai-records.css" />
     <link rel="stylesheet" href="/dashboard/css/auto-share.css" />
     <link rel="stylesheet" href="/dashboard/css/referral.css" />
     <link rel="stylesheet" href="/dashboard/css/ai-workspace.css" />
@@ -242,7 +243,6 @@
           <div id="adminsubmenu" hidden>
             <a href="/dashboard/admin/plans">Paket & Harga</a><a href="/dashboard/admin/accounts">Akun pelanggan</a
             ><a href="/dashboard/admin/ai">Pengaturan AI</a><a href="/dashboard/admin/profiles">Profil AI</a
-            ><a href="/dashboard/admin/ai-builder" data-editor>Editor profil</a
             ><a href="/dashboard/admin/failures">Log Kegagalan Agent</a><a href="/dashboard/admin/trace">Log Lengkap</a
             ><a href="/dashboard/admin/settings">Pengaturan pembayaran</a
             ><a href="/dashboard/admin/payments">Semua pembayaran</a><a href="/dashboard/admin/referral">Referral</a
@@ -564,6 +564,69 @@
               </div>
             </form>
           </dialog>
+          <dialog id="ai-source-dialog" aria-labelledby="ai-source-title">
+            <div class="modal-heading">
+              <h2 id="ai-source-title">Sumber data</h2>
+              <p>Dari mana AI membaca dan menulis record koleksi ini.</p>
+            </div>
+            <form id="ai-source-form" class="ai-source-form">
+              <div id="ai-source-mode" class="ai-segmented" role="radiogroup" aria-label="Sumber data koleksi">
+                <button type="button" role="radio" data-mode="builtin">Tabel aplikasi</button
+                ><button type="button" role="radio" data-mode="endpoint">API sendiri</button>
+              </div>
+              <p id="ai-source-hint" class="ai-helper"></p>
+              <div id="ai-source-api" hidden>
+                <label
+                  >URL API (HTTPS)<input
+                    id="ai-source-endpoint"
+                    type="url"
+                    maxlength="512"
+                    placeholder="https://api.bisnis-anda.id/ncwa/booking" /></label
+                ><label
+                  >Bearer token baru (opsional)<input
+                    id="ai-source-token"
+                    type="password"
+                    autocomplete="new-password"
+                    maxlength="512"
+                    placeholder="Kosongkan untuk mempertahankan token" /></label
+                ><label class="ai-inline-check"
+                  ><input id="ai-source-clear-token" type="checkbox" /> Hapus token tersimpan</label
+                >
+                <p id="ai-source-token-status" class="ai-helper"></p>
+                <details class="ai-source-guide">
+                  <summary>Panduan API koleksi</summary>
+                  <p>
+                    Server NC-WA mengirim POST JSON <code>{action, collection, query, context}</code>.
+                    <code>context</code> berisi account_id, data_profile_id, session_id, customer, dan request_id;
+                    <code>collection</code> berisi id, nama, milik_pelanggan, dan daftar field. Token dikirim sebagai
+                    Bearer token, setiap permintaan membawa header <code>Idempotency-Key</code>. Respons wajib HTTP 200
+                    JSON.
+                  </p>
+                  <p>
+                    <code>search</code>: query
+                    <code>{keyword, filters:[{match, conditions:[{field, operator, value}]}], sort, limit}</code>, balas
+                    <code>{"records":[{"id":"…","data":{…}}],"has_more":false}</code>. <code>get</code>: query
+                    <code>{id}</code>, balas <code>{"records":[…]}</code> (kosong bila tidak ada). <code>count</code>:
+                    seperti search ditambah <code>sum_field</code>, balas <code>{"count":0,"total":0}</code>.
+                    <code>create</code>: query <code>{data}</code>; <code>update</code>: query <code>{id, data}</code>
+                    berisi field yang diubah (null berarti dikosongkan); keduanya membalas record
+                    <code>{"id":"…","data":{…}}</code>. <code>delete</code>: query <code>{id}</code>.
+                  </p>
+                  <p>
+                    Isi <code>data</code> harus sesuai tipe field koleksi. Koleksi milik pelanggan wajib dibatasi ke
+                    <code>context.customer</code>. Endpoint HTTPS publik tanpa redirect; batas respons 64 KB dan timeout
+                    15 detik. Mengganti URL tanpa token baru menghapus token lama.
+                  </p>
+                </details>
+              </div>
+              <div class="modal-actions">
+                <button type="button" id="ai-source-test" class="secondary" hidden>Uji API</button
+                ><span class="ai-spacer"></span
+                ><button type="button" data-close="ai-source-dialog" class="secondary">Batal</button
+                ><button id="ai-source-save">Simpan sumber</button>
+              </div>
+            </form>
+          </dialog>
           <dialog id="ai-profile-create-dialog" aria-labelledby="ai-profile-create-title">
             <div class="modal-heading">
               <h2 id="ai-profile-create-title">Buat data profil</h2>
@@ -670,22 +733,53 @@
                 <span id="ai-save-status" class="ai-save-status" role="status" aria-live="polite"></span>
               </div>
               <section id="ai-tab-knowledge" class="ai-step">
-                <label class="ai-knowledge-select"
-                  >Bagian knowledge<select id="ai-knowledge-select">
-                    <option value="records">Koleksi data</option>
-                    <option value="behavior">Perilaku AI</option>
-                    <option value="fallback">Fallback Tim</option>
-                  </select></label
-                >
-                <div class="row-actions ai-knowledge-tabs">
-                  <button type="button" data-knowledge-tab="records">Koleksi data</button
+                <nav class="row-actions ai-knowledge-tabs" aria-label="Bagian knowledge">
+                  <span id="ai-knowledge-data" class="ai-knowledge-group" hidden
+                    ><span class="ai-knowledge-label">Data</span><span id="ai-knowledge-collections"></span
+                    ><span class="ai-knowledge-sep" aria-hidden="true"></span></span
+                  ><span class="ai-knowledge-label">Pengaturan</span
                   ><button type="button" data-knowledge-tab="behavior">Perilaku AI</button
                   ><button type="button" data-knowledge-tab="fallback">Fallback Tim</button>
-                </div>
-                <section id="ai-knowledge-tab-records">
-                  <h3>Koleksi data profil</h3>
-                  <p>Kelola record menggunakan struktur koleksi yang ditentukan pada profil.</p>
-                  <a id="ai-records-link" href="/dashboard/ai-data">Buka data koleksi ↗</a>
+                </nav>
+                <section id="ai-knowledge-tab-records" class="ai-records" hidden>
+                  <div class="ai-records-head">
+                    <div class="ai-records-title">
+                      <h3 id="ai-records-title"></h3>
+                      <p id="ai-records-meta"></p>
+                    </div>
+                    <div class="ai-records-tools">
+                      <label id="ai-records-search-label" class="ai-records-search"
+                        ><span class="sr-only">Cari record</span
+                        ><input id="ai-records-search" type="search" placeholder="Cari…" /></label
+                      ><label id="ai-records-customer-label" hidden
+                        ><span class="sr-only">Nomor pelanggan</span
+                        ><input id="ai-records-customer" inputmode="numeric" placeholder="Filter nomor pelanggan"
+                      /></label>
+                      <button type="button" id="ai-records-source" class="secondary">Sumber data</button
+                      ><button type="button" id="ai-records-new">+ Tambah</button>
+                    </div>
+                  </div>
+                  <p id="ai-records-owner-note" class="ai-helper" hidden>
+                    Milik pelanggan: record dibuat AI dari chat dan terikat ke nomor pengirim. Setiap pelanggan hanya
+                    bisa melihat miliknya sendiri melalui AI; Anda melihat semuanya di sini.
+                  </p>
+                  <div class="ai-records-body">
+                    <div id="ai-records" class="table-wrap"></div>
+                    <aside id="ai-record-panel" class="ai-record-panel" aria-labelledby="ai-record-title" hidden>
+                      <div class="ai-record-panel-head">
+                        <div><strong id="ai-record-title"></strong><small id="ai-record-sub"></small></div>
+                        <button type="button" id="ai-record-close" class="secondary icon-button" aria-label="Tutup">
+                          ×
+                        </button>
+                      </div>
+                      <form id="ai-record-form" class="ai-record-form"></form>
+                    </aside>
+                  </div>
+                  <nav id="ai-records-pager" class="row-actions ai-records-pager" aria-label="Halaman record">
+                    <span id="ai-records-page" aria-live="polite"></span
+                    ><button type="button" id="ai-records-prev" class="secondary">Sebelumnya</button
+                    ><button type="button" id="ai-records-next" class="secondary">Berikutnya</button>
+                  </nav>
                 </section>
                 <section id="ai-knowledge-tab-behavior" hidden>
                   <label class="ai-field-label"
@@ -2140,6 +2234,7 @@ X-API-Key: KUNCI_ANDA   # header bebas, opsional
     <script src="/dashboard/js/pages/ai-sessions.js" defer></script>
     <script src="/dashboard/js/pages/ai-usage.js" defer></script>
     <script src="/dashboard/js/pages/ai-knowledge.js" defer></script>
+    <script src="/dashboard/js/pages/ai-records.js" defer></script>
     <script src="/dashboard/js/pages/ai-chat.js" defer></script>
     <script src="/dashboard/js/pages/ai-admin.js" defer></script>
     <script src="/dashboard/js/pages/auto-share.js" defer></script>

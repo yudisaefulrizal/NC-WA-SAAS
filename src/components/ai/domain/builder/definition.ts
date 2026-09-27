@@ -7,10 +7,13 @@ import { filterOperators, maxToolLimit, type FilterOperator } from './record-que
 export const nodeTypes = [
   'input',
   'memory',
+  'context_memory',
   'router',
   'agent',
   'condition',
-  'tool',
+  'data_table',
+  'data_text',
+  'data_form',
   'context',
   'output',
   'fallback',
@@ -95,12 +98,25 @@ export interface ComputeStep {
 // Koleksi umum dibaca semua pelanggan; koleksi milik pelanggan terikat ke nomor pengirim dan hanya bisa diakses
 // pelanggan itu melalui AI.
 export const collectionOwners = ['shared', 'customer'] as const;
+// Jenis koleksi: list = banyak baris berfield (node Data tabel), text = satu teks panjang per data profil (node Data
+// teks), form = satu isian berfield tetap per data profil (node Data isian). Teks dan isian selalu umum.
+export const collectionKinds = ['list', 'text', 'form'] as const;
+export type CollectionKind = (typeof collectionKinds)[number];
+export const maxCollectionText = 20000;
 export interface Collection {
   id: string;
   name: string;
   owner: (typeof collectionOwners)[number];
+  // Tidak ada berarti list, supaya definisi lama tetap sama.
+  kind?: CollectionKind;
   fields: Field[];
 }
+export const collectionKind = (c: Collection): CollectionKind => c.kind ?? 'list';
+// Node yang membaca/menulis koleksi dan pasangan jenis koleksinya. Nama lama `tool` dibaca sebagai data_table.
+export const dataNodeKinds = { data_table: 'list', data_text: 'text', data_form: 'form' } as const;
+export const isDataNode = (n: { type: string }) => Object.hasOwn(dataNodeKinds, n.type);
+export const formOperations = ['get', 'update'] as const;
+export const defaultTextChars = 4000;
 export const toolOperations = ['search', 'get', 'create', 'update', 'delete', 'count'] as const;
 export type ToolOperation = (typeof toolOperations)[number];
 export const conditionOperators = [
@@ -140,6 +156,24 @@ export const contextVariables: Record<string, readonly string[]> = {
   customer: ['phone', 'name'],
   service: ['name'],
 };
+// Batas ukuran definisi; dipakai validator dan dokumen skill AI.
+export const limits = {
+  collections: 30,
+  fields: 50,
+  options: 100,
+  nodes: 60,
+  edges: 180,
+  branches: 20,
+  tools: 20,
+  filters: 20,
+  rules: 20,
+  extractFields: 30,
+  steps: 20,
+  memory: 60,
+  idLength: 32,
+  labelLength: 100,
+  textLength: 8000,
+} as const;
 export interface GraphNode {
   id: string;
   type: NodeType;
@@ -170,6 +204,8 @@ export interface GraphNode {
   // Node Ekstrak dan node Set / Hitung.
   fields?: ExtractField[];
   steps?: ComputeStep[];
+  // Node Data teks: jumlah karakter maksimal yang dikirim ke model.
+  max_chars?: number;
   // Node Kirim media: file dari `value`, keterangan, dikirim sebelum atau sesudah jawaban, dan jenisnya.
   caption?: string;
   send_when?: 'before' | 'after';
@@ -179,7 +215,10 @@ export interface GraphNode {
   context_format?: 'text' | 'spo';
   fallback?: boolean;
   memory_limit?: number;
+  // Memori percakapan (node memory) yang riwayatnya dibaca node ini.
   memory?: string;
+  // Memori konteks (node context_memory): dibaca Router/Agent/Ekstrak sebagai input.context, ditulis node Context.
+  context_memory?: string;
 }
 export interface GraphEdge {
   id: string;
@@ -206,7 +245,7 @@ export function text(v: unknown, max = 8000): string {
   return v;
 }
 function id(v: unknown) {
-  const s = text(v, 32);
+  const s = text(v, limits.idLength);
   if (!/^[a-z][a-z0-9_]*$/.test(s) || ['constructor', 'prototype', '__proto__'].includes(s))
     throw bad('ID harus huruf kecil, angka, atau garis bawah.');
   return s;
@@ -225,16 +264,16 @@ function choice<T extends string>(v: unknown, values: readonly T[]): T {
 export function parseDefinition(value: unknown): GraphDefinition {
   const root = record(value);
   if (root.format !== 'ncwa-profile' || root.version !== 1) throw bad('Format/versi profil tidak didukung.');
-  const collections = list(root.collections, 30).map(v => {
+  const collections = list(root.collections, limits.collections).map(v => {
     const c = record(v);
-    const fields = list(c.fields, 50).map(v => {
+    const fields = list(c.fields, limits.fields).map(v => {
       const f = record(v);
       const field: Field = {
         id: id(f.id),
         label: text(f.label, 100),
         type: choice(f.type, fieldTypes),
         required: f.required === true,
-        options: list(f.options ?? [], 100).map(v => text(v, 100)),
+        options: list(f.options ?? [], limits.options).map(v => text(v, 100)),
         collection: text(f.collection ?? '', 32),
       };
       if (f.unique === true) {
@@ -249,43 +288,49 @@ export function parseDefinition(value: unknown): GraphDefinition {
       return field;
     });
     unique(fields.map(f => f.id));
-    return { id: id(c.id), name: text(c.name, 100), owner: choice(c.owner ?? 'shared', collectionOwners), fields };
+    const kind = choice(c.kind ?? 'list', collectionKinds);
+    const owner = choice(c.owner ?? 'shared', collectionOwners);
+    if (kind === 'text' && fields.length) throw bad('Koleksi teks tidak memakai field.');
+    if (kind !== 'list' && owner !== 'shared') throw bad('Koleksi teks dan isian selalu umum.');
+    return { id: id(c.id), name: text(c.name, 100), owner, ...(kind !== 'list' ? { kind } : {}), fields };
   });
   unique(collections.map(c => c.id));
   for (const c of collections)
     for (const f of c.fields) {
       const target = collections.find(c => c.id === f.collection);
       if (f.type === 'relation' && !target) throw bad('Koleksi relasi tidak ditemukan.');
+      if (f.type === 'relation' && target && collectionKind(target) !== 'list')
+        throw bad('Relasi hanya ke koleksi tabel.');
       if (f.type === 'relation' && target?.owner === 'customer' && c.owner !== 'customer')
         throw bad('Koleksi umum tidak boleh berelasi ke koleksi milik pelanggan.');
       if (['choice', 'multichoice'].includes(f.type) && !f.options.length) throw bad('Field pilihan membutuhkan opsi.');
     }
-  const nodes = list(root.nodes, 60).map(v => {
+  const nodes = list(root.nodes, limits.nodes).map(v => {
     const n = record(v);
-    const branches = list(n.branches ?? [], 20).map(v => {
+    const branches = list(n.branches ?? [], limits.branches).map(v => {
       const b = record(v);
       return { id: id(b.id), label: text(b.label, 100), description: text(b.description, 1000) };
     });
     unique(branches.map(b => b.id));
     if (
       n.memory_limit !== undefined &&
-      (!Number.isSafeInteger(n.memory_limit) || Number(n.memory_limit) < 0 || Number(n.memory_limit) > 60)
+      (!Number.isSafeInteger(n.memory_limit) || Number(n.memory_limit) < 0 || Number(n.memory_limit) > limits.memory)
     )
-      throw bad('Shared Memory membutuhkan batas 0–60 pesan.');
+      throw bad('Shared Memory membutuhkan batas 0–' + limits.memory + ' pesan.');
     const coord = (v: unknown) => {
       if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > 20000) throw bad('Posisi node tidak valid.');
       return v;
     };
     return {
       id: id(n.id),
-      type: choice(n.type, nodeTypes),
+      type: choice(n.type === 'tool' ? 'data_table' : n.type, nodeTypes),
       label: text(n.label, 100),
       x: coord(n.x),
       y: coord(n.y),
       prompt: text(n.prompt ?? ''),
       tier: choice(n.tier ?? 'medium', modelTiers),
       model: text(n.model ?? '', 100),
-      tools: list(n.tools ?? [], 20).map(id),
+      tools: list(n.tools ?? [], limits.tools).map(id),
       branches,
       ...(n.context_format !== undefined ? { context_format: choice(n.context_format, ['text', 'spo'] as const) } : {}),
       ...(n.fallback !== undefined ? { fallback: n.fallback === true } : {}),
@@ -298,7 +343,7 @@ export function parseDefinition(value: unknown): GraphDefinition {
       compare: text(n.compare ?? '', 2000),
       ...(n.filters !== undefined
         ? {
-            filters: list(n.filters, 20).map(v => {
+            filters: list(n.filters, limits.filters).map(v => {
               const f = record(v);
               return { field: id(f.field), operator: choice(f.operator, filterOperators), value: text(f.value, 2000) };
             }),
@@ -309,9 +354,10 @@ export function parseDefinition(value: unknown): GraphDefinition {
       ...(n.sort_direction !== undefined ? { sort_direction: choice(n.sort_direction, ['asc', 'desc'] as const) } : {}),
       ...(n.limit !== undefined ? { limit: limit(n.limit) } : {}),
       ...(n.sum_field !== undefined ? { sum_field: n.sum_field === '' ? '' : id(n.sum_field) } : {}),
-      ...(n.rules !== undefined ? { rules: list(n.rules, 20).map(rule) } : {}),
-      ...(n.fields !== undefined ? { fields: list(n.fields, 30).map(extractField) } : {}),
-      ...(n.steps !== undefined ? { steps: list(n.steps, 20).map(computeStep) } : {}),
+      ...(n.rules !== undefined ? { rules: list(n.rules, limits.rules).map(rule) } : {}),
+      ...(n.fields !== undefined ? { fields: list(n.fields, limits.extractFields).map(extractField) } : {}),
+      ...(n.steps !== undefined ? { steps: list(n.steps, limits.steps).map(computeStep) } : {}),
+      ...(n.max_chars !== undefined ? { max_chars: maxChars(n.max_chars) } : {}),
       ...(n.caption !== undefined ? { caption: text(n.caption, 1000) } : {}),
       ...(n.send_when !== undefined ? { send_when: choice(n.send_when, ['before', 'after'] as const) } : {}),
       ...(n.media_as !== undefined ? { media_as: choice(n.media_as, ['auto', 'image', 'document'] as const) } : {}),
@@ -319,11 +365,14 @@ export function parseDefinition(value: unknown): GraphDefinition {
         ? { accept: [...new Set(list(n.accept, 2).map(v => choice(v, ['image', 'document'] as const)))] }
         : {}),
       ...(n.memory !== undefined ? { memory: n.memory === '' ? '' : id(n.memory) } : {}),
+      ...(n.context_memory !== undefined
+        ? { context_memory: n.context_memory === '' ? '' : id(n.context_memory) }
+        : {}),
       ...(n.memory_limit !== undefined ? { memory_limit: Number(n.memory_limit) } : {}),
     };
   });
   unique(nodes.map(n => n.id));
-  const edges = list(root.edges, 180).map(v => {
+  const edges = list(root.edges, limits.edges).map(v => {
     const e = record(v);
     return { id: id(e.id), source: id(e.source), target: id(e.target), port: text(e.port, 32) };
   });
@@ -343,6 +392,11 @@ export function parseDefinition(value: unknown): GraphDefinition {
     }),
   );
 }
+function maxChars(v: unknown) {
+  if (!Number.isSafeInteger(v) || Number(v) < 200 || Number(v) > maxCollectionText)
+    throw bad('Maksimal karakter harus 200–' + maxCollectionText + '.');
+  return Number(v);
+}
 function limit(v: unknown) {
   if (!Number.isSafeInteger(v) || Number(v) < 1 || Number(v) > maxToolLimit)
     throw bad('Batas hasil harus 1–' + maxToolLimit + '.');
@@ -356,7 +410,7 @@ function extractField(v: unknown): ExtractField {
     type: choice(f.type, extractFieldTypes),
     required: f.required === true,
     hint: text(f.hint ?? '', 500),
-    options: list(f.options ?? [], 100).map(v => text(v, 100)),
+    options: list(f.options ?? [], limits.options).map(v => text(v, 100)),
   };
 }
 function computeStep(v: unknown): ComputeStep {
@@ -377,9 +431,9 @@ function leaf(v: unknown): ConditionRule {
 function rule(v: unknown): ConditionRule | ConditionGroup {
   const r = record(v);
   if (r.rules === undefined) return leaf(r);
-  return { match: choice(r.match, ['all', 'any'] as const), rules: list(r.rules, 20).map(leaf) };
+  return { match: choice(r.match, ['all', 'any'] as const), rules: list(r.rules, limits.rules).map(leaf) };
 }
-const recordLookup = (n: GraphNode) => n.type === 'tool' && ['search', 'get'].includes(n.operation);
+const recordLookup = (n: GraphNode) => n.type === 'data_table' && ['search', 'get'].includes(n.operation);
 // Cari/Ambil dulu hanya punya port "next". Definisi lama tetap berjalan sama: kedua port baru menuju tujuan lama.
 export function normalizeRecordPorts(d: GraphDefinition): GraphDefinition {
   for (const n of d.nodes.filter(recordLookup)) {
@@ -420,7 +474,7 @@ export function normalizeMemoryConnections(d: GraphDefinition): GraphDefinition 
   return d;
 }
 export function ports(node: GraphNode): string[] {
-  if (['output', 'fallback', 'memory'].includes(node.type)) return [];
+  if (['output', 'fallback', 'memory', 'context_memory'].includes(node.type)) return [];
   if (node.type === 'router') return node.branches.map(b => b.id);
   if (node.type === 'agent' && node.fallback) return ['next', 'fallback'];
   if (node.type === 'condition') return ['yes', 'no'];
@@ -437,13 +491,37 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
   if (inputs.length !== 1) add('Alur membutuhkan tepat satu Input.');
   for (const e of d.edges) {
     if (!nodes.has(e.source) || !nodes.has(e.target)) add('Koneksi mengacu pada node yang tidak ada.', e.source);
-    else if (!ports(nodes.get(e.source)!).includes(e.port) || ['input', 'memory'].includes(nodes.get(e.target)!.type))
+    else if (
+      !ports(nodes.get(e.source)!).includes(e.port) ||
+      ['input', 'memory', 'context_memory'].includes(nodes.get(e.target)!.type)
+    )
       add('Port koneksi tidak sesuai.', e.source);
   }
+  // Nama node unik (huruf besar/kecil, spasi, dan _ dianggap sama) agar jejak, masalah, dan variabel tidak rancu.
+  const labels = new Set<string>();
+  for (const n of d.nodes) {
+    const key = n.label
+      .trim()
+      .replace(/[\s_]+/g, '_')
+      .toLowerCase();
+    if (!key) add('Nama node wajib diisi.', n.id);
+    else if (labels.has(key)) add('Nama node "' + n.label.trim() + '" sudah dipakai node lain.', n.id);
+    labels.add(key);
+  }
+  // Profil tanpa node Memori konteks memakai cara lama: ringkasan S-P-O ikut Shared Memory.
+  const contextMemories = d.nodes.filter(n => n.type === 'context_memory');
+  if (contextMemories.length > 1) add('Hanya boleh satu Memori konteks.', contextMemories[1].id);
   const linkedTools = new Set(d.nodes.flatMap(n => n.tools));
   for (const n of d.nodes) {
     if (n.memory && (!memoryConsumers.includes(n.type) || nodes.get(n.memory)?.type !== 'memory'))
       add('Sambungan memori harus berasal dari Shared Memory menuju Router, Agent, Context, atau Ekstrak.', n.id);
+    if (
+      n.context_memory &&
+      (!memoryConsumers.includes(n.type) || nodes.get(n.context_memory)?.type !== 'context_memory')
+    )
+      add('Sambungan konteks harus berasal dari Memori konteks menuju Router, Agent, Context, atau Ekstrak.', n.id);
+    if (n.type === 'context' && contextMemories.length && !n.context_memory)
+      add('Hubungkan Context ke Memori konteks agar ringkasannya tersimpan.', n.id);
     if (['agent', 'context'].includes(n.type) && !n.prompt.trim()) add('Prompt wajib diisi.', n.id);
     if (n.type === 'extract') {
       const fields = n.fields ?? [];
@@ -467,8 +545,24 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
     if (n.context_format && n.type !== 'context') add('Format konteks hanya untuk node Context.', n.id);
     if (n.fallback && n.type !== 'agent') add('Port fallback hanya untuk Agent.', n.id);
     const collection = d.collections.find(c => c.id === n.collection);
-    if (n.type === 'tool' && !collection) add('Pilih koleksi untuk node Data.', n.id);
-    if (n.type === 'tool' && collection) {
+    if (isDataNode(n) && !collection) add('Pilih koleksi untuk node ' + dataNodeLabel[n.type] + '.', n.id);
+    if (
+      isDataNode(n) &&
+      collection &&
+      collectionKind(collection) !== dataNodeKinds[n.type as keyof typeof dataNodeKinds]
+    )
+      add(
+        dataNodeLabel[n.type] +
+          ' hanya bisa memakai koleksi ' +
+          kindLabel[dataNodeKinds[n.type as keyof typeof dataNodeKinds]] +
+          '.',
+        n.id,
+      );
+    if (n.type === 'data_form' && !(formOperations as readonly string[]).includes(n.operation))
+      add('Data isian hanya bisa Baca atau Ubah.', n.id);
+    if (n.type === 'data_form' && collection && !collection.fields.length)
+      add('Koleksi isian ' + collection.name + ' belum punya field.', n.id);
+    if (n.type === 'data_table' && collection) {
       for (const f of n.filters ?? [])
         if (!collection.fields.some(x => x.id === f.field))
           add('Field filter ' + f.field + ' tidak ada di koleksi ' + collection.name + '.', n.id);
@@ -481,10 +575,8 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
     }
     for (const tool of n.tools)
       if (!nodes.has(tool)) add('Tool belum tersedia: ' + tool + '.', n.id);
-      else if (n.type !== 'agent' || nodes.get(tool)?.type !== 'tool')
-        add('Agent hanya dapat memakai node Tool.', n.id);
-    if (n.type === 'tool' && linkedTools.has(n.id) && !d.edges.some(e => e.source === n.id || e.target === n.id))
-      continue;
+      else if (n.type !== 'agent' || !isDataNode(nodes.get(tool)!)) add('Agent hanya dapat memakai node data.', n.id);
+    if (isDataNode(n) && linkedTools.has(n.id) && !d.edges.some(e => e.source === n.id || e.target === n.id)) continue;
     for (const port of ports(n))
       if (d.edges.filter(e => e.source === n.id && e.port === port).length !== 1)
         add('Hubungkan tepat satu tujuan pada port ' + port + '.', n.id);
@@ -513,8 +605,9 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
   for (const n of d.nodes)
     if (
       n.type !== 'memory' &&
+      n.type !== 'context_memory' &&
       !reachable.has(n.id) &&
-      !(n.type === 'tool' && d.nodes.some(a => reachable.has(a.id) && a.tools.includes(n.id)))
+      !(isDataNode(n) && d.nodes.some(a => reachable.has(a.id) && a.tools.includes(n.id)))
     )
       add('Node tidak terhubung dari Input.', n.id);
   // Referensi node harus tersedia pada setiap jalur menuju pemakai, bukan hanya salah satu cabang.
@@ -527,7 +620,7 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
   for (const n of d.nodes) {
     if (n.type === 'condition' && (!conditionRules(n).length || conditionRules(n).some(r => !r.field.trim())))
       add('Isi nilai yang diperiksa pada setiap syarat Kondisi.', n.id);
-    if (n.type === 'tool' && ['create', 'update'].includes(n.operation)) {
+    if ((n.type === 'data_table' || n.type === 'data_form') && ['create', 'update'].includes(n.operation)) {
       try {
         JSON.parse(n.value);
       } catch {
@@ -560,43 +653,65 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
         }
         if (
           path.some(p => ['__proto__', 'constructor', 'prototype'].includes(p)) ||
-          !['input', 'nodes', ...Object.keys(contextVariables)].includes(path[0])
+          !['input', 'nodes', 'data', ...Object.keys(contextVariables)].includes(path[0])
         )
           add('Path variabel tidak diizinkan.', n.id);
         if (contextVariables[path[0]] && !contextVariables[path[0]].includes(path[1] ?? ''))
           add('Variabel ' + match[1] + ' tidak dikenal.', n.id);
+        if (path[0] === 'data') {
+          const c = d.collections.find(c => c.id === path[1]);
+          if (!c || collectionKind(c) === 'list')
+            add('Variabel ' + match[1] + ' harus merujuk koleksi teks atau isian.', n.id);
+          else if (
+            collectionKind(c) === 'text'
+              ? path.length > 2
+              : path.length > 3 || (path[2] !== undefined && !c.fields.some(f => f.id === path[2]))
+          )
+            add('Variabel ' + match[1] + ' tidak dikenal.', n.id);
+        }
         if (path[0] === 'input' && path[1] && !['message', 'context', 'history'].includes(path[1]))
           add('Field input tidak dikenal: ' + path[1] + '.', n.id);
         if (path[0] === 'nodes') {
           const source = nodes.get(path[1]);
           if (source && path[2]) {
-            const fields: Record<NodeType, string[]> = {
-              input: ['message', 'context', 'history'],
-              memory: ['history', 'context'],
-              agent: ['answer', 'fallback', 'question'],
-              router: ['branch', 'fallback_terkait'],
-              condition: ['matched'],
-              context: ['context'],
-              tool: recordOutputs[source.operation],
-              output: [],
-              fallback: [],
-              extract: [...(source.fields ?? []).map(f => f.id), 'missing'],
-              compute: (source.steps ?? []).map(s => s.name),
-              media: ['files', 'count', 'skipped'],
-              receive: ['file', 'filename', 'type', 'mimetype', 'caption'],
-            };
-            if (!fields[source.type].includes(path[2])) add('Field keluaran ' + match[1] + ' tidak dikenal.', n.id);
+            if (!outputFields(source).includes(path[2])) add('Field keluaran ' + match[1] + ' tidak dikenal.', n.id);
           }
           if (
             !source ||
             source.id === n.id ||
-            (source.type === 'memory' ? n.memory !== source.id : ancestors(n.id, path[1]))
+            (source.type === 'memory'
+              ? n.memory !== source.id
+              : source.type === 'context_memory'
+                ? n.context_memory !== source.id
+                : ancestors(n.id, path[1]))
           )
             add('Variabel ' + match[1] + ' belum tersedia pada semua jalur.', n.id);
         }
       }
   }
   return issues;
+}
+// Field keluaran yang bisa dibaca node lain sebagai {{nodes.<id>.<field>}}.
+export function outputFields(source: GraphNode): string[] {
+  const fields: Record<NodeType, string[]> = {
+    input: ['message', 'context', 'history'],
+    memory: ['history', 'context'],
+    context_memory: ['context'],
+    agent: ['answer', 'fallback', 'question'],
+    router: ['branch', 'fallback_terkait'],
+    condition: ['matched'],
+    context: ['context'],
+    data_table: recordOutputs[source.operation],
+    data_text: ['text', 'found'],
+    data_form: ['data', 'found'],
+    output: [],
+    fallback: [],
+    extract: [...(source.fields ?? []).map(f => f.id), 'missing'],
+    compute: (source.steps ?? []).map(s => s.name),
+    media: ['files', 'count', 'skipped'],
+    receive: ['file', 'filename', 'type', 'mimetype', 'caption'],
+  };
+  return fields[source.type];
 }
 // Keluaran node Data per operasi; Cari dan Ambil memakai bentuk yang sama supaya jalur berikutnya tidak berubah.
 export const recordOutputs: Record<ToolOperation, string[]> = {
@@ -607,6 +722,23 @@ export const recordOutputs: Record<ToolOperation, string[]> = {
   update: ['id', 'data', 'revision', 'customer', 'deleted'],
   delete: ['id', 'deleted'],
 };
+const dataNodeLabel: Record<string, string> = {
+  data_table: 'Data tabel',
+  data_text: 'Data teks',
+  data_form: 'Data isian',
+};
+const kindLabel: Record<CollectionKind, string> = { list: 'tabel', text: 'teks', form: 'isian' };
+// Koleksi teks/isian yang dirujuk variabel {{data.<koleksi>...}} di teks node mana pun; runtime memuat isinya sekali.
+export function dataVariableCollections(d: GraphDefinition): string[] {
+  const found = new Set<string>();
+  const scan = (v: unknown) => {
+    if (typeof v === 'string') for (const m of v.matchAll(/\{\{\s*data\.(\w+)/g)) found.add(m[1]);
+    else if (Array.isArray(v)) v.forEach(scan);
+    else if (v && typeof v === 'object') Object.values(v).forEach(scan);
+  };
+  scan(d.nodes);
+  return [...found].filter(id => d.collections.some(c => c.id === id && collectionKind(c) !== 'list'));
+}
 // Runtime hanya meneruskan pesan gambar/dokumen ke profil yang grafnya punya node Terima media.
 export const receivesMedia = (d: GraphDefinition) => d.nodes.some(n => n.type === 'receive');
 export function assertRunnable(d: GraphDefinition) {
@@ -674,6 +806,14 @@ export function fieldValue(f: Field, v: unknown): unknown {
 export function validateRecord(c: Collection, value: unknown, create = false): Record<string, unknown> {
   const data = record(value),
     result: Record<string, unknown> = {};
+  // Koleksi teks: satu kunci `text`, teks bebas sampai batasnya.
+  if (collectionKind(c) === 'text') {
+    if (Object.keys(data).some(k => k !== 'text')) throw bad('Koleksi teks hanya berisi text.');
+    if (data.text === undefined || data.text === null || data.text === '') return result;
+    if (typeof data.text !== 'string' || data.text.length > maxCollectionText)
+      throw bad('Teks maksimal ' + maxCollectionText.toLocaleString('id-ID') + ' karakter.');
+    return { text: data.text };
+  }
   if (Object.keys(data).some(k => !c.fields.some(f => f.id === k))) throw bad('Field data tidak dikenal.');
   for (const f of c.fields) {
     let v = data[f.id];
@@ -691,7 +831,7 @@ export function blankDefinition(name = 'Profil baru'): GraphDefinition {
   const node = (id: string, type: NodeType, x: number, prompt = ''): GraphNode => ({
     id,
     type,
-    label: type === 'input' ? 'Pesan masuk' : type === 'agent' ? 'Asisten' : 'Jawaban',
+    label: type === 'input' ? 'Pesan_masuk' : type === 'agent' ? 'Asisten' : 'Jawaban',
     x,
     y: 240,
     prompt,

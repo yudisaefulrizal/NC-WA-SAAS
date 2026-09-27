@@ -5,7 +5,14 @@ import { validatedAI } from '../pipeline/retry.js';
 import type { AIConfig, AITransport, AIMessage } from '../provider.js';
 import { isJevModel, tierConfig } from '../pipeline/models.js';
 import type { ToolContext } from '../pipeline/scope.js';
-import { assertRunnable, type GraphDefinition, type GraphNode } from './definition.js';
+import {
+  assertRunnable,
+  dataVariableCollections,
+  isDataNode,
+  maxCollectionText,
+  type GraphDefinition,
+  type GraphNode,
+} from './definition.js';
 import { queryRecords, countCollection, getRecord, writeRecord } from './store.js';
 import { conditionMatches, systemVariables } from './conditions.js';
 import { runRecordTool, recordToolGuide, type RecordAdapter } from './record-tools.js';
@@ -103,21 +110,39 @@ export async function runGraph(
   let sharedMessages: AIMessage[] = [];
   const outputs: Record<string, unknown> = {};
   let state: Record<string, unknown> = {};
+  // Isi koleksi teks/isian untuk variabel {{data.<koleksi>}}, dimuat sekali sebelum node pertama berjalan.
+  const dataVariables: Record<string, unknown> = {};
   const context = {
+    data: dataVariables,
     system: systemVariables(),
     customer: { phone: scope.customer, name: scope.customerName ?? '' },
     service: { name: scope.serviceName ?? '' },
   };
+  // Memori percakapan memberi riwayat; memori konteks memberi ringkasan S-P-O. Profil tanpa node Memori konteks
+  // memakai cara lama: ringkasan ikut Shared Memory yang tersambung.
+  const legacyContext = !d.nodes.some(m => m.type === 'context_memory');
+  const contextSource = (n: GraphNode) =>
+    legacyContext
+      ? d.nodes.find(m => m.id === n.memory && m.type === 'memory')
+      : d.nodes.find(m => m.id === n.context_memory && m.type === 'context_memory');
   const nodeState = (n: GraphNode) => {
-    const resource = d.nodes.find(m => m.id === n.memory && m.type === 'memory');
+    const resource = d.nodes.find(m => m.id === n.memory && m.type === 'memory'),
+      contextResource = contextSource(n);
     const limit = resource?.memory_limit ?? 20;
     const history = resource && limit > 0 ? previous.slice(-limit) : [];
-    const memory = { history, context: resource ? (config.graph_context ?? null) : null };
+    const summary = contextResource ? (config.graph_context ?? null) : null;
+    const memory = { history, context: summary };
     sharedMessages = [...messages.filter(m => m.role === 'system'), ...history, { role: 'user', content: input }];
     if (resource) config.onTrace?.({ node: resource.id, state: 'read', output: { consumer: n.id, ...memory } });
+    if (contextResource && contextResource !== resource)
+      config.onTrace?.({ node: contextResource.id, state: 'read', output: { consumer: n.id, context: summary } });
     return {
       input: { message: input, ...memory },
-      nodes: { ...outputs, ...(resource ? { [resource.id]: memory } : {}) },
+      nodes: {
+        ...outputs,
+        ...(resource ? { [resource.id]: memory } : {}),
+        ...(contextResource && contextResource !== resource ? { [contextResource.id]: { context: summary } } : {}),
+      },
       ...context,
     };
   };
@@ -172,6 +197,23 @@ export async function runGraph(
     if (mutating && !(result as { error?: unknown })?.error) mutations.set(key, result);
     return result;
   };
+  for (const id of dataVariableCollections(d)) {
+    const c = d.collections.find(c => c.id === id)!;
+    const reader = { ...d.nodes[0], id: 'data_' + id, collection: id, operation: 'get' as const, query: '' };
+    if (c.kind === 'text') {
+      const out = (await executeTool(
+        { ...reader, type: 'data_text', max_chars: maxCollectionText },
+        '',
+        scope.requestId + ':data:' + id,
+      )) as { text: string };
+      dataVariables[id] = out.text;
+    } else {
+      const out = (await executeTool({ ...reader, type: 'data_form' }, '', scope.requestId + ':data:' + id)) as {
+        data: Record<string, unknown>;
+      };
+      dataVariables[id] = Object.fromEntries(c.fields.map(f => [f.id, out.data[f.id] ?? '']));
+    }
+  }
   const counted: AITransport = async (c, m, max) => {
     guard();
     if (calls >= 20) throw Error('ai_retry_limit');
@@ -342,10 +384,17 @@ export async function runGraph(
         );
         port = yes ? 'yes' : 'no';
         result = { matched: yes };
-      } else if (n.type === 'tool') {
-        const value = interpolate(['create', 'update'].includes(n.operation) ? JSON.parse(n.value) : n.query, state);
-        result = await tool(n, value, scope.requestId + ':' + n.id);
-        if (['search', 'get'].includes(n.operation))
+      } else if (isDataNode(n)) {
+        // Data tabel: create/update memakai pemetaan JSON, lainnya kata kunci/ID. Data isian: Ubah memakai pemetaan
+        // JSON. Data teks: kata kunci opsional.
+        const mapped =
+          ['create', 'update'].includes(n.operation) && n.type !== 'data_text'
+            ? JSON.parse(n.value)
+            : n.type === 'data_form'
+              ? ''
+              : n.query;
+        result = await tool(n, interpolate(mapped, state), scope.requestId + ':' + n.id);
+        if (n.type === 'data_table' && ['search', 'get'].includes(n.operation))
           port = Number((result as { count?: number }).count) > 0 ? 'found' : 'empty';
       } else if (n.type === 'agent') {
         agent = n.id;
@@ -479,7 +528,8 @@ export async function runGraph(
               )
             : (await ask(n, String(interpolate(n.prompt, state)) + '\nRingkas menjadi maksimal 200 karakter.')).trim();
         if (!value || value.length > 200) throw Error('ai_invalid_context');
-        if (n.memory) config.graph_context = value;
+        // Hanya Context yang menulis ringkasan, ke Memori konteks (atau Shared Memory pada profil cara lama).
+        if (contextSource(n)) config.graph_context = value;
         result = { context: value };
       } else if (n.type === 'output') {
         const value = n.value ? interpolate(n.value, state) : lastAnswer;

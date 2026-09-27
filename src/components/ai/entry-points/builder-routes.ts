@@ -2,7 +2,7 @@
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import * as builder from '../domain/builder/store.js';
-import { templates } from '../domain/builder/templates.js';
+import { profileSkillZip, skillName } from '../domain/builder/skill.js';
 import { simulate } from '../domain/builder/simulation.js';
 import { uploadRecordFile, recordFilePath } from '../domain/builder/record-files.js';
 import {
@@ -14,7 +14,14 @@ import { ApiError } from '../../../libraries/errors.js';
 export function builderAdminRoutes(app: express.Express) {
   const base = '/api/admin/ai/builder';
   app.get(base, async (_req, res) => res.json(await builder.listGraphs()));
-  app.get(base + '/templates', (_req, res) => res.json(templates()));
+  // Skill AI (ZIP berformat skill Claude) untuk menyusun profil dengan bantuan ChatGPT/Claude; hanya format dan contoh.
+  app.get(base + '/skill', (_req, res) =>
+    res
+      .set('Content-Type', 'application/zip')
+      .set('Content-Disposition', 'attachment; filename="' + skillName + '.zip"')
+      .set('Cache-Control', 'no-store')
+      .send(profileSkillZip()),
+  );
   app.post(base, async (req, res) => res.status(201).json(await builder.createGraph(res.locals.account.id, req.body)));
   app.delete(base + '/:id', async (req, res) =>
     res.json(await builder.deleteGraph(res.locals.account.id, String(req.params.id), req.body)),
@@ -113,7 +120,8 @@ export function builderAccountRoutes(app: express.Express) {
   const base = '/api/ai/records/:profile';
   app.get(base, async (req, res) => {
     const d = await builder.recordDefinition(res.locals.account.id, String(req.params.profile));
-    res.json({ name: d.name, collections: d.collections });
+    const counts = await builder.recordCounts(res.locals.account.id, String(req.params.profile));
+    res.json({ name: d.name, collections: d.collections, counts });
   });
   app.get(base + '/:collection', async (req, res) =>
     res.json(

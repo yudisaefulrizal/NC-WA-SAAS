@@ -88,7 +88,11 @@ export function createApp(gateway = defaultGateway, payments = defaultPayments, 
   aiAdminRoutes(app);
   builderAdminRoutes(app);
   app.get('/dashboard/admin/ai-builder', (_req, res) => res.type('html').send(page('ai-builder/index.html')));
-  app.get('/dashboard/ai-data', (_req, res) => res.type('html').send(page('ai-builder/data.html')));
+  // Isi koleksi kini dikelola di Asisten AI › Knowledge; tautan lama diarahkan ke data profil yang sama.
+  app.get('/dashboard/ai-data', (req, res) => {
+    const profile = typeof req.query.profile === 'string' ? req.query.profile : '';
+    res.redirect(302, '/dashboard/ai' + (profile ? '?data_profile=' + encodeURIComponent(profile) : ''));
+  });
   referralAdminRoutes(app, { referral });
   // Browser senang terus memakai skrip lama setelah deploy, dan itu terlihat persis seperti fitur rusak. Setiap
   // halaman ditulis ulang supaya asetnya membawa hash isi; file yang berubah mendapat URL baru, file yang tidak

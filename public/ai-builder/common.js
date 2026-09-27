@@ -6,7 +6,7 @@ function el(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-function btn(text, fn, className) {
+function btn(text, fn, className = 'btn small') {
   const node = el('button', text, className);
   node.type = 'button';
   node.onclick = () => task(fn, node);

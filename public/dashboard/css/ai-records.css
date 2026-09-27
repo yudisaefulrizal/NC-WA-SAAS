@@ -1,0 +1,325 @@
+/* Asisten AI › Knowledge: sub-menu koleksi (label grup, ikon milik pelanggan, jumlah record), tabel record dengan
+   panel tambah/ubah di sampingnya, dan dialog sumber data. Di layar sempit sub-menu digeser ke samping, baris tabel
+   menjadi kartu, dan panel record tampil di atas tabel. */
+#ai-tab-knowledge .ai-knowledge-tabs {
+  align-items: center;
+}
+.ai-knowledge-group {
+  display: contents;
+}
+#ai-knowledge-collections {
+  display: contents;
+}
+.ai-knowledge-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.ai-knowledge-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  margin: 0 6px;
+}
+#ai-tab-knowledge .ai-knowledge-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-knowledge-count {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: rgba(8, 104, 73, 0.12);
+}
+#ai-tab-knowledge .ai-knowledge-tabs [aria-pressed='true'] .ai-knowledge-count {
+  background: rgba(255, 255, 255, 0.24);
+}
+.ai-records-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ai-records-title {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.ai-records-title h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.ai-records-title p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ai-records-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ai-records-tools label {
+  margin: 0;
+}
+.ai-records-tools input {
+  margin: 0;
+  width: 220px;
+  min-height: 38px;
+}
+#ai-records-owner-note {
+  margin: 10px 0 0;
+}
+.ai-records-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+.ai-records-body > .table-wrap {
+  flex: 1;
+  min-width: 0;
+}
+#ai-records .row-actions {
+  flex-wrap: nowrap;
+  margin: 0;
+}
+#ai-records .row-actions button.danger {
+  color: #b42318;
+  background: #fdf0ef;
+  border-color: #f5c9c4;
+}
+.ai-records-empty {
+  margin: 0;
+  padding: 18px;
+}
+.ai-record-panel {
+  width: 360px;
+  flex-shrink: 0;
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(20, 40, 32, 0.08);
+}
+.ai-record-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-record-panel-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.ai-record-panel-head strong,
+.ai-record-panel-head small {
+  display: block;
+}
+.ai-record-panel-head small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.ai-record-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+}
+.ai-record-form label {
+  margin: 0;
+}
+.ai-record-form input[readonly] {
+  background: #f4f6f5;
+  color: var(--muted);
+}
+.ai-record-form small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.ai-record-choices {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0;
+}
+.ai-record-choices legend {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+.ai-record-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ai-record-actions .danger {
+  color: #b42318;
+}
+.ai-spacer {
+  flex: 1;
+}
+#ai-tab-knowledge .ai-records-pager {
+  justify-content: flex-end;
+  margin: 0;
+}
+#ai-records-page {
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ai-source-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-source-form label {
+  margin: 0;
+}
+.ai-segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #eef2f0;
+}
+.workspace .ai-segmented button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #2f4640;
+  box-shadow: none;
+}
+.workspace .ai-segmented [aria-checked='true'] {
+  background: #fff;
+  color: #087b5a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.ai-source-guide {
+  font-size: 13px;
+  color: var(--muted);
+}
+.ai-source-guide summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #20332e;
+}
+@media (max-width: 900px) {
+  .ai-records-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ai-record-panel {
+    order: -1;
+    width: auto;
+  }
+}
+@media (max-width: 760px) {
+  #ai-tab-knowledge nav.ai-knowledge-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin-right: -16px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  #ai-tab-knowledge .ai-knowledge-tabs button {
+    flex-shrink: 0;
+    min-height: 40px;
+  }
+  .ai-knowledge-label {
+    display: none;
+  }
+  .ai-records-tools {
+    width: 100%;
+  }
+  .ai-records-tools label {
+    flex: 1 1 100%;
+  }
+  .ai-records-tools input {
+    width: 100%;
+    min-height: 44px;
+  }
+  .ai-records-tools button {
+    flex: 1;
+    min-height: 44px;
+  }
+  /* Baris tabel menjadi kartu: setiap sel memakai judul kolomnya sebagai label. */
+  #ai-records table,
+  #ai-records tbody,
+  #ai-records tr,
+  #ai-records td {
+    display: block;
+    width: 100%;
+  }
+  #ai-records thead {
+    display: none;
+  }
+  #ai-records.table-wrap {
+    border: 0;
+  }
+  #ai-records tr {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    background: #fff;
+  }
+  #ai-records td {
+    display: flex;
+    gap: 12px;
+    padding: 4px 0;
+    border: 0;
+  }
+  #ai-records td::before {
+    content: attr(data-label);
+    flex: 0 0 38%;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  #ai-records td[data-label='']::before {
+    display: none;
+  }
+  #ai-records .row-actions button {
+    flex: 1;
+    min-height: 40px;
+    white-space: nowrap;
+  }
+  #ai-tab-knowledge .ai-records-pager button {
+    min-height: 44px;
+  }
+}
+.ai-single-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+}
+.ai-single-text textarea {
+  width: 100%;
+  min-height: 360px;
+  margin: 0;
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+.ai-single-status {
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--muted);
+}
+#ai-records .ai-single-form {
+  max-width: 560px;
+  padding: 16px 0 0;
+}

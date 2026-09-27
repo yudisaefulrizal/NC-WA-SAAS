@@ -13,6 +13,7 @@ import {
   validateGraph,
   validateRecord,
   blankDefinition,
+  collectionKind,
   type Collection,
   type GraphDefinition,
 } from './definition.js';
@@ -202,6 +203,11 @@ export async function recordDefinition(account: string, profile: string) {
   if (!graph?.active) throw new ApiError(409, 'profile_not_published', 'Profil belum diterbitkan.');
   return graph.active;
 }
+// Jumlah record tersimpan per koleksi untuk sub-menu Knowledge; koleksi bersumber API tidak punya record di NC-WA.
+export async function recordCounts(account: string, profile: string): Promise<Record<string, number>> {
+  const [rows] = await sql.countByCollection(db, [account, profile]);
+  return Object.fromEntries(rows.map(r => [String(r.collection_id), Number(r.n)]));
+}
 async function collectionOf(account: string, profile: string, collection: string) {
   const d = await recordDefinition(account, profile);
   const schema = d.collections.find(c => c.id === collection);
@@ -359,6 +365,12 @@ export async function writeRecord(
     if (operation === 'create') {
       data = validateRecord(schema, input.data, true);
       if (schema.owner === 'customer') customer = scoped ?? customerNumber(input.customer);
+      // Koleksi teks dan isian hanya punya satu record per data profil; berikutnya berupa Ubah.
+      if (collectionKind(schema) !== 'list') {
+        const [counts] = await sql.countByCollection(c, [account, profile]);
+        if (counts.some(r => r.collection_id === collection && Number(r.n) > 0))
+          throw new ApiError(409, 'single_record', 'Koleksi ini hanya berisi satu isian; ubah isian yang ada.');
+      }
     } else {
       const [existing] = await sql.record(c, [account, profile, collection, id]);
       const row = existing[0];

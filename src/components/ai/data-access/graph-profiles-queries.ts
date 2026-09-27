@@ -199,3 +199,9 @@ export function shareAvailable(c: Executor, p: SqlValue[]) {
     p,
   );
 }
+export function countByCollection(c: Executor, p: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT collection_id,COUNT(*) AS n FROM ai_data_records WHERE account_id=? AND data_profile_id=? GROUP BY collection_id',
+    p,
+  );
+}

@@ -8,27 +8,28 @@ function aiTab(tab) {
   document
     .querySelectorAll('[data-ai-tab]')
     .forEach(b => b.setAttribute('aria-pressed', String(b.dataset.aiTab === tab)));
-  if (tab === 'knowledge') knowledgeTab(knowledgeTabNames[0]);
+  if (tab === 'knowledge') knowledgeTab(defaultKnowledgeTab());
   if (tab === 'conversations' && $('ai-session').value && aiView === 'sessions') void run(loadConversations);
 }
 document.querySelectorAll('[data-ai-tab]').forEach(b => (b.onclick = () => aiTab(b.dataset.aiTab)));
-// Bagian Knowledge: isi bisnis ada di koleksi data profil (dikelola di halaman data koleksi); di sini hanya tautannya,
-// Perilaku AI, dan Fallback Tim.
-const knowledgeTabNames = ['records', 'behavior', 'fallback'];
-function renderKnowledgeTabs() {
-  $('ai-records-link').href = '/dashboard/ai-data?profile=' + encodeURIComponent(aiTarget());
-}
+// Bagian Knowledge: satu sub-menu per koleksi data profil (tab "c:<id koleksi>", isinya dikelola di tempat oleh
+// ai-records.js), lalu Perilaku AI dan Fallback Tim. `knowledge` dibagi dengan ai-records.js.
+const knowledge = { profile: '', collections: [], counts: {}, sources: [], current: 'behavior' };
+const defaultKnowledgeTab = () => (knowledge.collections[0] ? 'c:' + knowledge.collections[0].id : 'behavior');
 function knowledgeTab(tab) {
-  $('ai-knowledge-select').value = tab;
-  for (const name of knowledgeTabNames) $('ai-knowledge-tab-' + name).hidden = name !== tab;
+  const collection = tab.startsWith('c:') ? tab.slice(2) : '';
+  if (collection && !knowledge.collections.some(c => c.id === collection)) tab = 'behavior';
+  knowledge.current = tab;
+  $('ai-knowledge-tab-records').hidden = !tab.startsWith('c:');
+  for (const name of ['behavior', 'fallback']) $('ai-knowledge-tab-' + name).hidden = name !== tab;
   document
-    .querySelectorAll('[data-knowledge-tab]')
+    .querySelectorAll('#ai-tab-knowledge [data-knowledge-tab]')
     .forEach(b => b.setAttribute('aria-pressed', String(b.dataset.knowledgeTab === tab)));
+  if (tab.startsWith('c:')) showCollection(collection);
 }
 document
   .querySelectorAll('[data-knowledge-tab]')
   .forEach(b => (b.onclick = () => knowledgeTab(b.dataset.knowledgeTab)));
-$('ai-knowledge-select').onchange = e => knowledgeTab(e.target.value);
 {
   const icon = document.querySelector('.ai-hero-icon'),
     plan = document.createElement('div'),
@@ -99,6 +100,16 @@ async function loadAI() {
     $('ai-buy').disabled = !w.credit_price;
   }
   await loadAssistant();
+  // Tautan lama halaman data koleksi (/dashboard/ai-data?profile=…) diarahkan ke sini: buka kelola data profil itu.
+  const deepLink = new URLSearchParams(location.search).get('data_profile');
+  if (deepLink) {
+    history.replaceState(null, '', location.pathname);
+    aiView = 'profiles';
+    await loadDataProfiles();
+    const profile = aiDataProfiles.find(p => p.id === deepLink);
+    if (profile) manageProfile(profile);
+    else renderAIView();
+  }
 }
 // Status sesi diambil tiap 12 detik selama tab Asisten AI terbuka, supaya logout WhatsApp dari HP atau scan QR di tab
 // atau perangkat lain tercermin di carousel tanpa memuat ulang.
@@ -147,7 +158,6 @@ function allowedAITabs() {
 }
 function renderAITabs() {
   const allowed = allowedAITabs();
-  renderKnowledgeTabs();
   document.querySelectorAll('[data-ai-tab]').forEach(b => (b.hidden = !allowed.includes(b.dataset.aiTab)));
   const current = [...document.querySelectorAll('[data-ai-tab]')].find(b => b.getAttribute('aria-pressed') === 'true')
     ?.dataset.aiTab;

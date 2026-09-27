@@ -13,6 +13,7 @@ import { ai } from '../../src/components/ai/domain/service.js';
 import { setProfileEnabled } from '../../src/components/ai/domain/profiles/registry.js';
 import * as store from '../../src/components/ai/domain/builder/store.js';
 import { blankDefinition } from '../../src/components/ai/domain/builder/definition.js';
+import { catalogGraph } from '../../test/components/ai/graph-fixture.js';
 const owner = randomUUID(),
   client = randomUUID(),
   ownerToken = randomUUID(),
@@ -73,8 +74,14 @@ try {
       errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     page.on('dialog', d => void d.accept());
-    await page.goto(origin + '/dashboard/admin/ai-builder');
-    await page.locator('#templates .card').first().getByRole('button').click();
+    // Profil uji berbentuk katalog (Router → Layanan/Sapaan, koleksi Produk) dibuat lewat API, lalu dibuka di editor.
+    const created = await (
+      await context.request.post(origin + '/api/admin/ai/builder', {
+        data: catalogGraph(),
+        headers: { Origin: origin },
+      })
+    ).json();
+    await page.goto(origin + '/dashboard/admin/ai-builder?profile=' + created.id);
     await page.locator('#editor').waitFor();
     const id = new URL(page.url()).searchParams.get('profile')!;
     ids.push(id);
@@ -84,7 +91,7 @@ try {
     await page.locator('#add-collection').click();
     const added = page.locator('#collections .collection').last();
     await added.getByLabel('Nama koleksi', { exact: true }).fill('Booking');
-    await added.getByLabel('Kepemilikan data', { exact: true }).selectOption('customer');
+    await added.getByRole('radio', { name: /^Milik pelanggan/ }).check();
     await page
       .locator('#collections .collection')
       .last()
@@ -93,7 +100,8 @@ try {
 
     // Alur: node Data dengan filter, batas, jumlah, dan mode Agent/alur.
     await page.getByRole('button', { name: 'Alur', exact: true }).click();
-    await page.locator('#node-types').getByRole('button', { name: 'Data', exact: true }).click();
+    await page.locator('#add-node').click();
+    await page.locator('#node-types').getByRole('button', { name: 'Data tabel', exact: true }).click();
     const inspector = page.locator('#inspector');
     await inspector.getByLabel('Koleksi', { exact: true }).selectOption('produk');
     await inspector.getByRole('button', { name: '＋ Filter' }).click();
@@ -108,18 +116,23 @@ try {
     await inspector.getByRole('radio', { name: 'Dipanggil Agent' }).click();
     assert.equal(await inspector.getByLabel('Dipakai Layanan', { exact: true }).isChecked(), true);
     await inspector.getByRole('radio', { name: 'Di alur' }).click();
-    // ID field dibuat dari nama dan tidak ditampilkan; selama belum terbit, mengganti nama ikut mengganti rujukan filter.
+    // ID field dibuat dari nama dan hanya tampil sebagai teks; selama belum terbit, mengganti nama ikut mengganti
+    // rujukan filter.
     await page.getByRole('button', { name: 'Struktur data', exact: true }).click();
     assert.equal(await page.locator('#collections').getByLabel('ID field').count(), 0);
     await page
+      .locator('#collection-list')
+      .getByRole('button', { name: /^Produk/ })
+      .click();
+    await page
       .locator('#collections .collection')
-      .first()
       .getByLabel('Nama field', { exact: true })
       .first()
       .fill('Nama Produk');
     await page.getByRole('button', { name: 'Alur', exact: true }).click();
 
     // Kondisi: satu syarat jam dan satu grup "salah satu".
+    await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Kondisi', exact: true }).click();
     await inspector.getByLabel('Nilai yang diperiksa', { exact: true }).fill('system.time');
     await inspector.getByLabel('Operator', { exact: true }).selectOption('time_between');
@@ -127,14 +140,13 @@ try {
     await inspector.getByRole('button', { name: '＋ Grup DAN/ATAU' }).click();
     await inspector.getByLabel('Pembanding', { exact: true }).last().fill('gigi');
 
-    await page.locator('#save').click();
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.reload();
     await page.locator('#editor').waitFor();
     const exported = await context.request.get(origin + '/api/admin/ai/builder/' + id + '/export');
     const definition = await exported.json();
     const dataNode = definition.nodes.find(
-      (n: any) => n.type === 'tool' && n.collection === 'produk' && n.filters?.length,
+      (n: any) => n.type === 'data_table' && n.collection === 'produk' && n.filters?.length,
     );
     assert.deepEqual(dataNode.filters, [{ field: 'nama_produk', operator: 'contains', value: '{{input.message}}' }]);
     assert.equal(definition.collections[0].fields[0].id, 'nama_produk');
@@ -161,22 +173,30 @@ try {
     // Klien: record milik pelanggan wajib bernomor, tampil dengan kolom Pelanggan, dan bisa difilter.
     const data = await ai.createDataProfile(client, { profile_type: g.id, name: 'Klinik ' + width });
     await context.addCookies([{ name: 'ncwa_session', value: clientToken, url: origin }]);
-    await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
-    await page.locator('#data-title').filter({ hasText: 'Booking klinik' }).waitFor();
-    await page.locator('#collection').selectOption('booking');
-    await page.locator('#owner-note').waitFor();
-    await page.locator('#new-record').click();
-    await page.locator('#record-form [name=__customer]').fill('62811');
-    await page.locator('#record-form [name=tanggal]').fill('2026-09-27');
-    await page.locator('#record-form [name=keluhan]').fill('Gusi bengkak');
-    await page.locator('#record-form').getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#record-dialog').waitFor({ state: 'hidden' });
-    await page.reload();
-    await page.locator('#collection').selectOption('booking');
-    await page.locator('#records').getByText('62811', { exact: true }).waitFor();
-    await page.locator('#customer-filter').fill('62899');
-    await page.locator('#customer-filter').press('Enter');
-    await page.locator('#records').getByText('Belum ada data yang sesuai.').waitFor();
+    const openBooking = async () => {
+      await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
+      await page
+        .locator('#ai-manage-name')
+        .filter({ hasText: 'Klinik ' + width })
+        .waitFor();
+      await page
+        .locator('#ai-knowledge-collections')
+        .getByRole('button', { name: /^Booking/ })
+        .click();
+      await page.locator('#ai-records-owner-note').waitFor();
+    };
+    await openBooking();
+    await page.locator('#ai-records-new').click();
+    await page.locator('#ai-record-form [name=__customer]').fill('62811');
+    await page.locator('#ai-record-form [name=tanggal]').fill('2026-09-27');
+    await page.locator('#ai-record-form [name=keluhan]').fill('Gusi bengkak');
+    await page.locator('#ai-record-form').getByRole('button', { name: 'Simpan', exact: true }).click();
+    await page.locator('#ai-record-panel').waitFor({ state: 'hidden' });
+    await openBooking();
+    await page.locator('#ai-records').getByText('62811', { exact: true }).waitFor();
+    await page.locator('#ai-records-customer').fill('62899');
+    await page.locator('#ai-records-customer').press('Enter');
+    await page.locator('#ai-records').getByText('Belum ada data yang sesuai.').waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: join(screenshots, 'ai-builder-owned-records-' + width + '.png'), fullPage: true });
 

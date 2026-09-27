@@ -10,6 +10,7 @@ import { digest } from '../../src/libraries/security.js';
 import { screenshots } from './screenshots.js';
 import { ai } from '../../src/components/ai/domain/service.js';
 import { setProfileEnabled } from '../../src/components/ai/domain/profiles/registry.js';
+import { catalogGraph } from '../../test/components/ai/graph-fixture.js';
 const owner = randomUUID(),
   client = randomUUID(),
   ownerToken = randomUUID(),
@@ -53,19 +54,24 @@ try {
       errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     page.on('dialog', d => void d.accept());
-    await page.goto(origin + '/dashboard/admin/ai-builder');
-    await page.locator('#templates .card').first().getByRole('button').click();
+    // Profil uji berbentuk katalog (Router → Layanan/Sapaan, koleksi Produk) dibuat lewat API, lalu dibuka di editor.
+    const created = await (
+      await context.request.post(origin + '/api/admin/ai/builder', {
+        data: catalogGraph(),
+        headers: { Origin: origin },
+      })
+    ).json();
+    await page.goto(origin + '/dashboard/admin/ai-builder?profile=' + created.id);
     await page.locator('#editor').waitFor();
-    await page.locator('#node-types').getByRole('button', { name: 'Shared Memory', exact: true }).waitFor();
+    await page.locator('[data-node="shared_memory"]').waitFor();
     if (width === 390) await page.locator('#node-picker select').selectOption('shared_memory');
     else await page.locator('[data-node="shared_memory"] .node-heading').click();
     await page.locator('#inspector').getByLabel('Pesan sebelumnya (0–60)', { exact: true }).fill('8');
     const id = new URL(page.url()).searchParams.get('profile')!;
     ids.push(id);
-    await page.getByRole('button', { name: 'Ringkasan', exact: true }).click();
+    await page.getByRole('button', { name: 'Pengaturan', exact: true }).click();
     await page.locator('#profile-name').fill('Profil browser ' + width);
     await page.locator('#profile-name').blur();
-    await page.locator('#save').click();
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.reload();
     await page
@@ -86,29 +92,29 @@ try {
     }
     await page.locator('#inspector').getByLabel('Nama node', { exact: true }).fill('Layanan pelanggan');
     await page.locator('#inspector').getByLabel('Nama node', { exact: true }).blur();
+    await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Kondisi', exact: true }).click();
-    await page.locator('#inspector').getByRole('button', { name: 'Hapus', exact: true }).click();
+    await page.locator('#inspector').getByRole('button', { name: 'Hapus node', exact: true }).click();
     await page.locator('#fit').click();
     if (width === 1280) {
       await page.locator('[data-source="input"][data-port="next"]').click();
       await page.locator('[data-target="router"]:not([data-connection])').click();
       await page.locator('[data-source="shared_memory"][data-port="memory"]').click();
-      await page.locator('[data-target="layanan"][data-connection="memory"]').click();
-      await page.locator('[data-node="layanan"] .node-heading').click();
-      await page.locator('#inspector').getByLabel('Shared Memory', { exact: true }).selectOption('');
-      assert.equal(await page.locator('[data-memory-connection="shared_memory:layanan"]').count(), 0);
+      await page.locator('[data-target="layanan_pelanggan"][data-connection="memory"]').click();
+      await page.locator('[data-node="layanan_pelanggan"] .node-heading').click();
+      await page.locator('#inspector').getByLabel('Memori percakapan', { exact: true }).selectOption('');
+      assert.equal(await page.locator('[data-memory-connection="shared_memory:layanan_pelanggan"]').count(), 0);
       await page.locator('[data-source="shared_memory"][data-port="memory"]').click();
-      await page.locator('[data-target="layanan"][data-connection="memory"]').click();
+      await page.locator('[data-target="layanan_pelanggan"][data-connection="memory"]').click();
     } else {
       await page.locator('#node-picker select').selectOption('input');
-      await page.locator('#inspector').getByLabel('next', { exact: true }).selectOption('router');
-      await page.locator('#node-picker select').selectOption('layanan');
-      await page.locator('#inspector').getByLabel('Shared Memory', { exact: true }).selectOption('');
-      assert.equal(await page.locator('[data-memory-connection="shared_memory:layanan"]').count(), 0);
-      await page.locator('#inspector').getByLabel('Shared Memory', { exact: true }).selectOption('shared_memory');
+      await page.locator('#inspector').getByLabel('Lanjut', { exact: true }).selectOption('router');
+      await page.locator('#node-picker select').selectOption('layanan_pelanggan');
+      await page.locator('#inspector').getByLabel('Memori percakapan', { exact: true }).selectOption('');
+      assert.equal(await page.locator('[data-memory-connection="shared_memory:layanan_pelanggan"]').count(), 0);
+      await page.locator('#inspector').getByLabel('Memori percakapan', { exact: true }).selectOption('shared_memory');
     }
 
-    await page.locator('#save').click();
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.locator('#publish').click();
     await page.locator('#revision').filter({ hasText: 'Terbit v' }).waitFor();
@@ -121,13 +127,19 @@ try {
     assert.equal(exported.status(), 200);
     const definition = await exported.json();
     assert.equal(definition.nodes.find((n: any) => n.type === 'memory').memory_limit, 8);
-    assert.equal(definition.nodes.find((n: any) => n.id === 'layanan').memory, 'shared_memory');
+    assert.equal(definition.nodes.find((n: any) => n.id === 'layanan_pelanggan').memory, 'shared_memory');
     assert.equal(
       definition.edges.some((e: any) => e.source === 'shared_memory' || e.target === 'shared_memory'),
       false,
     );
-    assert.equal(definition.nodes.find((n: any) => n.id === 'layanan').label, 'Layanan pelanggan');
+    assert.equal(definition.nodes.find((n: any) => n.id === 'layanan_pelanggan').label, 'Layanan_pelanggan');
+    // ID node mengikuti nama: koneksi dan variabel jawaban di Output ikut berganti.
+    assert.equal(definition.nodes.find((n: any) => n.id === 'output').value, '{{nodes.layanan_pelanggan.answer}}');
+    assert.ok(definition.edges.some((e: any) => e.source === 'router' && e.target === 'layanan_pelanggan'));
+    // Kembali ke Profil AI, lalu impor dari halaman buat profil.
     await page.locator('#all-profiles').click();
+    await page.waitForURL(origin + '/dashboard/admin/profiles');
+    await page.goto(origin + '/dashboard/admin/ai-builder');
     await page.locator('#import-file').setInputFiles({
       name: 'profile.json',
       mimeType: 'application/json',
@@ -143,18 +155,27 @@ try {
     await setProfileEnabled(owner, id, true);
     const data = await ai.createDataProfile(client, { profile_type: id, name: 'Data browser ' + width });
     await context.addCookies([{ name: 'ncwa_session', value: clientToken, url: origin }]);
-    await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
+    // Tautan lama halaman data koleksi diarahkan ke Asisten AI › Knowledge › koleksi pertama data profil ini.
+    const openData = async () => {
+      await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
+      await page
+        .locator('#ai-manage-name')
+        .filter({ hasText: 'Data browser ' + width })
+        .waitFor();
+      await page.locator('#ai-records-title').filter({ hasText: 'Produk' }).waitFor();
+    };
+    await openData();
+    await page.locator('#ai-records-new').click();
+    await page.locator('#ai-record-form [name=nama]').fill('Produk Basic');
+    await page.locator('#ai-record-form [name=biaya]').fill('150000');
+    await page.locator('#ai-record-form').getByRole('button', { name: 'Simpan', exact: true }).click();
+    await page.locator('#ai-record-panel').waitFor({ state: 'hidden' });
     await page
-      .locator('#data-title')
-      .filter({ hasText: 'Profil browser ' + width })
+      .locator('#ai-knowledge-collections')
+      .getByRole('button', { name: /Produk\s*1$/ })
       .waitFor();
-    await page.locator('#new-record').click();
-    await page.locator('#record-form [name=nama]').fill('Produk Basic');
-    await page.locator('#record-form [name=biaya]').fill('150000');
-    await page.locator('#record-form').getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#record-dialog').waitFor({ state: 'hidden' });
-    await page.reload();
-    await page.locator('#records').getByText('Produk Basic', { exact: true }).waitFor();
+    await openData();
+    await page.locator('#ai-records').getByText('Produk Basic', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: join(screenshots, 'ai-builder-records-' + width + '.png'), fullPage: true });
     assert.deepEqual(errors, []);

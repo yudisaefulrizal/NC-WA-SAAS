@@ -507,7 +507,7 @@ document.querySelectorAll('#admin > details, #nomor > details').forEach(panel =>
         if (other !== panel) other.open = false;
   }),
 );
-document.querySelectorAll('.tabs a:not(.sidebar-brand):not([data-editor])').forEach(a =>
+document.querySelectorAll('.tabs a:not(.sidebar-brand)').forEach(a =>
   a.addEventListener('click', event => {
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();

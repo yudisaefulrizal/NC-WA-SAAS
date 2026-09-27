@@ -430,9 +430,6 @@ p.ai-warning {
   gap: 10px;
   margin-top: 16px;
 }
-.ai-knowledge-select {
-  display: none !important;
-}
 @media (max-width: 760px) {
   .client-workspace #ai .ai-hero {
     flex-wrap: wrap;
@@ -467,19 +464,6 @@ p.ai-warning {
   }
   .client-workspace #ai .ai-profile-actions button {
     min-height: 44px;
-  }
-  .ai-knowledge-select {
-    display: flex !important;
-    flex-direction: column;
-    gap: 6px;
-    margin: 0 0 12px !important;
-  }
-  .ai-knowledge-select select {
-    min-height: 44px;
-    margin: 0;
-  }
-  .client-workspace #ai .ai-knowledge-tabs {
-    display: none;
   }
   .modal-actions button {
     flex: 1;

@@ -14,6 +14,7 @@ import { ai } from '../../src/components/ai/domain/service.js';
 import { setProfileEnabled } from '../../src/components/ai/domain/profiles/registry.js';
 import * as store from '../../src/components/ai/domain/builder/store.js';
 import { blankDefinition } from '../../src/components/ai/domain/builder/definition.js';
+import { catalogGraph } from '../../test/components/ai/graph-fixture.js';
 const owner = randomUUID(),
   client = randomUUID(),
   ownerToken = randomUUID(),
@@ -88,8 +89,14 @@ try {
       errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     page.on('dialog', d => void d.accept());
-    await page.goto(origin + '/dashboard/admin/ai-builder');
-    await page.locator('#templates .card').first().getByRole('button').click();
+    // Profil uji berbentuk katalog (Router → Layanan/Sapaan, koleksi Produk) dibuat lewat API, lalu dibuka di editor.
+    const created = await (
+      await context.request.post(origin + '/api/admin/ai/builder', {
+        data: catalogGraph(),
+        headers: { Origin: origin },
+      })
+    ).json();
+    await page.goto(origin + '/dashboard/admin/ai-builder?profile=' + created.id);
     await page.locator('#editor').waitFor();
     const id = new URL(page.url()).searchParams.get('profile')!;
     ids.push(id);
@@ -97,13 +104,13 @@ try {
     // Struktur data: field baru bertipe Pilihan ganda dengan nilai bawaan, dan Telepon yang unik.
     await page.getByRole('button', { name: 'Struktur data', exact: true }).click();
     const produk = page.locator('#collections .collection').first();
-    await produk.getByRole('button', { name: '＋ Field' }).click();
+    await produk.getByRole('button', { name: 'Tambah field' }).click();
     const added = produk.locator('.field-grid').last();
     await added.getByLabel('Nama field', { exact: true }).fill('Kategori');
     await added.getByLabel('Tipe', { exact: true }).selectOption('multichoice');
     await produk.locator('.field-grid').last().getByLabel('Opsi (pisahkan koma)').fill('Reguler, Promo');
     await produk.locator('.field-grid').last().getByLabel('Nilai bawaan (pisahkan koma)').fill('Reguler');
-    await produk.getByRole('button', { name: '＋ Field' }).click();
+    await produk.getByRole('button', { name: 'Tambah field' }).click();
     const phone = produk.locator('.field-grid').last();
     await phone.getByLabel('Nama field', { exact: true }).fill('Kontak');
     await phone.getByLabel('Tipe', { exact: true }).selectOption('phone');
@@ -112,11 +119,13 @@ try {
     // Alur: Ekstrak dengan field dari koleksi, lalu Set / Hitung dengan operasi Kali.
     await page.getByRole('button', { name: 'Alur', exact: true }).click();
     const inspector = page.locator('#inspector');
+    await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Ekstrak', exact: true }).click();
     await inspector.getByLabel('Tipe', { exact: true }).selectOption('choice');
     await inspector.getByLabel('Opsi (pisahkan koma)', { exact: true }).fill('Gigi, Umum');
     await inspector.getByLabel('Salin field dari koleksi', { exact: true }).selectOption('produk');
     await inspector.getByLabel('Petunjuk untuk AI', { exact: true }).first().fill('Nama layanan');
+    await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Set / Hitung', exact: true }).click();
     await inspector.getByLabel('Nama hasil', { exact: true }).fill('total');
     await inspector.getByLabel('Operasi', { exact: true }).selectOption('multiply');
@@ -127,15 +136,16 @@ try {
     await inspector.getByLabel('Angka', { exact: true }).last().fill('{{input.message}}');
 
     // Kirim media: file dari variabel, keterangan, sesudah jawaban, sebagai dokumen.
+    await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Kirim media', exact: true }).click();
     await inspector.getByLabel('File yang dikirim', { exact: true }).fill('{{input.message}}');
     await inspector.getByLabel('Keterangan (opsional)', { exact: true }).fill('Brosur terbaru');
     await inspector.getByLabel('Waktu kirim', { exact: true }).selectOption('after');
     await inspector.getByLabel('Kirim sebagai', { exact: true }).selectOption('document');
     // Terima media: hanya gambar.
+    await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Terima media', exact: true }).click();
     await inspector.getByLabel(/^Dokumen \(PDF/).uncheck();
-    await page.locator('#save').click();
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.reload();
     await page.locator('#editor').waitFor();
@@ -172,10 +182,17 @@ try {
     // Klien: formulir record dengan tipe baru dan unggahan file.
     const data = await ai.createDataProfile(client, { profile_type: g.id, name: 'Santri ' + width });
     await context.addCookies([{ name: 'ncwa_session', value: clientToken, url: origin }]);
-    await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
-    await page.locator('#data-title').filter({ hasText: 'Pendaftaran santri' }).waitFor();
-    await page.locator('#new-record').click();
-    const form = page.locator('#record-form');
+    const openData = async () => {
+      await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
+      await page
+        .locator('#ai-manage-name')
+        .filter({ hasText: 'Santri ' + width })
+        .waitFor();
+      await page.locator('#ai-records-title').waitFor();
+    };
+    await openData();
+    await page.locator('#ai-records-new').click();
+    const form = page.locator('#ai-record-form');
     assert.equal(await form.getByLabel('Tahfidz', { exact: true }).isChecked(), true);
     await form.locator('[name=nama]').fill('Ahmad');
     await form.locator('[name=jam]').fill('07:30');
@@ -184,22 +201,22 @@ try {
     await form.locator('[name=hp]').fill('0812-3456-789');
     await form.locator('[name=foto]').setInputFiles({ name: 'pas foto.png', mimeType: 'image/png', buffer: png });
     await form.getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#record-dialog').waitFor({ state: 'hidden' });
-    await page.reload();
-    const link = page.locator('#records a', { hasText: 'pas foto.png' });
+    await page.locator('#ai-record-panel').waitFor({ state: 'hidden' });
+    await openData();
+    const link = page.locator('#ai-records a', { hasText: 'pas foto.png' });
     await link.waitFor();
-    await page.locator('#records').getByText('Tahfidz, Bahasa', { exact: true }).waitFor();
-    await page.locator('#records').getByText('628123456789', { exact: true }).waitFor();
-    await page.locator('#records').getByText('2026-10-01 08:00', { exact: true }).waitFor();
+    await page.locator('#ai-records').getByText('Tahfidz, Bahasa', { exact: true }).waitFor();
+    await page.locator('#ai-records').getByText('628123456789', { exact: true }).waitFor();
+    await page.locator('#ai-records').getByText('2026-10-01 08:00', { exact: true }).waitFor();
     const file = await context.request.get(origin + (await link.getAttribute('href')));
     assert.equal(file.status(), 200);
     assert.deepEqual(Buffer.from(await file.body()), png);
     // Nomor unik yang sama ditolak dengan pesan yang jelas.
-    await page.locator('#new-record').click();
+    await page.locator('#ai-records-new').click();
     await form.locator('[name=nama]').fill('Budi');
     await form.locator('[name=hp]').fill('628123456789');
     await form.getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#notice').filter({ hasText: 'sudah dipakai record lain' }).waitFor();
+    await page.locator('#message').filter({ hasText: 'sudah dipakai record lain' }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: join(screenshots, 'ai-builder-field-types-' + width + '.png'), fullPage: true });
     assert.deepEqual(errors, []);

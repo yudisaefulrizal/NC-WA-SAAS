@@ -78,29 +78,42 @@ try {
       errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     const data = await ai.createDataProfile(client, { profile_type: g.id, name: 'Kopi ' + width });
-    await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
-    await page.locator('#data-title').filter({ hasText: 'Toko kopi' }).waitFor();
-    assert.equal(await page.getByRole('radio', { name: 'Tabel aplikasi' }).getAttribute('aria-checked'), 'true');
-    await page.getByRole('radio', { name: 'API sendiri' }).click();
-    await page.locator('#source-endpoint').fill('https://8.8.8.8/orders');
-    await page.locator('#source-token').fill('rahasia-klien');
-    await page.locator('#source-save').click();
-    await page.locator('#source-test').waitFor();
-    await page.reload();
-    await page.locator('#source-test').waitFor();
-    assert.equal(await page.getByRole('radio', { name: 'API sendiri' }).getAttribute('aria-checked'), 'true');
-    assert.equal(await page.locator('#source-endpoint').inputValue(), 'https://8.8.8.8/orders');
-    await page.locator('#source-token-status').filter({ hasText: 'Token tersimpan.' }).waitFor();
-    assert.equal(await page.locator('#new-record').isHidden(), true);
-    await page.locator('#source-test').click();
-    await page.locator('#records').getByText('Kopi dari API', { exact: true }).waitFor();
+    // Sumber data diatur dari dialog di Asisten AI › Knowledge › koleksi.
+    const openData = async () => {
+      await page.goto(origin + '/dashboard/ai-data?profile=' + data.id);
+      await page
+        .locator('#ai-manage-name')
+        .filter({ hasText: 'Kopi ' + width })
+        .waitFor();
+      await page.locator('#ai-records-title').waitFor();
+    };
+    const dialog = page.locator('#ai-source-dialog');
+    await openData();
+    await page.locator('#ai-records-source').click();
+    assert.equal(await dialog.getByRole('radio', { name: 'Tabel aplikasi' }).getAttribute('aria-checked'), 'true');
+    await dialog.getByRole('radio', { name: 'API sendiri' }).click();
+    await page.locator('#ai-source-endpoint').fill('https://8.8.8.8/orders');
+    await page.locator('#ai-source-token').fill('rahasia-klien');
+    await page.locator('#ai-source-save').click();
+    await dialog.waitFor({ state: 'hidden' });
+    await page.locator('#ai-records-meta').filter({ hasText: 'API sendiri' }).waitFor();
+    await openData();
+    assert.equal(await page.locator('#ai-records-new').isHidden(), true);
+    await page.locator('#ai-records-source').click();
+    await page.locator('#ai-source-test').waitFor();
+    assert.equal(await dialog.getByRole('radio', { name: 'API sendiri' }).getAttribute('aria-checked'), 'true');
+    assert.equal(await page.locator('#ai-source-endpoint').inputValue(), 'https://8.8.8.8/orders');
+    await page.locator('#ai-source-token-status').filter({ hasText: 'Token tersimpan.' }).waitFor();
+    await page.locator('#ai-source-test').click();
+    await page.locator('#ai-records').getByText('Kopi dari API', { exact: true }).waitFor();
     assert.equal(calls.at(-1).action, 'search');
     assert.equal(calls.at(-1).context.data_profile_id, data.id);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: join(screenshots, 'ai-builder-api-source-' + width + '.png'), fullPage: true });
-    await page.getByRole('radio', { name: 'Tabel aplikasi' }).click();
-    await page.locator('#source-save').click();
-    await page.locator('#new-record').waitFor();
+    await page.locator('#ai-records-source').click();
+    await dialog.getByRole('radio', { name: 'Tabel aplikasi' }).click();
+    await page.locator('#ai-source-save').click();
+    await page.locator('#ai-records-new').waitFor();
     assert.equal(
       (await store.writeRecord(client, data.id, 'pesanan', 'create', { data: { produk: 'Lokal' } })).data.produk,
       'Lokal',

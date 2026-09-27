@@ -5,21 +5,22 @@ Implementasi berdasarkan diskusi pemilik: editor visual dengan graf bebas, struk
 ## Menggunakan fitur
 
 1. Buka **Dashboard Admin → Profil AI → Buat profil · Editor alur · Impor JSON**, atau `/dashboard/admin/ai-builder`.
-2. Buat profil kosong, gunakan template Katalog sederhana/Pendidikan/Tester, atau impor paket JSON. Profil baru berstatus draft dan belum aktif untuk klien.
-3. Tentukan koleksi pada **Struktur data**. ID koleksi dan field tidak ditampilkan: dibuat otomatis dari namanya (misalnya "Jadwal Dokter" menjadi `jadwal_dokter`). Selama belum pernah diterbitkan, ID ikut nama dan rujukan di node Data (koleksi, filter, urutan, jumlah, serta variabel `...data.<field>`) ikut diganti; setelah terbit ID dikunci karena record klien memakainya, dan mengganti nama hanya mengubah tampilan. Field node Ekstrak mengikuti aturan yang sama untuk variabel `nodes.<node>.<field>`.
-4. Susun node dan koneksi pada **Alur**. Klik/tarik palet untuk menambah, tarik header node untuk memindahkan, sambungkan port keluar ke port masuk. Pengaturan node juga menyediakan pemilih tujuan koneksi untuk keyboard/ponsel.
-5. Jalankan **Pengujian** dengan pesan dan data contoh. Lihat hasil per node di jejak eksekusi. Data contoh hanya berlaku untuk simulasi.
-6. Simpan draft dan periksa masalah pada **Ringkasan**. Terbitkan sesudah diuji. Aktifkan profil melalui daftar **Profil AI** agar bisa dipilih akun.
-7. Akun membuat **Data Profil**, memilih profil tersebut, lalu **Kelola isi** untuk mengisi koleksi. Pasang Data Profil ke sesi di halaman Asisten AI; Knowledge sesi berisi Perilaku AI, tautan data koleksi, dan Fallback Tim.
+2. Buat profil kosong, impor berkas JSON, atau **Tempel JSON** (misalnya jawaban ChatGPT/Claude; blok ```json dan teks di sekitarnya dibuang otomatis). Profil baru berstatus draft dan belum aktif untuk klien. Lihat [Membuat profil dengan bantuan AI](#membuat-profil-dengan-bantuan-ai).
+3. Tentukan koleksi pada **Struktur data**: daftar koleksi di kiri, tabel field koleksi terpilih di kanan (detail opsi, relasi, dan nilai bawaan dibuka per baris), dan daftar node yang memakainya. ID koleksi dan field dibuat otomatis dari namanya (misalnya "Jadwal Dokter" menjadi `jadwal_dokter`) dan tampil sebagai teks, bukan isian. Selama belum pernah diterbitkan, ID ikut nama dan rujukan di node Data (koleksi, filter, urutan, jumlah, serta variabel `...data.<field>`) ikut diganti; setelah terbit ID dikunci karena record klien memakainya, dan mengganti nama hanya mengubah tampilan. Field node Ekstrak mengikuti aturan yang sama untuk variabel `nodes.<node>.<field>`.
+4. Susun node dan koneksi pada **Alur**. **Tambah node** (atau tombol `/`) membuka daftar node yang bisa dicari dan dipilih dengan panah + Enter, atau ditarik ke kanvas. Nama node wajib unik (huruf besar/kecil, spasi, dan `_` dianggap sama), spasi otomatis menjadi `_`, dan ID-nya dibentuk dari nama, sehingga `Layanan_pelanggan` dipakai sebagai `{{nodes.layanan_pelanggan.answer}}`; mengganti nama ikut mengganti ID beserta koneksi, tool Agent, memori, dan semua `{{nodes.<id>...}}` yang merujuknya, sedangkan ID acak dari editor lama (misalnya `agent_85314d14`) diganti otomatis saat profil dibuka, begitu pula spasi di nama lama. Tarik header node untuk memindahkan, sambungkan port keluar ke port masuk; peta mini di kanan bawah memindahkan tampilan. Setiap node berupa kartu dengan ilustrasi duotone yang menggambarkan fungsinya bagi orang awam (satu jenis node, satu ilustrasi; misalnya semua Agent memakai gambar yang sama), diikuti nama dan ringkasan isinya. **Rapikan** menyusun jalur utama berkolom dari Input (cabang Router berurutan), menumpuk node data yang dipanggil Agent di bawah Agent-nya, menaruh Output dan Fallback di kolom paling kanan (Fallback di bawah), dan memori di satu baris di bawah jalur. Inspector di kanan mengatur node terpilih; isian instruksi menandai setiap `{{variabel}}` (oranye bila tidak dikenal) dan **Sisipkan variabel** menaruh variabel di posisi kursor. Bagian Koneksi di inspector juga menjadi pemilih tujuan untuk keyboard/ponsel.
+5. Tekan **Uji** untuk membuka uji coba di samping kanvas. Setiap jawaban punya **Jejak** per langkah (durasi, model, input dan hasil); jalur yang dijalankan diberi nomor dan disorot di kanvas, dan langkah yang gagal ditandai merah. Data contoh hanya berlaku untuk simulasi.
+6. Draft tersimpan otomatis setelah jeda singkat (Ctrl+S menyimpan seketika). Masalah alur tampil di tombol **N masalah** pada bilah atas, pada node terkait, dan di **Pengaturan**; **Terbitkan** nonaktif selama masih ada masalah atau tidak ada perubahan sejak terbit. **Pengaturan** juga memuat status di klien, riwayat versi (pulihkan ke draft), ekspor, salin, dan hapus. Aktifkan profil melalui daftar **Profil AI** agar bisa dipilih akun.
+7. Akun membuat **Data Profil**, memilih profil tersebut, lalu **Kelola isi**. Di **Knowledge** setiap koleksi profil menjadi sub-menu sendiri (grup Data, dengan jumlah record dan ikon untuk koleksi milik pelanggan), diikuti Perilaku AI dan Fallback Tim. Record dicari, difilter per pelanggan, ditambah, diubah (panel di samping tabel), dan dihapus di tempat; sumber data diatur lewat dialog **Sumber data**. Pasang Data Profil ke sesi di halaman Asisten AI; Knowledge sesi menampilkan hal yang sama untuk data profil yang terpasang. Tautan lama `/dashboard/ai-data?profile=…` diarahkan ke kelola data profil itu.
 
-Semua profil AI adalah graf. Profil statis lama (CS Usaha, CS Lembaga Pendidikan, Tester AI) dan AI Studio sudah dihapus beserta data profil, tabel isi, dan filenya; tidak ada konversi otomatis. Template Katalog sederhana/Pendidikan/Tester adalah titik awal dengan koleksi umum. Builder hanya berisi perkakas umum: tidak ada operasi khusus satu jenis usaha.
+Semua profil AI adalah graf. Profil statis lama (CS Usaha, CS Lembaga Pendidikan, Tester AI) dan AI Studio sudah dihapus beserta data profil, tabel isi, dan filenya; tidak ada konversi otomatis. Template bawaan juga sudah dihapus; profil dimulai kosong, dari JSON, atau dengan bantuan AI lewat skill. Builder hanya berisi perkakas umum: tidak ada operasi khusus satu jenis usaha.
 
 ## Node dan kontrak eksekusi
 
 | Node | Perilaku |
 | --- | --- |
 | Input | Menyediakan `input.message`, `input.context`, dan `input.history` |
-| Shared Memory | Resource riwayat untuk Router/Agent/Context yang dihubungkan; batas 0–60 pesan sebelumnya, terisolasi per akun/sesi/pelanggan |
+| Memori percakapan (`memory`) | Resource riwayat untuk node AI yang dihubungkan lewat kunci `memory`; batas 0–60 pesan sebelumnya, terisolasi per akun/sesi/pelanggan; hanya dibaca |
+| Memori konteks (`context_memory`) | Resource ringkasan S-P-O (maks. satu per profil); dibaca node AI lewat kunci `context_memory` sebagai `input.context`, hanya ditulis node Context |
 | Router | Memilih satu cabang sesuai kriteria; tier Keputusan mendukung JEV melalui protokol keputusan yang sudah tersedia |
 | Agent | Menghasilkan jawaban, atau memakai node Tool data yang diizinkan secara eksplisit |
 | Kondisi | Satu atau beberapa syarat (semua/salah satu), boleh dengan grup DAN/ATAU satu tingkat; lihat **Kondisi** |
@@ -38,9 +39,25 @@ Batas format: 60 node, 180 koneksi, 30 koleksi, 50 field per koleksi. Runtime me
 
 Variabel memakai `{{input.message}}`, `{{nodes.nama_node.answer}}`, atau variabel runtime `system.today|tomorrow|now|time|weekday` (WIB), `customer.phone|name` (nama profil WhatsApp; kosong di Uji Coba), dan `service.name` (nama data profil). Tidak ada `eval`, skrip pengguna, atau URL tool bebas. Konfigurasi koneksi provider dan secret berada di pengaturan AI server. Model khusus per node opsional; tidak mengubah penyedia/kredensial tier secara otomatis.
 
-## Node Data
+## Jenis koleksi dan node data
 
-Node Data (`type: "tool"`) memilih satu `operation`:
+Koleksi punya `kind`, dan tiap jenis dibaca oleh node data pasangannya:
+
+| `kind` | Isi yang diisi akun (Asisten AI › Knowledge) | Node | Keluaran |
+| --- | --- | --- | --- |
+| `list` (bawaan, boleh dihilangkan) | Tabel banyak baris berfield | **Data tabel** `data_table` | lihat di bawah |
+| `text` | Satu teks panjang, maks. 20.000 karakter, tersimpan otomatis | **Data teks** `data_text` | `text`, `found` |
+| `form` | Satu formulir berfield tetap, disimpan dengan tombol Simpan | **Data isian** `data_form` | `data`, `found` |
+
+Koleksi teks tidak punya field; teks dan isian selalu umum, tidak bisa bersumber API, dan relasi hanya boleh ke koleksi tabel. Keduanya disimpan sebagai satu record koleksinya di `ai_data_records` (tanpa tabel baru); record kedua ditolak (`single_record`). Data teks mengirim paragraf yang memuat kata kunci (`query`, boleh variabel atau diisi Agent) sampai `max_chars` (200–20.000, bawaan 4.000); tanpa kata kunci atau tanpa paragraf yang cocok, awal teks dipotong di batas itu. Data isian punya operasi `get` (Baca) dan `update` (Ubah, `value` `{"data":{...}}`, digabung ke isian lama atau dibuat bila belum ada). Seperti Data tabel, keduanya bisa di alur atau dipanggil Agent.
+
+Isi teks dan isian juga bisa ditempel langsung dengan variabel `{{data.<koleksi_teks>}}` dan `{{data.<koleksi_isian>.<field>}}`; runtime memuatnya sekali sebelum node pertama berjalan (field isian kosong menjadi `""`). Validator menolak variabel `data.*` untuk koleksi tabel atau field yang tidak ada. Mengganti nama koleksi/field di editor ikut mengganti variabel ini.
+
+Nama lama `type: "tool"` tetap diterima saat membaca definisi (draft, versi terbit, impor) dan dinormalkan menjadi `data_table`.
+
+## Node Data tabel
+
+Node Data tabel (`type: "data_table"`) memilih satu `operation`:
 
 | Operasi | Input (`query` untuk alur, atau `query` dari Agent) | Keluaran | Port di alur |
 | --- | --- | --- | --- |
@@ -103,7 +120,7 @@ Keluaran `files`, `count`, dan `skipped`. Maksimal tiga file per balasan untuk s
 
 ## Sumber data koleksi: tabel aplikasi atau API klien
 
-Setiap koleksi pada sebuah Data Profil memakai **tabel aplikasi** (bawaan, `ai_data_records`) atau **API sendiri** milik klien. Pilihan ini diatur klien di halaman data koleksi, per data profil, dan disimpan di `ai_collection_sources` (tanpa baris berarti tabel aplikasi). Pemilik tetap merancang alur dan struktur koleksi; klien menyambungkan datanya tanpa mengubah alur. Tidak ada node Webhook terpisah.
+Setiap koleksi pada sebuah Data Profil memakai **tabel aplikasi** (bawaan, `ai_data_records`) atau **API sendiri** milik klien. Pilihan ini diatur klien lewat dialog Sumber data di Asisten AI › Knowledge › koleksi, per data profil, dan disimpan di `ai_collection_sources` (tanpa baris berarti tabel aplikasi). Pemilik tetap merancang alur dan struktur koleksi; klien menyambungkan datanya tanpa mengubah alur. Tidak ada node Webhook terpisah.
 
 Bila memakai API, keenam operasi node Data dikirim ke API: `POST` JSON `{action, collection, query, context}`, token Bearer terenkripsi, header `Idempotency-Key`, HTTPS publik tanpa redirect, timeout 15 detik, dan balasan maksimal 64 KB.
 
@@ -145,9 +162,15 @@ Semua akses memakai akun dari autentikasi server dan data profil yang dimiliki a
 
 Publikasi memeriksa data yang tersimpan terhadap skema baru. Perubahan tidak kompatibel ditolak; migrasi data harus dilakukan lebih dahulu. Lock definisi menjaga agar publikasi dan operasi tulis tidak memakai skema berbeda di tengah transaksi. Eksekusi yang masih membawa skema lama tidak boleh menulis setelah skema berubah.
 
-Simpan draft dan perubahan record memakai pemeriksaan revisi agar dua tab tidak saling menimpa. Operasi tulis tool menggunakan request ID + node + parameter yang dinormalisasi; pengulangan identik mengembalikan hasil yang sudah ada. Graf bukan transaksi menyeluruh: tulisan yang sudah berhasil tetap tersimpan jika node berikutnya gagal. Membuat record umum tidak otomatis mengurangi stok, menerima pembayaran, atau menjalankan aturan transaksi profil bawaan.
+Simpan draft (otomatis) dan perubahan record memakai pemeriksaan revisi agar dua tab tidak saling menimpa. Operasi tulis tool menggunakan request ID + node + parameter yang dinormalisasi; pengulangan identik mengembalikan hasil yang sudah ada. Graf bukan transaksi menyeluruh: tulisan yang sudah berhasil tetap tersimpan jika node berikutnya gagal. Membuat record umum tidak otomatis mengurangi stok, menerima pembayaran, atau menjalankan aturan transaksi profil bawaan.
 
 Profil yang sudah dipakai data akun tidak dapat dihapus; pemilik dapat menonaktifkannya. Riwayat versi tidak diubah saat dipulihkan: pemilik menyimpan dan menerbitkan draft hasil pemulihan secara eksplisit.
+
+## Membuat profil dengan bantuan AI
+
+**Unduh skill AI** (halaman Buat profil dan tab Pengaturan, `GET /api/admin/ai/builder/skill`, khusus pemilik) menghasilkan `ncwa-profil-ai.zip` berformat skill Claude: `SKILL.md` (alur kerja, pola inti konteks S-P-O sebagai arsitektur bawaan untuk profil ber-Router, aturan utama, daftar periksa), `examples/cs-spo.json` (contoh lengkap: Router dengan memori konteks → Informasi/Layanan/Sapaan → Context S-P-O → Jawaban, Layanan boleh ke Tim dan juga membaca riwayat), `reference/format.md` (semua jenis node beserta port, kunci, dan keluaran; tipe field; operator Kondisi dan filter; operasi Data dan Set / Hitung; tier; variabel; batas). Di Claude ZIP-nya dipasang sebagai Skill; untuk ChatGPT, ZIP diekstrak dan isinya diunggah ke Project atau GPT sebagai pengetahuan. Pemilik menceritakan usahanya, lalu menempelkan JSON jawaban AI di **Tempel JSON**; validasi impor dan daftar masalah editor tetap menjadi penjaga. Untuk mengubah profil, berikan skill dan hasil Ekspor JSON ke AI; hasil impornya menjadi draft baru.
+
+Isi skill dibuat saat diunduh dari `domain/builder/skill.ts`: daftar node, operator, tipe field, tier, variabel, dan batas diambil dari konstanta `definition.ts` (termasuk `limits` dan `outputFields`), dan deskripsinya berupa `Record` atas tipe-tipe itu sehingga node/operator baru tanpa deskripsi gagal di `tsc`. Skill hanya berisi format dan contoh, tanpa data akun, secret, atau isi percakapan. ZIP dibuat oleh `libraries/zip.ts` (deflate bawaan Node, tanpa dependensi).
 
 ## Impor dan ekspor
 
@@ -193,7 +216,7 @@ Pencarian dan filter membaca JSON dalam cakupan akun/profil/koleksi (dan pelangg
 
 ## Verifikasi
 
-- `test/components/ai/builder.test.ts`: kontrak, template, graf invalid, JEV, kondisi, tool, koreksi format, idempotensi, relasi, isolasi akun, ekspor/impor, versi, perubahan skema, dan penghapusan.
+- `test/components/ai/builder.test.ts`: kontrak, graf katalog uji (`graph-fixture.ts`), graf invalid, JEV, kondisi, tool, koreksi format, idempotensi, relasi, isolasi akun, ekspor/impor, versi, perubahan skema, dan penghapusan.
 - `test/components/ai/builder-data.test.ts`: kontrak dan normalisasi, isolasi record per pelanggan, paritas filter/kata kunci/urutan/batas antara MySQL dan simulasi, operasi node Data di alur, Kondisi dan variabel WIB, simulasi, duplikasi, dan konflik kepemilikan saat publikasi.
 - `test/components/ai/builder-sources.test.ts`: pengaturan sumber dan token, penolakan SSRF, penulisan dashboard ke koleksi API, keenam operasi ke API tiruan beserta isi `query`/`context`, validasi balasan, error HTTP, uji dari dashboard, dan simulasi yang tidak memanggil API.
 - `scripts/checks/browser-ai-builder-sources-check.ts`: ganti koleksi ke API, simpan-buka ulang, uji API, dan kembali ke tabel pada 1280/390 px.
@@ -204,23 +227,29 @@ Pencarian dan filter membaca JSON dalam cakupan akun/profil/koleksi (dan pelangg
 - `scripts/checks/browser-ai-builder-data-check.ts`: kepemilikan koleksi, node Data, Kondisi berkelompok, simpan-buka ulang, halaman record milik pelanggan, dan dialog duplikat pada 1280/390 px.
 - `test/components/ai/profiles.test.ts`: data profil dipakai bersama sesi, ganti/cabut, isolasi akun, sesi tanpa data profil, duplikasi, profil yang dimatikan pemilik, Uji Coba, dan sesi WhatsApp dengan engine tiruan; hanya graf terbit dijalankan, draft tidak memengaruhi jawaban.
 - `test/components/ai/service.test.ts`: runtime WhatsApp di atas graf uji (`graph-fixture.ts`): tagihan per kata, memori, tiket fallback, konteks Context, jeda dan balasan manual, pengulangan saat provider gagal, node Data yang dibatasi akun dan tidak menulis setelah admin mengambil alih, serta tier model per node.
-- `scripts/checks/browser-ai-builder-check.ts`: editor dan formulir data pada 1280/390 px, termasuk simpan lalu buka ulang dan impor.
+- `scripts/checks/browser-ai-builder-check.ts`: editor dan formulir data pada 1280/390 px, termasuk simpan otomatis lalu buka ulang dan impor.
+- `test/components/ai/builder-data-kinds.test.ts`: alias `tool`, aturan jenis koleksi dan pasangan node, validasi variabel `data.*`, kutipan paragraf Data teks, runtime yang membaca teks/isian, mengubah isian, dan mengisi variabel, satu record per koleksi teks/isian, sumber API ditolak untuk non-tabel, serta contoh simulasi berupa string/objek.
+- `scripts/checks/browser-ai-data-kinds-check.ts`: jenis koleksi di Struktur data, node Data isian di popover, dan pengisian Teks (otomatis) serta Isian (Simpan) oleh klien di Knowledge pada 1280/390 px.
+- `test/components/ai/builder-memory.test.ts`: satu Memori konteks per profil, sambungan konteks yang sah, Context wajib menulis ke Memori konteks, Router/Agent hanya menerima ringkasan tanpa riwayat, Context membaca riwayat lalu menulis ringkasan, dan profil lama tanpa Memori konteks.
+- `test/components/ai/builder-skill.test.ts`: ZIP terbaca (CRC dan nama UTF-8), frontmatter skill, referensi mencakup semua node/operator/tipe/tier/variabel validator, contoh S-P-O lolos validasi dan (dengan model tiruan) setiap cabangnya melewati Context serta membawa ringkasan ke Router pada pesan berikutnya, dan unduhan hanya untuk pemilik.
+- `scripts/checks/browser-ai-builder-ux-check.ts`: dua memori (garis baca/tulis konteks dan pilihan di inspector), bentuk node per jenis, Rapikan sesuai jenis node tanpa tumpang tindih, Tambah node dengan pencarian dan keyboard, nama node unik dengan ID dari nama (termasuk ID acak lama), unduh skill AI dan Tempel JSON (termasuk jawaban AI yang terpotong), penanda dan menu variabel, simpan otomatis, daftar masalah, serta uji coba dengan jejak yang disorot di kanvas (transport AI tiruan) pada 1280/390 px.
 - `scripts/checks/browser-ai-profiles-check.ts` dan `browser-ai-conversation-check.ts`: strip sesi, dialog pasang, Data Profil, halaman Profil AI pemilik, dan tampilan Percakapan pada 1280/390 px.
 
 Pengujian otomatis menggunakan MySQL sementara, transport AI tiruan, serta engine WhatsApp tiruan. Model AI sungguhan dan HP WhatsApp nyata belum diuji untuk profil graf.
 
 
-## Shared Memory
+## Memori percakapan dan memori konteks
 
-**Shared Memory** adalah resource dengan koneksi sendiri. Alur eksekusi tetap misalnya Input → Router → Agent → Output. Port ungu Shared Memory dapat dihubungkan ke port **Memori** pada satu atau beberapa Router, Agent, dan Context. Satu node pemakai memilih satu resource; satu resource boleh mempunyai banyak pemakai. Resource yang tidak terhubung boleh tetap berada di kanvas.
+Ada dua resource memori dengan sambungan sendiri (bukan edge alur):
 
-Koneksi dapat dipasang/dilepas dengan port, melalui pemilih **Shared Memory** pada inspector pemakai, atau checkbox daftar pemakai pada inspector resource. Klik garis ungu untuk memutuskannya. Node yang dilepas tidak lagi menerima riwayat dan ringkasan secara otomatis; hasil node lain pada jalur eksekusi tetap merupakan data alur. Pemutusan koneksi tidak menghapus riwayat tersimpan.
+- **Memori percakapan** (`type: "memory"`): riwayat pesan pelanggan dan balasan (AI, tim lewat tiket fallback, balasan manual) dari `ai_conversations.messages`. Node membacanya lewat kunci `memory` (`memory_limit` 0–60 pesan terakhir); yang menulis selalu sistem setelah balasan terkirim, bukan node.
+- **Memori konteks** (`type: "context_memory"`, maksimal satu per profil): ringkasan S-P-O posisi percakapan dari `ai_conversations.router_context`. Router, Agent, Context, dan Ekstrak membacanya lewat kunci `context_memory` sebagai `input.context` (dan `{{nodes.<id>.context}}`). **Hanya node Context yang menulisnya**: Context membaca riwayat dari Memori percakapan dan menulis ringkasan baru ke Memori konteks; validator mewajibkan Context tersambung ke Memori konteks bila profil memilikinya.
 
-`memory` pada definisi node menyimpan ID resource, atau string kosong untuk tidak terhubung. Jumlah riwayat pada resource memakai `memory_limit` (0–60 pesan). `{{nodes.shared_memory.history}}` dan `{{nodes.shared_memory.context}}` hanya dapat dibaca node yang terhubung langsung ke resource tersebut. Referensi memori yang belum dihubungkan ditolak saat validasi.
+Karena terpisah, node bisa nyambung tanpa riwayat: Router cukup memakai memori konteks dan pesan terbaru, dan Agent yang hanya tersambung ke memori konteks menerima satu baris ringkasan, bukan puluhan pesan. Semua sambungan diatur pemilik; editor tidak menyambungkan apa pun otomatis. Pola anjurannya ada di skill AI.
 
-Penyimpanan tetap memakai `ai_conversations.messages` dan `router_context` dengan cakupan akun, sesi WhatsApp, dan pelanggan. Resource membaca percakapan yang sama dengan jendela masing-masing, tanpa memanggil model. Context yang terhubung dapat memperbarui ringkasan; runtime menyimpan riwayat setelah balasan. Batas penyimpanan tetap mengikuti pengaturan memori sesi, sedangkan simulasi menyimpan hingga 60 pesan sementara.
+Di kanvas, node AI punya dua port masuk memori: **Konteks** (hijau toska) dan **Riwayat** (ungu). Garis putus-putus berarti membaca; garis tebal dari Memori konteks ke Context berarti menulis. Sambungan juga bisa diatur lewat pemilih **Memori konteks** dan **Memori percakapan** di inspector atau daftar pemakai di inspector resource; klik garis untuk memutuskannya.
 
-Profil kosong/template baru memiliki sambungan resource bawaan. Definisi lama yang menempatkan Shared Memory di jalur berurutan dinormalisasi ketika dibaca: sambungan alur dilewatkan langsung dan node model sesudahnya mendapat referensi resource. Versi tersimpan tidak ditulis ulang otomatis. Profil tanpa sambungan memori tidak membaca riwayat secara otomatis; pasang resource pada node yang memerlukannya.
+**Profil lama** (tanpa node Memori konteks) tetap memakai cara lama: ringkasan dibaca dan ditulis lewat Memori percakapan yang tersambung, jadi perilaku yang sudah terbit tidak berubah. Begitu node Memori konteks ditambahkan, aturan baru berlaku untuk seluruh profil. Definisi lama yang menempatkan Shared Memory di jalur berurutan tetap dinormalisasi saat dibaca.
 
 ## Fallback dari Agent
 

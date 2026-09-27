@@ -117,7 +117,7 @@ test('Contract: old Search ports and single conditions normalize; ownership and 
   d.nodes.splice(
     1,
     1,
-    node('cari', 'tool', { collection: 'layanan', operation: 'search', query: '{{input.message}}' }),
+    node('cari', 'data_table', { collection: 'layanan', operation: 'search', query: '{{input.message}}' }),
   );
   d.nodes[2].value = '{{nodes.cari.count}}';
   d.edges = [
@@ -331,20 +331,20 @@ test('Data node in a flow: Search routes found/empty, Create and Count stay per 
   d.collections = [layanan, booking];
   d.nodes = [
     node('input', 'input'),
-    node('cari', 'tool', {
+    node('cari', 'data_table', {
       collection: 'layanan',
       operation: 'search',
       query: '',
       filters: [{ field: 'nama', operator: 'equals', value: '{{input.message}}' }],
     }),
-    node('buat', 'tool', {
+    node('buat', 'data_table', {
       collection: 'booking',
       operation: 'create',
       value: '{"data":{"layanan":"{{nodes.cari.first.id}}","tanggal":"{{system.tomorrow}}","status":"menunggu"}}',
     }),
-    node('hitung', 'tool', { collection: 'booking', operation: 'count', query: '' }),
-    node('mine', 'tool', { collection: 'booking', operation: 'search', query: '', limit: 1 }),
-    node('ubah', 'tool', {
+    node('hitung', 'data_table', { collection: 'booking', operation: 'count', query: '' }),
+    node('mine', 'data_table', { collection: 'booking', operation: 'search', query: '', limit: 1 }),
+    node('ubah', 'data_table', {
       collection: 'booking',
       operation: 'update',
       value: '{"id":"{{nodes.mine.first.id}}","data":{"status":"batal"}}',
@@ -378,8 +378,8 @@ test('Data node in a flow: Search routes found/empty, Create and Count stay per 
   const g = parseDefinition(d);
   g.nodes = [
     node('input', 'input'),
-    node('ambil', 'tool', { collection: 'booking', operation: 'get', query: '{{input.message}}' }),
-    node('hapus', 'tool', { collection: 'booking', operation: 'delete', query: '{{nodes.ambil.first.id}}' }),
+    node('ambil', 'data_table', { collection: 'booking', operation: 'get', query: '{{input.message}}' }),
+    node('hapus', 'data_table', { collection: 'booking', operation: 'delete', query: '{{nodes.ambil.first.id}}' }),
     node('output', 'output', { value: 'terhapus {{nodes.hapus.deleted}}' }),
     node('kosong', 'output', { value: 'tidak ditemukan' }),
   ];
@@ -463,9 +463,9 @@ test('Simulation keeps customer-owned samples private and Data node writes stay 
   d.collections = [layanan, booking];
   d.nodes = [
     node('input', 'input'),
-    node('cari', 'tool', { collection: 'booking', operation: 'search', query: '' }),
+    node('cari', 'data_table', { collection: 'booking', operation: 'search', query: '' }),
     node('ada', 'output', { value: 'ada {{nodes.cari.count}}' }),
-    node('buat', 'tool', {
+    node('buat', 'data_table', {
       collection: 'booking',
       operation: 'create',
       value: '{"data":{"tanggal":"{{system.today}}","status":"menunggu"}}',

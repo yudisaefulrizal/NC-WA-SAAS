@@ -461,7 +461,16 @@ test('Kirim media sends a collection file before the text answer and skips it wh
   const base = d.nodes[2];
   d.nodes = [
     d.nodes[0],
-    { ...base, id: 'cari', type: 'tool', collection: 'katalog', operation: 'search', query: '', value: '' },
+    {
+      ...base,
+      id: 'cari',
+      label: 'cari',
+      type: 'data_table',
+      collection: 'katalog',
+      operation: 'search',
+      query: '',
+      value: '',
+    },
     {
       ...base,
       id: 'kirim',
@@ -469,8 +478,8 @@ test('Kirim media sends a collection file before the text answer and skips it wh
       value: '{{nodes.cari.first.data.foto}}',
       caption: '{{nodes.cari.first.data.nama}}',
     },
-    { ...base, id: 'output', value: 'Ini fotonya' },
-    { ...base, id: 'tim', type: 'fallback', value: 'Tidak ada katalog' },
+    { ...base, id: 'output', label: 'output', value: 'Ini fotonya' },
+    { ...base, id: 'tim', label: 'tim', type: 'fallback', value: 'Tidak ada katalog' },
   ];
   d.edges = [
     { id: 'e1', source: 'input', port: 'next', target: 'cari' },
@@ -538,17 +547,17 @@ test('Terima media stores a customer image into a record; profiles without the n
   const base = d.nodes[2];
   d.nodes = [
     d.nodes[0],
-    { ...base, id: 'terima', type: 'receive', accept: ['image'], value: '' },
+    { ...base, id: 'terima', label: 'terima', type: 'receive', accept: ['image'], value: '' },
     {
       ...base,
       id: 'simpan',
-      type: 'tool',
+      type: 'data_table',
       collection: 'bukti',
       operation: 'create',
       value: '{"data":{"foto":"{{nodes.terima.file}}","catatan":"{{nodes.terima.caption}}"}}',
     },
-    { ...base, id: 'ok', value: 'Bukti diterima' },
-    { ...base, id: 'minta', value: 'Silakan kirim foto bukti' },
+    { ...base, id: 'ok', label: 'ok', value: 'Bukti diterima' },
+    { ...base, id: 'minta', label: 'minta', value: 'Silakan kirim foto bukti' },
   ];
   d.edges = [
     { id: 'e1', source: 'input', port: 'next', target: 'terima' },

@@ -252,7 +252,7 @@ export async function saveProfileField(
   field: string,
   value: unknown,
 ) {
-  // Isi bisnis ada di koleksi (halaman data koleksi); di sini hanya perilaku AI dan nomor fallback tim.
+  // Isi bisnis ada di koleksi (Asisten AI › Knowledge); di sini hanya perilaku AI dan nomor fallback tim.
   if (field === 'behavior') {
     await dataProfilesSql.updateBehavior(db, [text(value, 2000, 'Perilaku AI'), profile, account]);
     return;
