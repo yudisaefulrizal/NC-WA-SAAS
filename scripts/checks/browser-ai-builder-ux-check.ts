@@ -226,10 +226,13 @@ try {
             'Rapikan tidak boleh menumpuk ' + a.id + ' dan ' + b.id,
           );
     const at = (id: string) => boxes.find(b => b.id === id)!;
-    assert.equal(at('cari_produk').x, at('informasi').x);
-    assert.ok(at('cari_produk').y > at('informasi').y);
-    const flowBottom = Math.max(...boxes.filter(b => !b.type.includes('memory')).map(b => b.y + b.h));
-    assert.ok(at('memori_konteks').y > flowBottom && at('memori_percakapan').y > flowBottom);
+    // Laci data di kanan Agent pemakainya; memori di rel atas; cabang Router berurutan.
+    assert.ok(at('cari_produk').x > at('informasi').x && at('cari_produk').y >= at('informasi').y);
+    assert.ok(at('cari_produk').x < at('ringkas_konteks').x);
+    const flowTop = Math.min(...boxes.filter(b => !b.type.includes('memory')).map(b => b.y));
+    assert.ok(at('memori_konteks').y + at('memori_konteks').h < flowTop);
+    assert.ok(at('memori_percakapan').y + at('memori_percakapan').h < flowTop);
+    assert.ok(at('informasi').y < at('layanan').y && at('layanan').y < at('sapaan').y);
     assert.ok(at('tim').x === at('jawaban').x && at('tim').y > at('jawaban').y);
     await page.screenshot({ path: join(screenshots, 'ai-builder-shapes-' + width + '.png'), fullPage: true });
 

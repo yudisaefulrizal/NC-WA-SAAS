@@ -1,7 +1,7 @@
 // Kanvas graf: node, sambungan port, drag, zoom, peta mini, popover Tambah node, dan riwayat perubahan tanpa
 // pustaka eksternal.
 const viewport = $('viewport');
-const nodeWidth = 208;
+const nodeWidth = 236;
 function transform() {
   $('world').style.transform = `translate(${state.pan.x}px,${state.pan.y}px) scale(${state.zoom})`;
   $('fit').textContent = Math.round(state.zoom * 100) + '%';
@@ -627,10 +627,11 @@ function fitCanvas() {
   transform();
 }
 $('fit').onclick = fitCanvas;
-// Rapikan: kolom mengikuti jarak dari Input; node Data yang dipanggil Agent diletakkan di kolom Agent-nya.
-// Rapikan sesuai jenis node: jalur utama berkolom dari Input; node data yang hanya dipanggil Agent ditumpuk di bawah
-// Agent-nya; Output dan Fallback di kolom paling kanan (Fallback di bawah); memori di satu baris di bawah jalur,
-// sejajar node pertama yang memakainya. Jarak mengikuti tinggi node sebenarnya.
+// Rapikan sesuai jenis node, dibaca kiri ke kanan: jalur utama berkolom menurut jarak dari Input dan berurutan
+// mengikuti port sumbernya (cabang Router seperti kipas); node data yang hanya dipanggil Agent menjadi "laci" di kanan
+// Agent-nya; Output dan Fallback di kolom paling kanan (Fallback di bawah); memori di rel atas, di atas node yang
+// memakainya; node yang tidak tersambung dikumpulkan di kiri bawah. Setiap kolom diratakan tengah terhadap kolom
+// tertinggi. Hasilnya selalu sama untuk graf yang sama dan bisa dibatalkan dengan Urungkan.
 $('layout').onclick = () => {
   mutate(() => {
     const nodes = state.document.nodes,
@@ -641,6 +642,8 @@ $('layout').onclick = () => {
         isDataNode(n) &&
         !edges.some(e => e.source === n.id || e.target === n.id) &&
         nodes.some(a => a.tools.includes(n.id)),
+      step = nodeWidth + 44,
+      gap = 40,
       levels = new Map(),
       input = nodes.find(n => n.type === 'input'),
       queue = input ? [{ id: input.id, level: 0 }] : [];
@@ -651,49 +654,137 @@ $('layout').onclick = () => {
       levels.set(id, level);
       for (const e of edges.filter(e => e.source === id)) queue.push({ id: e.target, level: level + 1 });
     }
-    const flow = nodes.filter(n => !isMemory(n) && !agentTool(n));
+    const main = nodes.filter(n => !isMemory(n) && !agentTool(n)),
+      loose = main.filter(n => !levels.has(n.id) && !edges.some(e => e.source === n.id || e.target === n.id)),
+      flow = main.filter(n => !loose.includes(n));
     for (const n of flow) if (!levels.has(n.id)) levels.set(n.id, 0);
     const last =
       Math.max(0, ...flow.filter(n => !['output', 'fallback'].includes(n.type)).map(n => levels.get(n.id))) + 1;
     for (const n of flow) if (['output', 'fallback'].includes(n.type)) levels.set(n.id, last);
     const columns = new Map();
     for (const n of flow) columns.set(levels.get(n.id), [...(columns.get(levels.get(n.id)) ?? []), n]);
-    // Urutan dalam kolom mengikuti posisi sumbernya dan urutan port (cabang Router berurutan); Fallback paling bawah.
-    const order = n => {
-      const incoming = edges.filter(e => e.target === n.id);
-      const keys = incoming.map(e => {
-        const source = nodes.find(x => x.id === e.source);
-        return (source?.y ?? 0) + nodePorts(source ?? n).indexOf(e.port);
-      });
-      return (n.type === 'fallback' ? 1e6 : 0) + (keys.length ? Math.min(...keys) : 0);
-    };
-    let bottom = 100;
+    // Laci data: node data yang dipakai satu Agent menempel di kanan Agent itu; yang dipakai beberapa Agent diletakkan
+    // di laci Agent pertama, setinggi rata-rata pemakainya.
+    const users = t => flow.filter(n => n.tools.includes(t.id)),
+      tools = nodes.filter(t => agentTool(t) && users(t).length),
+      drawer = new Map(flow.map(n => [n.id, tools.filter(t => users(t).length === 1 && users(t)[0] === n)])),
+      shared = tools.filter(t => users(t).length > 1),
+      rank = new Map(),
+      order = [],
+      columnX = new Map();
+    let x = 60;
     for (const level of [...columns.keys()].sort((a, b) => a - b)) {
-      let y = 100;
-      for (const n of columns.get(level).sort((a, b) => order(a) - order(b))) {
-        n.x = 60 + Math.min(20, level) * 270;
-        n.y = y;
-        y += height(n) + 50;
-        for (const t of nodes.filter(t => agentTool(t) && n.tools.includes(t.id) && t.type !== 'agent')) {
-          if (t.laidOut) continue;
-          t.x = n.x;
-          t.y = y - 20;
-          t.laidOut = true;
-          y += height(t) + 30;
-        }
-      }
-      bottom = Math.max(bottom, y);
+      // Urutan dalam kolom mengikuti urutan sumber di kolom sebelumnya lalu urutan port; Fallback paling bawah.
+      const key = n => {
+        const keys = edges
+          .filter(e => e.target === n.id && rank.has(e.source))
+          .map(e => {
+            const source = nodes.find(x => x.id === e.source);
+            return rank.get(e.source) * 100 + Math.max(0, nodePorts(source).indexOf(e.port));
+          });
+        return (n.type === 'fallback' ? 1e6 : 0) + (keys.length ? Math.min(...keys) : 0);
+      };
+      const column = columns.get(level).sort((a, b) => key(a) - key(b) || a.id.localeCompare(b.id));
+      column.forEach((n, index) => rank.set(n.id, index));
+      order.push(column);
+      for (const n of column) n.x = x;
+      columnX.set(level, x);
+      const wide = column.some(n => drawer.get(n.id).length || shared.some(t => users(t)[0] === n));
+      x += wide ? step + nodeWidth + 36 : step;
     }
-    for (const t of nodes) delete t.laidOut;
-    // Memori di satu baris di bawah jalur, sejajar node pertama yang memakainya.
-    const used = new Set();
-    for (const m of nodes.filter(isMemory)) {
-      const users = nodes.filter(n => (m.type === 'memory' ? n.memory : n.context_memory) === m.id);
-      let x = users.length ? Math.min(...users.map(n => n.x)) : 60;
-      while (used.has(x)) x += 230;
-      used.add(x);
-      m.x = x;
-      m.y = bottom + 40;
+    const mean = list => list.reduce((sum, v) => sum + v, 0) / list.length,
+      block = n =>
+        Math.max(
+          height(n),
+          drawer.get(n.id).length ? drawer.get(n.id).reduce((sum, t) => sum + height(t) + 16, 12) : 0,
+        ),
+      center = n => n.y + height(n) / 2,
+      // Letakkan kolom sedekat mungkin dengan posisi yang diinginkan tanpa menumpuk dan tanpa mengubah urutan.
+      place = (column, want) => {
+        const wants = column.map(n => want(n)),
+          chosen = wants.map((w, i) => w ?? column[i].y);
+        let end = -Infinity;
+        column.forEach((n, i) => {
+          n.y = Math.max(chosen[i], end + gap);
+          end = n.y + block(n);
+        });
+        // Dorongan ke bawah membuat kelompok menggantung; geser seluruh kolom agar rata-rata tepat di posisi yang diinginkan
+        // (misalnya cabang Router berpusat di Router).
+        if (wants.every(w => w === undefined)) return;
+        const delta = mean(column.flatMap((n, i) => (wants[i] === undefined ? [] : [wants[i] - n.y])));
+        for (const n of column) n.y += delta;
+      };
+    for (const column of order) {
+      let stack = 0;
+      for (const n of column) {
+        n.y = stack;
+        stack += block(n) + gap;
+      }
+    }
+    // Sejajarkan setiap node dengan sumbernya (kiri ke kanan), lalu sumber dengan tujuannya (kanan ke kiri), lalu sekali
+    // lagi kiri ke kanan, sehingga Output berada tepat di kanan Agent-nya dan Router di tengah cabangnya.
+    const linked = (n, side) =>
+        edges
+          .filter(e => (side === 'in' ? e.target : e.source) === n.id)
+          .map(e => flow.find(m => m.id === (side === 'in' ? e.source : e.target)))
+          .filter(m => m && m.x !== n.x),
+      align = side => n => {
+        const others = linked(n, side).filter(m => (side === 'in' ? m.x < n.x : m.x > n.x));
+        return others.length ? mean(others.map(center)) - height(n) / 2 : undefined;
+      };
+    for (const column of order.slice(1)) place(column, align('in'));
+    for (const column of order.slice(0, -1).reverse()) place(column, align('out'));
+    for (const column of order.slice(1)) place(column, align('in'));
+    for (const n of flow)
+      drawer.get(n.id).reduce((ty, t) => {
+        t.x = n.x + nodeWidth + 36;
+        t.y = ty;
+        return ty + height(t) + 16;
+      }, n.y + 28);
+    // Data bersama: setinggi rata-rata pemakainya, digeser seperlunya agar tidak menumpuk isi laci lain.
+    for (const t of shared) {
+      const us = users(t);
+      t.x = us[0].x + nodeWidth + 36;
+      t.y = mean(us.map(center)) - height(t) / 2;
+    }
+    const drawerColumns = new Map();
+    for (const t of tools) drawerColumns.set(t.x, [...(drawerColumns.get(t.x) ?? []), t]);
+    for (const list of drawerColumns.values()) {
+      let end = -Infinity;
+      for (const t of list.sort((a, b) => a.y - b.y)) {
+        t.y = Math.max(t.y, end + 16);
+        end = t.y + height(t);
+      }
+    }
+    const placedTools = new Set(tools.map(t => t.id)),
+      laid = [...flow, ...tools],
+      minY = Math.min(...laid.map(n => n.y)),
+      tallest = Math.max(0, ...laid.map(n => n.y + height(n))) - minY;
+    // Rel memori di atas jalur utama.
+    const memories = nodes.filter(isMemory),
+      top = memories.length ? 100 + Math.max(...memories.map(height)) + 70 : 100;
+    for (const n of laid) n.y = Math.round(n.y - minY + top);
+    // Node data yang Agent pemakainya tidak ada di jalur ikut dikumpulkan di kiri bawah.
+    for (const t of nodes.filter(t => agentTool(t) && !placedTools.has(t.id))) loose.push(t);
+    let lx = 60;
+    const bottom = top + tallest + 80;
+    for (const n of loose.sort((a, b) => a.id.localeCompare(b.id))) {
+      n.x = lx;
+      n.y = bottom;
+      lx += step;
+    }
+    // Memori diletakkan di atas rata-rata posisi pemakainya, tanpa saling menumpuk.
+    const placed = memories
+      .map(m => {
+        const users = nodes.filter(n => (m.type === 'memory' ? n.memory : n.context_memory) === m.id);
+        return { m, want: users.length ? users.reduce((sum, n) => sum + n.x, 0) / users.length : 60 };
+      })
+      .sort((a, b) => a.want - b.want || a.m.id.localeCompare(b.m.id));
+    let minX = 60;
+    for (const { m, want } of placed) {
+      m.x = Math.round(Math.max(minX, want));
+      m.y = 100;
+      minX = m.x + step;
     }
   });
   fitCanvas();

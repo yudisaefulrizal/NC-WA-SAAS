@@ -75,7 +75,7 @@ const nodeDocs: Record<NodeType, NodeDoc> = {
   agent: {
     name: 'Agent',
     purpose: 'AI menyusun jawaban untuk pelanggan.',
-    keys: '`prompt` wajib (peran, gaya bahasa, batasan). `tier`, `memory`. `tools`: daftar id node Data yang boleh dipanggil Agent. `fallback: true` menambah port `fallback` agar AI bisa meneruskan ke tim bila tidak bisa menjawab.',
+    keys: '`prompt` wajib: tugas node ini, data yang dipakai, dan batasannya. Jangan menulis gaya bahasa, nama asisten, atau sapaan; itu diatur klien di Perilaku AI. `tier`, `memory`. `tools`: daftar id node Data yang boleh dipanggil Agent. `fallback: true` menambah port `fallback` agar AI bisa meneruskan ke tim bila tidak bisa menjawab.',
     ports: '`next`; ditambah `fallback` bila `fallback: true`',
     outputs: '`answer`, `fallback`, `question`',
   },
@@ -357,7 +357,7 @@ export function spoExample(): GraphDefinition {
       ...contextMemory,
       tools: ['cari_produk'],
       prompt:
-        'Kamu CS {{service.name}}. Jawab singkat dan ramah dalam bahasa Indonesia. Cari data dengan Cari_produk; jangan mengarang harga atau stok. Bila pelanggan tertarik, tawarkan untuk memesan.',
+        'Jawab pertanyaan tentang produk. Cari data dengan Cari_produk; jangan mengarang harga atau stok. Bila pelanggan tertarik, tawarkan untuk memesan.',
     }),
     node('layanan', 'Layanan', 'agent', 580, 260, {
       ...memory,
@@ -365,12 +365,12 @@ export function spoExample(): GraphDefinition {
       fallback: true,
       tools: ['cari_produk', 'catat_pesanan', 'baca_sop'],
       prompt:
-        'Kamu CS {{service.name}} yang mengurus pesanan. Ikuti aturan di Baca_SOP (pembayaran, jam, keluhan). Pastikan produk dan jumlah jelas, konfirmasi ke pelanggan, lalu simpan dengan Catat_pesanan. Keluhan atau permintaan di luar kemampuanmu diteruskan ke tim lewat fallback.',
+        'Urus pesanan pelanggan. Ikuti aturan di Baca_SOP (pembayaran, jam, keluhan). Pastikan produk dan jumlah jelas, konfirmasi ke pelanggan, lalu simpan dengan Catat_pesanan. Keluhan atau permintaan di luar kemampuanmu diteruskan ke tim lewat fallback.',
     }),
     node('sapaan', 'Sapaan', 'agent', 580, 460, {
       ...contextMemory,
       tier: 'cheap',
-      prompt: 'Balas salam, terima kasih, atau pamit dengan singkat dan ramah, lalu tawarkan bantuan.',
+      prompt: 'Balas salam, terima kasih, atau pamit, lalu tawarkan bantuan.',
     }),
     node('cari_produk', 'Cari_produk', 'data_table', 850, 20, { collection: 'produk', operation: 'search', limit: 5 }),
     node('catat_pesanan', 'Catat_pesanan', 'data_table', 850, 180, {
@@ -423,15 +423,46 @@ Profil AI NC-WA adalah graf yang menjawab pelanggan WhatsApp. Pesan masuk lewat 
 
 Hasil kerja skill ini adalah satu JSON \`ncwa-profile\` yang diimpor pemilik di **Profil AI → Buat profil → Impor JSON / Tempel JSON**. Profil hasil impor selalu berupa draft baru; pemilik mengujinya lalu menerbitkannya sendiri.
 
+## Tujuan profil
+
+Profil yang baik:
+
+1. **Benar**: menjawab dari data klien, tidak mengarang harga, stok, atau jadwal.
+2. **Paham konteks**: mengerti balasan pendek ("ya", "1 aja") sesuai posisi percakapan.
+3. **Hemat**: sesedikit mungkin panggilan AI, tier, dan riwayat per pesan.
+4. **Tahu batas**: meneruskan ke tim daripada menjawab salah.
+5. **Bisa dipakai banyak klien**: isi data dan gaya bahasa diatur tiap klien, bukan ditulis di profil.
+
+Ukur setiap keputusan rancangan dengan lima hal ini. Setiap node harus punya alasan ada; bila dihapus hasilnya sama, hapus.
+
+## Kenapa polanya begini
+
+- **Multi-agent (Router → beberapa Agent)**: setiap Agent punya prompt pendek dan fokus serta hanya tool yang relevan, sehingga lebih akurat, lebih murah, dan tidak salah memakai tool. Bila usaha sederhana (1–2 jenis pertanyaan), satu Agent tanpa Router sudah cukup; jangan memecah tanpa alasan.
+- **Konteks S-P-O**: Router tetap paham balasan pendek tanpa membaca seluruh riwayat, sehingga murah, cepat, dan tidak terganggu obrolan lama.
+- **Dua memori**: memori konteks untuk arah percakapan, riwayat untuk detail. Pasang riwayat hanya pada node yang butuh detail (misalnya Agent yang mencatat pesanan dan Context), karena setiap riwayat menambah biaya.
+- **Tier model**: \`cheap\` untuk memilah dan meringkas (Router, Context, Sapaan); tier lebih tinggi hanya untuk Agent yang menangani hal rumit.
+- **Node data**: jawaban diambil dari koleksi, sehingga tidak ada data karangan dan klien cukup memperbarui datanya tanpa mengubah profil.
+- **Fallback**: meneruskan ke tim lebih baik daripada menjawab salah; pasang pada Agent yang menangani hal di luar data (keluhan, pengecualian, pembayaran bermasalah).
+- **Terima media**: pasang bila bisnisnya menerima file dari pelanggan (bukti transfer, berkas pendaftaran, foto kerusakan untuk klaim). **Tanpa node ini, pesan gambar dan dokumen pelanggan tidak diproses sama sekali.** Isi gambar tidak dibaca AI: node ini untuk menyimpan berkas lewat node Data, pemeriksaan isinya tetap oleh tim.
+- **Kirim media**: pasang bila file menjawab lebih baik dari teks (brosur, daftar harga, foto produk, denah, formulir). Simpan file di field File koleksi agar klien bisa menggantinya sendiri; URL tetap hanya untuk file umum. Kirim hanya di jalur yang memang meminta atau menawarkan file, bukan di setiap jawaban.
+
 ## Alur kerja
 
-1. Pahami kebutuhan dulu. Tanyakan bila belum jelas: jenis usaha, pertanyaan yang sering datang, data yang perlu dicari atau dicatat (menjadi koleksi), kapan harus diteruskan ke tim, dan gaya bahasa.
+1. Pahami kebutuhan dulu. Tanyakan bila belum jelas: jenis usaha, pertanyaan yang sering datang, data yang perlu dicari atau dicatat (menjadi koleksi), kapan harus diteruskan ke tim, apakah pelanggan perlu mengirim berkas, dan berkas apa yang sering diminta pelanggan (brosur, katalog, formulir). Gaya bahasa tidak perlu ditanyakan karena diatur tiap klien (lihat bagian Perilaku AI klien).
 2. Jelaskan rancangan singkat dalam kata-kata (node, cabang, koleksi) sebelum menulis JSON yang panjang.
 3. Tulis JSON lengkap mengikuti [referensi format](reference/format.md). Mulai dari [contoh S-P-O](${spoExampleFile}) lalu sesuaikan cabang, prompt, dan koleksinya dengan usaha pengguna.
 4. Jalankan daftar periksa di bawah, lalu berikan JSON dalam satu blok \`\`\`json tanpa komentar.
 5. Minta pemilik mengimpor dan menekan **Uji**. Bila editor menampilkan masalah, minta pemilik menempelkan pesannya lalu perbaiki JSON.
 
 Untuk mengubah profil yang sudah ada, minta pemilik **Ekspor JSON** dari tab Pengaturan, ubah seperlunya dengan mempertahankan id yang tidak perlu berubah, lalu berikan JSON lengkap untuk diimpor sebagai draft baru.
+
+## Perilaku AI klien
+
+Setiap akun klien mengisi **Perilaku AI** di dashboard: gaya bahasa, nama asisten, sapaan, panjang jawaban, hal yang tidak boleh dikatakan. Sistem otomatis menambahkannya ke setiap node AI sebagai "Perilaku layanan", sehingga satu profil bisa dipakai banyak klien dengan gaya masing-masing.
+
+- Prompt node berisi **apa yang dikerjakan** (tugas, data yang dipakai, kapan fallback), bukan **cara bicara**.
+- Jangan menulis gaya bahasa, nada, nama asisten, persona ("Kamu CS …"), emoji, atau panjang jawaban di prompt. Prompt yang memuatnya akan bertabrakan dengan Perilaku AI klien.
+- Bila pemilik menyebut gaya bahasa, sampaikan bahwa itu diisi di Perilaku AI pada dashboard, bukan di profil.
 
 ## Pola inti NC-WA: konteks S-P-O
 
@@ -465,7 +496,7 @@ Context: memory = memori percakapan (dibaca), context_memory = memori konteks (d
 - Variabel ditulis \`{{path}}\` dan hanya boleh merujuk node yang pasti sudah berjalan di **setiap** jalur menuju node pemakai.
 - Data bisnis (harga, jadwal, stok, alamat) disimpan di koleksi dan dicari dengan node Data; jangan ditulis permanen di prompt.
 - Data per pelanggan (booking, pesanan, pendaftaran) memakai koleksi \`"owner": "customer"\`: AI hanya bisa membaca dan mengubah record milik pelanggan yang sedang chat.
-- Susun koordinat \`x\`/\`y\` dari kiri ke kanan: sekitar 270 px per kolom dan 160 px per baris, Input di paling kiri.
+- Koordinat \`x\`/\`y\` hanya untuk tampilan: susun dari kiri ke kanan (sekitar 280 px per kolom, 160 px per baris), Input di paling kiri, node data di kanan Agent pemakainya, memori di atas jalur. Tidak perlu presisi; tombol **Rapikan** di editor menyusun ulang semuanya.
 
 ## Daftar periksa sebelum menyerahkan JSON
 
@@ -479,6 +510,9 @@ Context: memory = memori percakapan (dibaca), context_memory = memori konteks (d
 - [ ] Node Data yang dipanggil Agent ada di \`tools\` Agent dan tidak punya edge; node Data di alur punya edge masuk dan keluar.
 - [ ] \`collection\`, field filter, \`sort_field\`, dan \`sum_field\` merujuk id yang ada; \`sum_field\` bertipe angka; \`value\` create/update adalah string JSON valid.
 - [ ] Field \`choice\`/\`multichoice\` punya \`options\`; relasi menunjuk koleksi yang ada, dan koleksi umum tidak berelasi ke koleksi milik pelanggan.
+- [ ] Setiap node punya alasan ada (lihat Tujuan profil); tidak ada Agent, riwayat, tier tinggi, atau Kirim media yang tidak diperlukan.
+- [ ] Bila pelanggan perlu mengirim berkas, ada node Terima media yang hasilnya disimpan lewat node Data.
+- [ ] Prompt node tidak memuat gaya bahasa, persona, nama asisten, atau panjang jawaban (itu Perilaku AI klien).
 - [ ] Setiap \`{{variabel}}\` dikenal (lihat referensi) dan tersedia di semua jalur; \`memory\` hanya menunjuk node Shared Memory.
 `;
 }
