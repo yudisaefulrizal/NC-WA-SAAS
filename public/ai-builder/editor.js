@@ -173,7 +173,7 @@ async function loadLibrary() {
     $('profiles').append(card);
   }
   if (!profiles.length)
-    $('profiles').append(el('p', 'Belum ada profil dinamis. Mulai dari template atau buat alur baru.', 'muted'));
+    $('profiles').append(el('p', 'Belum ada profil. Mulai dari template atau buat alur baru.', 'muted'));
 }
 async function create(d) {
   const result = await api(base, 'POST', d);

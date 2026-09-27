@@ -287,7 +287,7 @@ admin = async () => {
   routesHeading.textContent = 'Model per tingkat';
   routes.prepend(routesHeading);
   routes.querySelector('p').textContent =
-    'Pilih profil untuk setiap tingkat; API key tersimpan di server. Terstruktur memerlukan model dengan JSON Schema. Untuk memakai JEV pada Router, atur Keputusan ke profil OpenRouter dengan model typesafe/jev-1.13 lalu pilih tingkat Keputusan di AI Studio.';
+    'Pilih profil untuk setiap tingkat; API key tersimpan di server. Terstruktur memerlukan model dengan JSON Schema. Untuk memakai JEV pada Router, atur Keputusan ke profil OpenRouter dengan model typesafe/jev-1.13 lalu pilih tingkat Keputusan pada node Router di Editor profil.';
   panels.provider.append($('ai-config-status'), page.querySelector('.ai-provider-panel'));
   panels.model.append(routes, config, ...page.querySelectorAll('[data-ai-test]'));
   panels.tidy.append(tidy, saver('Simpan prompt rapikan'));
@@ -339,7 +339,7 @@ async function loadModelUsage() {
 $('ai-model-refresh').onclick = () => run(loadModelUsage);
 let failuresPage = 1,
   failuresLoading = false;
-// Profil adalah pipeline di kode; pemilik menyalakan atau mematikannya untuk semua klien dan menyetelnya di AI Studio.
+// Profil adalah graf dari Editor profil; pemilik menyalakan atau mematikannya untuk semua klien.
 async function loadAdminProfiles() {
   const rows = await api('/api/admin/ai/profiles');
   table('admin-profiles-list', ['Profil', 'Alur aktif', 'Pemakaian', 'Untuk klien', ''], rows, p => {
@@ -347,12 +347,16 @@ async function loadAdminProfiles() {
       icon = element('span', 'admin-profile-icon');
     icon.innerHTML = chatIcon;
     const text = element('div');
-    text.append(element('strong', '', p.name), element('small', '', p.nodes + ' node · ' + p.node_summary));
+    text.append(element('strong', '', p.name), element('small', '', p.nodes + ' node'));
     name.append(icon, text);
     const flow = element('div', 'admin-profile-cell');
     flow.append(
-      element('strong', '', p.active_version ? 'Versi ' + p.active_version : 'Bawaan'),
-      element('small', '', p.revision > p.published_revision ? 'draft berubah' : 'draft sama dengan aktif'),
+      element('strong', '', p.published ? 'Versi ' + p.published_revision : 'Belum terbit'),
+      element(
+        'small',
+        '',
+        !p.published ? 'hanya draft' : p.revision > p.published_revision ? 'draft berubah' : 'draft sama dengan aktif',
+      ),
     );
     const usage = element('div', 'admin-profile-cell');
     usage.append(element('strong', '', p.sessions + ' sesi'), element('small', '', p.data_profiles + ' data profil'));
@@ -361,6 +365,7 @@ async function loadAdminProfiles() {
       state = element('strong', '', p.enabled ? 'Aktif' : 'Nonaktif');
     input.type = 'checkbox';
     input.checked = p.enabled;
+    input.disabled = !p.published && !p.enabled;
     input.setAttribute('aria-label', p.name + ' aktif untuk klien');
     input.onchange = () =>
       run(async () => {
@@ -387,12 +392,10 @@ async function loadAdminProfiles() {
         }
       });
     toggle.append(input, element('span'), state);
-    const studio = element('a', 'button secondary', 'Buka di AI Studio');
-    studio.href = p.dynamic
-      ? '/dashboard/admin/ai-builder?profile=' + encodeURIComponent(p.id)
-      : '/dashboard/admin/ai-studio?profile=' + encodeURIComponent(p.id);
-    studio.dataset.studio = '';
-    return [name, flow, usage, toggle, studio];
+    const editor = element('a', 'button secondary', 'Buka di Editor profil');
+    editor.href = '/dashboard/admin/ai-builder?profile=' + encodeURIComponent(p.id);
+    editor.dataset.editor = '';
+    return [name, flow, usage, toggle, editor];
   });
 }
 async function loadFailures(page = failuresPage) {

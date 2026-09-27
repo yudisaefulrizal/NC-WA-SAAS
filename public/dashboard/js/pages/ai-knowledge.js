@@ -1,15 +1,6 @@
-// Asisten AI, Knowledge: sumber data produk/pesanan, simpan otomatis per bidang, dan memuat pengaturan asisten.
+// Asisten AI, Knowledge: Perilaku AI dan Fallback Tim (simpan otomatis per bidang), tiket fallback sesi, dan memuat
+// pengaturan asisten. Isi bisnis ada di koleksi data profil, dikelola di halaman data koleksi.
 let assistantLoad = 0;
-const sourceKinds = ['products', 'orders'];
-const profileFields = ['usaha', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq'];
-function sourceVisibility() {
-  for (const kind of sourceKinds) {
-    const external = $('ai-form').elements[kind + '_mode'].value === 'endpoint';
-    $('ai-' + kind + '-endpoint').hidden = !external;
-    $('ai-form').elements[kind + '_endpoint'].required = external;
-    if (external) $('ai-' + kind + '-endpoint').closest('details').open = true;
-  }
-}
 // Simpan otomatis: setiap bidang menyimpan dirinya sendiri dengan jeda, bukan satu tombol "Simpan semua tab". Timer
 // per elemen membuat mengetik di satu kolom tidak pernah mengulang simpanan kolom lain yang sedang menunggu.
 const autosaveTimers = new WeakMap();
@@ -58,10 +49,6 @@ function debounceAutosave(el, field, value, delay = 800) {
     setTimeout(() => run(() => autosaveField(field, value)), delay),
   );
 }
-for (const field of profileFields) {
-  const el = $('ai-form').elements['profile_' + field];
-  el.oninput = () => debounceAutosave(el, field, el.value);
-}
 {
   const el = $('ai-form').elements.behavior;
   el.oninput = () => debounceAutosave(el, 'behavior', el.value);
@@ -71,26 +58,6 @@ for (const field of profileFields) {
   el.oninput = () => debounceAutosave(el, 'fallback_number', el.value);
 }
 $('ai-form').elements.fallback_notify.onchange = e => run(() => autosaveField('fallback_notify', e.target.checked));
-for (const kind of sourceKinds) {
-  const sourceValue = () => ({
-    mode: $('ai-form').elements[kind + '_mode'].value,
-    endpoint: $('ai-form').elements[kind + '_endpoint'].value,
-    token: $('ai-form').elements[kind + '_token'].value || undefined,
-    clear_token: $('ai-form').elements[kind + '_clear_token'].checked,
-  });
-  $('ai-form').elements[kind + '_mode'].onchange = () => {
-    sourceVisibility();
-    run(() => autosaveField(kind + '_source', sourceValue()));
-  };
-  $('ai-form').elements[kind + '_clear_token'].onchange = () =>
-    run(() => autosaveField(kind + '_source', sourceValue()));
-  const endpointEl = $('ai-form').elements[kind + '_endpoint'];
-  endpointEl.oninput = () => debounceAutosave(endpointEl, kind + '_source', sourceValue());
-  const tokenEl = $('ai-form').elements[kind + '_token'];
-  tokenEl.oninput = () => {
-    if (tokenEl.value) debounceAutosave(tokenEl, kind + '_source', sourceValue());
-  };
-}
 // keepFocus:true (respons simpan otomatis) melewati bidang yang sedang diketik, supaya balasan dari ketikan pengguna
 // sendiri tidak menimpa apa yang masih diketiknya.
 function applyAssistantConfig(config, { keepFocus = false } = {}) {
@@ -98,29 +65,12 @@ function applyAssistantConfig(config, { keepFocus = false } = {}) {
   const setValue = (el, value) => {
     if (el !== active) el.value = value;
   };
-  for (const field of profileFields) setValue($('ai-form').elements['profile_' + field], config.profile?.[field] ?? '');
   setValue($('ai-form').elements.behavior, config.behavior ?? '');
-  const edu = config.edu;
-  setValue($('ai-form').elements.edu_lembaga, edu?.lembaga ?? '');
-  setValue($('edu-jadwal'), edu?.jadwal ?? '');
-  eduJadwalCount();
   setValue($('ai-form').elements.fallback_number, config.fallback_number ?? '');
   if ($('ai-form').elements.fallback_notify !== active)
     $('ai-form').elements.fallback_notify.checked = Boolean(config.fallback_notify);
   // Data profil tidak punya saklar AI sendiri; hanya pengaturan sesi yang memilikinya.
   if ('enabled' in config) $('ai-session-enabled-field').value = config.enabled ? 'on' : '';
-  for (const kind of sourceKinds) {
-    const src = config[kind + '_source'] || { mode: 'builtin', endpoint: '', has_token: false };
-    if ($('ai-form').elements[kind + '_mode'] !== active) $('ai-form').elements[kind + '_mode'].value = src.mode;
-    setValue($('ai-form').elements[kind + '_endpoint'], src.endpoint);
-    // Kolom token selalu kosong saat dibaca ulang (secret yang tersimpan tidak pernah dikirim ke browser); bila pengguna
-    // sedang mengisinya, biarkan supaya ketikannya tidak terhapus oleh respons simpan.
-    if ($('ai-form').elements[kind + '_token'] !== active) $('ai-form').elements[kind + '_token'].value = '';
-    if ($('ai-form').elements[kind + '_clear_token'] !== active)
-      $('ai-form').elements[kind + '_clear_token'].checked = false;
-    $('ai-' + kind + '-token-status').textContent = src.has_token ? 'Token tersimpan terenkripsi.' : 'Tanpa token.';
-  }
-  sourceVisibility();
 }
 async function loadAssistant() {
   const generation = ++assistantLoad,
@@ -131,17 +81,16 @@ async function loadAssistant() {
   for (const control of controls) control.disabled = true;
   renderAIView();
   $('ai-trial-session').value = aiView === 'sessions' ? id : '';
-  // Knowledge, produk, dan pesanan milik data profil tujuan; tanpa data profil tidak ada yang bisa disunting.
+  // Perilaku dan fallback milik data profil tujuan; tanpa data profil tidak ada yang bisa disunting.
   const target = aiTarget(),
     sessions = aiView === 'sessions';
-  $('ai-product-add').disabled = $('ai-order-add').disabled = true;
   try {
     const config =
       sessions && id
         ? await api('/sessions/' + encodeURIComponent(id) + '/ai')
         : !sessions && target
           ? await api(profileBase(target))
-          : { enabled: false, profile: {}, behavior: '' };
+          : { enabled: false, behavior: '' };
     if (generation !== assistantLoad) return;
     applyAssistantConfig(config);
     if (!sessions || !id) {
@@ -151,17 +100,67 @@ async function loadAssistant() {
       renderChatList();
       renderChatView();
     }
-    await Promise.all([
-      sessions && id ? loadConversations() : null,
-      // Tester AI tidak punya data selain Peran pelanggan, yang sudah dimuat bersama pengaturan asisten.
-      target && aiTargetType() === 'pendidikan' ? loadEduData(generation) : null,
-      target && aiTargetType() === 'cs' ? loadAIData(generation) : null,
-    ]);
-    if (!target) for (const name of ['ai-products', 'ai-orders', 'ai-fallbacks']) $(name).replaceChildren();
+    await Promise.all([sessions && id ? loadConversations() : null, sessions && target ? loadFallbacks() : null]);
+    if (!sessions || !target) $('ai-fallbacks').replaceChildren();
   } finally {
-    if (generation === assistantLoad) {
-      for (const control of controls) control.disabled = !target;
-      $('ai-product-add').disabled = $('ai-order-add').disabled = !target;
-    }
+    if (generation === assistantLoad) for (const control of controls) control.disabled = !target;
   }
 }
+// Tiket fallback milik pelanggan sebuah sesi; data profil yang dikelola langsung hanya mengatur nomor tim.
+let aiFallbacksPage = 1,
+  aiFallbacksLoading = false;
+async function loadFallbacks(
+  base = (() => {
+    const id = $('ai-session').value;
+    return id && aiView === 'sessions' ? '/sessions/' + encodeURIComponent(id) + '/ai' : null;
+  })(),
+  page = aiFallbacksPage,
+) {
+  if (!base || aiFallbacksLoading) return;
+  aiFallbacksLoading = true;
+  $('ai-fallbacks-prev').disabled = $('ai-fallbacks-next').disabled = true;
+  try {
+    const result = await api(base + '/fallbacks?page=' + page);
+    aiFallbacksPage = result.page;
+    table('ai-fallbacks', ['ID', 'Pelanggan', 'Status', 'Pertanyaan', 'Dibuat', 'Tindakan'], result.items, row => {
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+      if (row.status === 'waiting')
+        actions.append(
+          button('Jawab', async () => {
+            const answer = prompt('Jawaban untuk pelanggan:');
+            if (!answer?.trim()) return;
+            await api(base + '/fallbacks/' + encodeURIComponent(row.id) + '/answer', 'POST', { answer });
+            await loadFallbacks(base);
+          }),
+        );
+      actions.append(
+        button('Hapus', async () => {
+          if (!confirm('Hapus tiket fallback ini?')) return;
+          await api(base + '/fallbacks/' + encodeURIComponent(row.id), 'DELETE');
+          await loadFallbacks(base);
+        }),
+      );
+      return [
+        row.id,
+        row.customer,
+        row.status,
+        row.question,
+        new Date(row.created_at).toLocaleString('id-ID'),
+        actions,
+      ];
+    });
+    $('ai-fallbacks-page').textContent =
+      'Halaman ' + result.page + ' dari ' + result.pages + ' · ' + result.total + ' tiket';
+    $('ai-fallbacks-prev').disabled = result.page <= 1;
+    $('ai-fallbacks-next').disabled = result.page >= result.pages;
+  } catch (error) {
+    $('ai-fallbacks-prev').disabled = aiFallbacksPage <= 1;
+    $('ai-fallbacks-next').disabled = false;
+    throw error;
+  } finally {
+    aiFallbacksLoading = false;
+  }
+}
+$('ai-fallbacks-prev').onclick = () => run(() => loadFallbacks(undefined, aiFallbacksPage - 1));
+$('ai-fallbacks-next').onclick = () => run(() => loadFallbacks(undefined, aiFallbacksPage + 1));

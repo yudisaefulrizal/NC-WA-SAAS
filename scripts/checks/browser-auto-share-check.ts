@@ -10,6 +10,9 @@ import assert from 'node:assert/strict';
 import { db } from '../../src/libraries/db.js';
 import { digest } from '../../src/libraries/security.js';
 import { ai } from '../../src/components/ai/domain/service.js';
+import { blankDefinition } from '../../src/components/ai/domain/builder/definition.js';
+import { createGraph, saveGraph } from '../../src/components/ai/domain/builder/store.js';
+import { setProfileEnabled } from '../../src/components/ai/domain/profiles/registry.js';
 import { createGateway } from '../../src/http/gateway.js';
 import { screenshots } from './screenshots.js';
 
@@ -41,7 +44,8 @@ const server = createApp(gateway).listen(port, '127.0.0.1');
 const account = randomUUID(),
   token = randomUUID(),
   customer = '628123456789';
-let browser;
+let browser,
+  graphId = '';
 try {
   await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)', [
     account,
@@ -68,7 +72,13 @@ try {
     (await context.request.post(origin + '/sessions', { headers: { Origin: origin }, data: { id: 'shop' } })).status(),
     200,
   );
-  await ai.saveAssistant(account, 'shop', { enabled: true, profile: {}, behavior: '' });
+  // Sesi memakai data profil dari graf sederhana yang diterbitkan, supaya AI-nya menyala.
+  const graph = await createGraph(account, blankDefinition('Profil browser'));
+  graphId = graph.id;
+  await saveGraph(account, graph.id, { revision: graph.revision }, true);
+  await setProfileEnabled(account, graph.id, true);
+  const data = await ai.createDataProfile(account, { profile_type: graph.id, name: 'Toko' });
+  await ai.attachProfile(account, 'shop', { data_profile_id: data.id, enabled: true });
   await ai.conversation(account, 'shop', customer, { paused: true });
   const page = await context.newPage(),
     errors: string[] = [];
@@ -154,6 +164,8 @@ try {
   await new Promise<void>(r => server.close(() => r()));
   await db.execute('DELETE FROM audit_events WHERE account_id=?', [account]);
   await db.execute('DELETE FROM accounts WHERE id=?', [account]);
+  await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [graphId]);
+  await db.execute('DELETE FROM ai_profile_types WHERE id=?', [graphId]);
   await db.end();
   await rm(temporary, { recursive: true, force: true });
 }

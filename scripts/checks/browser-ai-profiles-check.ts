@@ -1,6 +1,5 @@
 // Pemeriksaan browser multi-profil: kartu dan strip sesi, memasang data profil baru dari dialog, daftar Data Profil
-// dan mengelolanya langsung, mencabut, halaman Profil AI pemilik, dan pemilih profil AI Studio, di lebar desktop
-// dan ponsel.
+// dan mengelolanya langsung, mencabut, dan halaman Profil AI pemilik, di lebar desktop dan ponsel.
 import { chromium } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -11,6 +10,9 @@ import assert from 'node:assert/strict';
 import { db } from '../../src/libraries/db.js';
 import { digest } from '../../src/libraries/security.js';
 import { ai } from '../../src/components/ai/domain/service.js';
+import { blankDefinition } from '../../src/components/ai/domain/builder/definition.js';
+import { createGraph, saveGraph } from '../../src/components/ai/domain/builder/store.js';
+import { setProfileEnabled } from '../../src/components/ai/domain/profiles/registry.js';
 import { createGateway } from '../../src/http/gateway.js';
 import { basicWallet } from '../../src/components/billing/domain/plans.js';
 import { screenshots } from './screenshots.js';
@@ -60,7 +62,8 @@ const until = async <T>(
     await page.waitForTimeout(150);
   }
 };
-let browser;
+let browser,
+  graphId = '';
 try {
   await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)', [
     client,
@@ -105,8 +108,13 @@ try {
       );
     await context.close();
   }
-  const kopi = await ai.createDataProfile(client, { profile_type: 'cs', name: 'Toko Kopi Senja' });
-  await ai.saveDataProfileField(client, kopi.id, 'usaha', 'Toko Kopi Senja, Bandung');
+  // Profil yang dipilih klien: graf "Kafe" yang diterbitkan dan dinyalakan pemilik.
+  const graph = await createGraph(owner, blankDefinition('Kafe'));
+  graphId = graph.id;
+  await saveGraph(owner, graph.id, { revision: graph.revision }, true);
+  await setProfileEnabled(owner, graph.id, true);
+  const kopi = await ai.createDataProfile(client, { profile_type: graph.id, name: 'Toko Kopi Senja' });
+  await ai.saveDataProfileField(client, kopi.id, 'behavior', 'Ramah, panggil pelanggan Kak');
   for (const session of ['toko-utama', 'cabang-dago'])
     await ai.attachProfile(client, session, { data_profile_id: kopi.id, enabled: true });
   await mkdir(screenshots, { recursive: true });
@@ -115,13 +123,13 @@ try {
   const { page, errors, context } = await open(clientToken, '/dashboard/ai');
   const strip = page.locator('#ai-profile-strip');
   await strip.getByText('Toko Kopi Senja').waitFor();
-  assert.match(await strip.innerText(), /memakai profil CS Usaha dengan data profil Toko Kopi Senja/);
+  assert.match(await strip.innerText(), /memakai profil Kafe dengan data profil Toko Kopi Senja/);
   assert.match(await strip.innerText(), /dipakai juga oleh cabang-dago/);
   assert.equal(
     await page.locator('.ai-session-card.selected .ai-session-profile').innerText(),
-    'CS USAHA\nToko Kopi Senja',
+    'KAFE\nToko Kopi Senja',
   );
-  assert.equal(await page.locator('textarea[name=profile_usaha]').inputValue(), 'Toko Kopi Senja, Bandung');
+  assert.equal(await page.locator('textarea[name=behavior]').inputValue(), 'Ramah, panggil pelanggan Kak');
   await page.locator('#ai-session-detail').screenshot({ path: join(screenshots, 'profiles-session.png') });
   // Sesi tanpa profil hanya menawarkan tab sesi dan cara memasang profil.
   for (let i = 0; i < 5 && !(await strip.innerText()).includes('belum memakai'); i++) {
@@ -150,13 +158,14 @@ try {
   assert.deepEqual(promo.sessions, ['promo-baru']);
   assert.equal((await ai.assistant(client, 'promo-baru')).enabled, false);
   assert.ok(await page.locator('[data-ai-tab="knowledge"]').isVisible());
-  // Knowledge yang diketik di sini tersimpan otomatis ke data profil yang terpasang.
-  await page.locator('textarea[name=profile_usaha]').fill('Promo khusus Lebaran');
+  // Perilaku yang diketik di sini tersimpan otomatis ke data profil yang terpasang.
+  await page.locator('[data-knowledge-tab="behavior"]').click();
+  await page.locator('textarea[name=behavior]').fill('Promo khusus Lebaran');
   await until(
     page,
     async id => {
       const r = await fetch('/ai/data-profiles/' + id);
-      return (await r.json()).profile.usaha === 'Promo khusus Lebaran';
+      return (await r.json()).behavior === 'Promo khusus Lebaran';
     },
     promo.id,
     5000,
@@ -166,7 +175,7 @@ try {
   await strip.getByText('Sesi ini belum memakai profil AI').waitFor();
   assert.deepEqual((await ai.dataProfiles(client)).find(p => p.id === promo.id)!.sessions, []);
 
-  // Tampilan Data Profil: daftar, lalu kelola langsung data profil yang tidak terpasang dan tambahkan produk.
+  // Tampilan Data Profil: daftar, lalu kelola langsung data profil yang tidak terpasang.
   await page.locator('[data-ai-view="profiles"]').click();
   const card = page.locator('.ai-profile-card', { hasText: 'Promo Lebaran' });
   await card.waitFor();
@@ -178,23 +187,13 @@ try {
   await page.locator('#ai-profiles-view').screenshot({ path: join(screenshots, 'profiles-list.png') });
   await card.getByRole('button', { name: 'Kelola isi' }).click();
   await page.locator('#ai-manage-name', { hasText: 'Promo Lebaran' }).waitFor();
-  assert.deepEqual(await page.locator('[data-ai-tab]:visible').allTextContents(), [
-    'Knowledge',
-    'Pesanan Masuk',
-    'Uji Coba',
-  ]);
+  assert.deepEqual(await page.locator('[data-ai-tab]:visible').allTextContents(), ['Knowledge', 'Uji Coba']);
   assert.equal(await page.locator('#ai-session-picker').isHidden(), true);
-  await page.locator('[data-knowledge-tab="products"]').click();
-  await page.locator('#ai-product-add').click();
-  const product = page.locator('#ai-product-form');
-  await product.locator('[name=name]').fill('Ketupat');
-  await product.locator('[name=price]').fill('15000');
-  await product.locator('[name=stock]').fill('20');
-  await product.getByRole('button', { name: 'Simpan produk' }).click();
-  await page.locator('#ai-products').getByText('Ketupat').waitFor();
-  assert.equal((await ai.dataProfiles(client)).find(p => p.id === promo.id)!.products, 1);
+  // Isi bisnis dikelola di halaman data koleksi milik data profil ini.
+  await page.locator('[data-knowledge-tab="records"]').click();
+  assert.equal(await page.locator('#ai-records-link').getAttribute('href'), '/dashboard/ai-data?profile=' + promo.id);
   await page.locator('#ai-manage-back').click();
-  await card.filter({ hasText: '1 produk' }).waitFor();
+  await card.filter({ hasText: '0 record' }).waitFor();
   // Buat dari daftar.
   await page.locator('#ai-profile-new').click();
   await page.locator('#ai-profile-create-form [name=name]').fill('Laundry Bersih');
@@ -221,51 +220,37 @@ try {
     await context.close();
   }
 
-  // Pemilik: halaman Profil AI mengatur ketersediaan; AI Studio menyunting profil yang dipilih.
+  // Pemilik: halaman Profil AI mengatur ketersediaan dan membuka profil di Editor profil.
   {
     const { page, errors, context } = await open(ownerToken, '/dashboard/admin/profiles');
-    const row = page.locator('#admin-profiles-list tr', { hasText: 'CS Usaha' });
+    const row = page.locator('#admin-profiles-list tr', { hasText: 'Kafe' });
     await row.waitFor();
-    assert.match(await row.innerText(), /3 sesi|2 sesi/);
+    assert.match(await row.innerText(), /2 sesi/);
+    assert.equal(
+      await row.getByRole('link', { name: 'Buka di Editor profil' }).getAttribute('href'),
+      '/dashboard/admin/ai-builder?profile=' + graphId,
+    );
     await row.locator('label.admin-profile-toggle').click();
     await row.getByText('Nonaktif', { exact: true }).waitFor();
-    assert.deepEqual(
-      (await (await context.request.get(origin + '/api/admin/ai/profiles')).json()).map((p: any) => [p.id, p.enabled]),
-      [
-        ['cs', false],
-        ['pendidikan', false],
-        ['tester', false],
-      ],
+    const listed = (await (await context.request.get(origin + '/api/admin/ai/profiles')).json()).find(
+      (p: any) => p.id === graphId,
     );
-    await page
-      .locator('#admin-profiles-list tr', { hasText: 'CS Usaha' })
-      .locator('label.admin-profile-toggle')
-      .click();
-    await page
-      .locator('#admin-profiles-list tr', { hasText: 'CS Usaha' })
-      .getByText('Aktif', { exact: true })
-      .waitFor();
+    assert.equal(listed.enabled, false);
+    await page.locator('#admin-profiles-list tr', { hasText: 'Kafe' }).locator('label.admin-profile-toggle').click();
+    await page.locator('#admin-profiles-list tr', { hasText: 'Kafe' }).getByText('Aktif', { exact: true }).waitFor();
     assert.deepEqual(errors, []);
     await context.close();
   }
   {
     const { page, errors, context } = await open(ownerToken, '/dashboard/admin/profiles', 390, 844);
     await page.locator('#admin-menu-toggle').click();
-    await page.locator('#adminsubmenu a', { hasText: 'AI Studio' }).waitFor();
+    await page.locator('#adminsubmenu a', { hasText: 'Editor profil' }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.deepEqual(errors, []);
     await context.close();
   }
-  {
-    const { page, errors, context } = await open(ownerToken, '/dashboard/admin/ai-studio?profile=cs');
-    await page.locator('#profile-status', { hasText: 'Aktif untuk klien' }).waitFor();
-    assert.equal(await page.locator('#profile-select').inputValue(), 'cs');
-    assert.equal(await page.locator('#canvas-profile').innerText(), 'CS Usaha');
-    assert.deepEqual(errors, []);
-    await context.close();
-  }
   console.log(
-    'Multi-profile UI: session strip, attach dialog, Data Profil, manage, detach, owner Profil AI and AI Studio checks passed on desktop and phone',
+    'Multi-profile UI: session strip, attach dialog, Data Profil, manage, detach, and owner Profil AI checks passed on desktop and phone',
   );
 } finally {
   await browser?.close();
@@ -275,6 +260,8 @@ try {
     await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
     await db.execute('DELETE FROM accounts WHERE id=?', [id]);
   }
+  await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [graphId]);
+  await db.execute('DELETE FROM ai_profile_types WHERE id=?', [graphId]);
   await db.end();
   await rm(temporary, { recursive: true, force: true });
 }

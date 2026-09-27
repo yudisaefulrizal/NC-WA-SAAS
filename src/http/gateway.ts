@@ -14,13 +14,11 @@ import {
 import {
   aiRoutes,
   ai as defaultAI,
-  ProductImageStore,
   customerOf,
   onChatChange,
   recordIncoming,
   recordOutgoing,
   updateStatus,
-  eduData,
 } from '../components/ai/index.js';
 import { autoShareRouter, createAutoShare, AssetStore } from '../components/auto-share/index.js';
 import { record } from '../libraries/validation.js';
@@ -213,15 +211,11 @@ export function createGateway(
     next();
   });
   const shareAssets = new AssetStore(paths.shareAssets, db);
-  const productImages = new ProductImageStore(paths.productImages);
-  ai.productImages = productImages;
-  // Dokumen CS Lembaga Pendidikan disimpan di samping foto produk, di bawah folder penyimpanan gateway ini.
-  eduData.store.root = paths.aiDocuments;
   const autoShare = createAutoShare(manager, shareAssets);
   router.use('/auto-share', autoShareRouter(autoShare));
   const routeContext = { pending, hooks, media, streams, ai };
   sessionRoutes(router, routeContext);
-  aiRoutes(router, { ai, productImages });
+  aiRoutes(router, { ai });
   sessionDetailRoutes(router, routeContext);
   let maintenance: ReturnType<typeof setInterval> | undefined;
   let refreshing: Promise<void> | undefined;

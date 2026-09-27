@@ -8,13 +8,8 @@ function sessionChips(sessions) {
   for (const id of sessions) chips.append(element('span', 'ai-session-chip', id));
   return chips;
 }
-// Isi sebuah data profil, dalam istilah profilnya sendiri.
-const profileCounts = p =>
-  p.profile_type === 'tester'
-    ? ['Pelanggan tiruan']
-    : p.profile_type === 'pendidikan'
-      ? [p.programs + ' program', p.documents + ' dokumen', p.contacts + ' kontak']
-      : [p.products + ' produk', p.orders + ' pesanan'];
+// Isi sebuah data profil: jumlah record di semua koleksinya.
+const profileCounts = p => [p.records + ' record'];
 function renderDataProfiles() {
   const list = $('ai-profiles-list');
   list.replaceChildren();
@@ -58,20 +53,7 @@ function renderDataProfiles() {
             'Cabut data profil ini dari sesi ' + p.sessions.join(', ') + ' sebelum menghapusnya.';
           return;
         }
-        if (
-          !confirm(
-            'Hapus data profil ' +
-              p.name +
-              '? ' +
-              (p.profile_type === 'tester'
-                ? 'Peran pelanggannya'
-                : p.profile_type === 'pendidikan'
-                  ? 'Profil lembaga, program, jadwal, dokumen, dan kontaknya'
-                  : 'Knowledge, produk, foto, dan pesanannya') +
-              ' ikut terhapus.',
-          )
-        )
-          return;
+        if (!confirm('Hapus data profil ' + p.name + '? Perilaku, record koleksi, dan file-nya ikut terhapus.')) return;
         await api(profileBase(p.id), 'DELETE');
         await loadDataProfiles();
         $('message').textContent = 'Data profil dihapus.';
@@ -109,7 +91,7 @@ function renderDataProfiles() {
   $('ai-profile-types-info').textContent = enabled.length
     ? 'Profil tersedia: ' +
       enabled.map(t => t.name).join(', ') +
-      '. Profil adalah alur AI siap pakai dari NC-WA; setiap data profil dibuat untuk satu profil. Profil lain muncul di sini setelah diaktifkan admin.'
+      '. Profil adalah alur AI yang disiapkan NC-WA; setiap data profil dibuat untuk satu profil. Profil lain muncul di sini setelah diaktifkan admin.'
     : 'Belum ada profil AI yang diaktifkan admin.';
   $('ai-profile-new').disabled = !enabled.length;
 }
@@ -128,22 +110,8 @@ form('ai-profile-create-form', async data => {
     const created = await api('/ai/data-profiles', 'POST', { profile_type: data.profile_type, name: data.name.trim() });
     $('ai-profile-create-dialog').close();
     await loadDataProfiles();
-    manageProfile(
-      aiDataProfiles.find(p => p.id === created.id) ?? {
-        ...created,
-        products: 0,
-        orders: 0,
-        programs: 0,
-        documents: 0,
-        contacts: 0,
-      },
-    );
-    $('message').textContent =
-      data.profile_type === 'tester'
-        ? 'Data profil dibuat. Tulis peran pelanggannya di Knowledge, lalu pasang ke sesi nomor tester.'
-        : data.profile_type === 'pendidikan'
-          ? 'Data profil dibuat. Isi profil lembaga, program, jadwal, dokumen, dan kontaknya, lalu pasang ke sesi.'
-          : 'Data profil dibuat. Isi knowledge dan produknya, lalu pasang ke sesi.';
+    manageProfile(aiDataProfiles.find(p => p.id === created.id) ?? { ...created, records: 0 });
+    $('message').textContent = 'Data profil dibuat. Isi perilaku dan data koleksinya, lalu pasang ke sesi.';
   } catch (e) {
     $('ai-profile-create-error').textContent = e.message;
     throw e;
@@ -358,11 +326,9 @@ async function openDuplicate(p) {
   form.reset();
   form.elements.name.value = ('Salinan ' + p.name).slice(0, 100);
   $('ai-profile-duplicate-error').textContent = '';
-  let owned = false;
-  if (p.profile_type.startsWith('g_'))
-    owned = await api('/api/ai/records/' + encodeURIComponent(p.id))
-      .then(d => d.collections.some(c => c.owner === 'customer'))
-      .catch(() => false);
+  const owned = await api('/api/ai/records/' + encodeURIComponent(p.id))
+    .then(d => d.collections.some(c => c.owner === 'customer'))
+    .catch(() => false);
   $('ai-profile-duplicate-customer').hidden = !owned;
   $('ai-profile-duplicate-dialog').showModal();
 }
@@ -386,14 +352,8 @@ $('ai-profile-duplicate-form').onsubmit = e => {
     $('ai-profile-duplicate-dialog').close();
     await loadDataProfiles();
     $('message').textContent =
-      p.profile_type === 'tester'
-        ? 'Data profil diduplikat beserta peran pelanggannya.'
-        : p.profile_type === 'pendidikan'
-          ? 'Data profil diduplikat beserta program, dokumen, dan kontaknya.'
-          : p.profile_type.startsWith('g_')
-            ? form.elements.copy_customer_records.checked && !$('ai-profile-duplicate-customer').hidden
-              ? 'Data profil diduplikat beserta seluruh record, termasuk milik pelanggan.'
-              : 'Data profil diduplikat beserta data umumnya.'
-            : 'Data profil diduplikat beserta produk dan fotonya.';
+      form.elements.copy_customer_records.checked && !$('ai-profile-duplicate-customer').hidden
+        ? 'Data profil diduplikat beserta seluruh record, termasuk milik pelanggan.'
+        : 'Data profil diduplikat beserta data umumnya.';
   });
 };

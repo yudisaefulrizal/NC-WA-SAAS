@@ -19,9 +19,7 @@ import * as store from '../../../src/components/ai/domain/builder/store.js';
 import { templates } from '../../../src/components/ai/domain/builder/templates.js';
 import { runGraph, interpolate } from '../../../src/components/ai/domain/builder/engine.js';
 import { simulate } from '../../../src/components/ai/domain/builder/simulation.js';
-import { setProfileEnabled, activeWorkflow } from '../../../src/components/ai/domain/profiles/registry.js';
-import { runAgents } from '../../../src/components/ai/domain/pipeline/runner.js';
-import type { AgentWorkflow } from '../../../src/components/ai/domain/pipeline/models.js';
+import { setProfileEnabled, activeGraph } from '../../../src/components/ai/domain/profiles/registry.js';
 const owner = randomUUID(),
   client = randomUUID(),
   other = randomUUID(),
@@ -40,7 +38,6 @@ const scope = {
   session: 'test',
   customer: '628001',
   requestId: randomUUID(),
-  knowledge: '',
   fallbackEnabled: true,
 };
 before(async () => {
@@ -124,7 +121,7 @@ test('Draft revision conflicts and immutable published versions protect active e
   await store.saveGraph(owner, g.id, { revision: saved.revision }, true);
   assert.equal((await store.version(g.id, 1)).name, g.draft.name);
   assert.equal((await store.versions(g.id)).length, 2);
-  assert.equal(((await activeWorkflow(g.id)) as AgentWorkflow).graph?.name, 'Updated');
+  assert.equal((await activeGraph(g.id)).name, 'Updated');
 });
 test('Unpublished profiles cannot be enabled', async () => {
   const g = await store.createGraph(owner, blankDefinition());
@@ -206,7 +203,7 @@ test('Relations stay within a data profile; cloning remaps references and delete
   assert.notEqual(copiedParent.id, parent.id);
   assert.equal(copiedChild.data.parent, copiedParent.id);
 });
-test('Runtime executes configured graph instead of legacy router and persists context', async () => {
+test('A graph run leaves the Context summary in the config for the next message', async () => {
   const d = blankDefinition();
   const context: GraphNode = { ...d.nodes[1], id: 'context', type: 'context', prompt: 'Ringkas', x: 600 };
   context.memory = 'memory';
@@ -214,16 +211,19 @@ test('Runtime executes configured graph instead of legacy router and persists co
   d.edges[1].target = 'context';
   d.edges.push({ id: 'e3', source: 'context', port: 'next', target: 'output' });
   const calls: string[] = [];
-  const config = { ...defaults, workflow: { graph: d, nodes: {} } };
-  const answer = await runAgents(
+  const config = { ...defaults };
+  const answer = await runGraph(
+    d,
     async c => {
       calls.push(c.call_role!);
       return c.call_role === 'context' ? 'pelanggan-selesai-bertanya' : '{"answer":"Baik"}';
     },
     config,
     [{ role: 'user', content: 'Halo' }],
-    100,
     scope,
+    null,
+    undefined,
+    100,
   );
   assert.equal(answer.answer, 'Baik');
   assert.deepEqual(calls, ['agent', 'context']);
@@ -270,6 +270,46 @@ test('JEV router follows choice and invokes only tools granted to the selected a
     ),
     /ai_invalid_tool/,
   );
+});
+test('Router links only the pending tickets it selects, and only those reach the agent', async () => {
+  const d = templates()[0].definition;
+  const pendingFallbacks = [
+    { id: 'FB-A', question: 'Persetujuan diskon khusus' },
+    { id: 'FB-B', question: 'Penggantian bingkai rusak' },
+  ];
+  for (const selected of [[], ['FB-A'], ['FB-A', 'FB-A']]) {
+    const result = await runGraph(
+      d,
+      async (c, m) => {
+        if (c.call_role === 'router') {
+          assert.ok(m[1].content.includes('FB-A') && m[1].content.includes('FB-B'));
+          return JSON.stringify({ branch: 'sapaan', fallback_terkait: selected });
+        }
+        const prompt = m.map(x => x.content).join('\n');
+        assert.equal(prompt.includes('Persetujuan diskon khusus'), selected.length > 0);
+        assert.equal(prompt.includes('Penggantian bingkai rusak'), false);
+        return '{"answer":"Baik"}';
+      },
+      { ...defaults },
+      [{ role: 'user', content: 'Halo lagi' }],
+      { ...scope, pendingFallbacks },
+      null,
+    );
+    assert.equal(result.answer, 'Baik');
+  }
+  // Tiket yang tidak ada, bentuk yang salah, atau pilihan yang dilewati padahal ada tiket menunggu ditolak.
+  for (const selected of [['FB-OTHER'], 'FB-A', undefined])
+    await assert.rejects(
+      runGraph(
+        d,
+        async () => JSON.stringify({ branch: 'sapaan', fallback_terkait: selected }),
+        { ...defaults },
+        [{ role: 'user', content: 'Halo' }],
+        { ...scope, pendingFallbacks: [{ id: 'FB-A', question: 'Diskon' }] },
+        null,
+      ),
+      /ai_invalid_route/,
+    );
 });
 test('Condition branches and abort signal bypass model calls', async () => {
   const d = blankDefinition();

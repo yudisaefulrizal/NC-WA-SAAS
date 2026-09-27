@@ -93,80 +93,9 @@ try {
   await page.locator('#sendresult').filter({ hasText: 'browser-fixture' }).waitFor();
   await page.locator('.tabs a[href="/dashboard/ai"]').click();
   await page.locator('#ai-session option[value="shop"]').waitFor({ state: 'attached' });
-  await page.locator('#ai-session').selectOption('shop');
-  await page.locator('[data-ai-tab="knowledge"]').click();
-  await page.locator('[data-knowledge-tab="lainnya"]').click();
-  await page.locator('[form=ai-form][name=profile_lainnya]').fill('Informasi bisnis <script>alert(1)</script>');
-  await page.locator('[data-ai-tab="behavior"]').click();
-  await page.locator('[form=ai-form][name=behavior]').fill('Ramah');
-  await page.locator('[data-ai-tab="products"]').click();
-  await page.locator('[form=ai-form][name=products_mode]').selectOption('builtin');
-  await page.locator('[data-ai-tab="orders"]').click();
-  await page.locator('[form=ai-form][name=orders_mode]').selectOption('builtin');
-  await page.locator('.ai-hero-actions button[form="ai-form"]').click();
-  await page.locator('#message').filter({ hasText: 'Pengaturan asisten tersimpan' }).waitFor();
-  await page.reload();
-  await page.locator('#ai-session').selectOption('shop');
-  await page.locator('[data-ai-tab="knowledge"]').click();
-  await page.locator('[data-knowledge-tab="lainnya"]').click();
-  await page.waitForFunction(() =>
-    document
-      .querySelector<HTMLTextAreaElement>('[form=ai-form][name=profile_lainnya]')
-      ?.value.includes('Informasi bisnis'),
-  );
-  await page.locator('[data-ai-tab="products"]').click();
-  await page.locator('#ai-tab-products:visible').waitFor();
-  assert.equal(await page.locator('[form=ai-form][name=products_mode]').inputValue(), 'builtin');
+  // Sesi tanpa data profil: AI Asisten menampilkan ajakan memasang profil, tanpa isi yang bisa disunting.
+  await page.locator('#ai-profile-strip').filter({ hasText: 'belum memakai profil AI' }).waitFor();
   assert.equal(await page.locator('#ai script').count(), 0);
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.locator('#ai-product-add').click();
-  await page.locator('#ai-product-form [name=id]').fill('P-UI');
-  await page.locator('#ai-product-form [name=name]').fill('Produk UI');
-  await page.locator('#ai-product-form [name=description]').fill('<script>alert(1)</script>');
-  await page.locator('#ai-product-form [name=price]').fill('150000');
-  await page.locator('#ai-product-form [name=stock]').fill('10');
-  await page.locator('#ai-product-form button').first().click();
-  await page.locator('#ai-products').filter({ hasText: 'Produk UI' }).waitFor();
-  await page.locator('#ai-products button').first().click();
-  assert.equal(await page.locator('#ai-product-form [name=id]').getAttribute('readonly'), '');
-  await page.locator('#ai-product-form [name=stock]').fill('8');
-  await page.locator('#ai-product-form button').first().click();
-  await page.locator('#message').filter({ hasText: 'Produk tersimpan' }).waitFor();
-  await page.locator('[data-ai-tab="orders"]').click();
-  await page.locator('#ai-tab-orders:visible').waitFor();
-  await page.locator('#ai-order-add').click();
-  await page.locator('#ai-order-form [name=customer]').fill('628123456789');
-  await page.locator('#ai-order-form [name=product_id]').fill('UNKNOWN');
-  await page.locator('#ai-order-form button').first().click();
-  await page.locator('#ai-order-form [role=alert]').filter({ hasText: 'Produk tidak tersedia' }).waitFor();
-  await page.locator('#ai-order-form [name=product_id]').fill('P-UI');
-  await page.locator('#ai-order-form [name=quantity]').fill('2');
-  await page.locator('#ai-order-form button').first().click();
-  await page.locator('#ai-orders').filter({ hasText: 'Produk UI × 2' }).waitFor();
-  await page.locator('#ai-orders button').first().click();
-  await page.locator('#ai-order-edit-form [name=status]').selectOption('diproses');
-  await page.locator('#ai-order-edit-form [name=notes]').fill('Siap diproses');
-  await page.locator('#ai-order-edit-form button').first().click();
-  await page.locator('#ai-orders').filter({ hasText: 'diproses' }).waitFor();
-  await page.locator('[data-ai-tab="products"]').click();
-  await page.locator('#ai-tab-products:visible').waitFor();
-  await page.locator('[form=ai-form][name=products_mode]').selectOption('endpoint');
-  await page.locator('[form=ai-form][name=products_endpoint]').fill('https://8.8.8.8/products');
-  await page.locator('.ai-hero-actions button[form="ai-form"]').click();
-  await page.locator('#message').filter({ hasText: 'Pengaturan asisten tersimpan' }).waitFor();
-  await page.reload();
-  await page.locator('#ai-session').selectOption('shop');
-  await page.locator('[data-ai-tab="products"]').click();
-  await page.locator('#ai-tab-products:visible').waitFor();
-  await page.waitForFunction(
-    () => document.querySelector<HTMLSelectElement>('[form=ai-form][name=products_mode]')?.value === 'endpoint',
-  );
-  await page.locator('[data-ai-tab="orders"]').click();
-  await page.locator('#ai-tab-orders:visible').waitFor();
-  assert.equal(await page.locator('[form=ai-form][name=orders_mode]').inputValue(), 'builtin');
-  assert.equal(await page.locator('#ai-products script').count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.setViewportSize({ width: 1280, height: 900 });

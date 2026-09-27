@@ -1,4 +1,4 @@
-// File untuk field File/gambar koleksi profil dinamis: unggah dari dashboard, unduh, salin saat duplikasi, dan
+// File untuk field File/gambar koleksi profil: unggah dari dashboard, unduh, salin saat duplikasi, dan
 // hapus saat record atau data profilnya dihapus. Batasnya sama dengan dokumen profil lain.
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';

@@ -12,16 +12,12 @@ import { sendBilled } from '../../billing/index.js';
 import { recordNote, recordOutgoing } from './chat.js';
 import { defaults } from './provider.js';
 import { fail, text } from './input-validation.js';
-import { composeKnowledge } from './profiles/cs/knowledge.js';
-import { faqLimit } from './profile-pipelines.js';
 import { transaction, lockAccount } from './transaction.js';
 import { parseMemory } from './memory.js';
 import type { AIService } from './service.js';
-import * as dataProfiles from './data-profiles.js';
 import * as assistantsSql from '../data-access/assistants-queries.js';
 import * as chatMessagesSql from '../data-access/chat-messages-queries.js';
 import * as conversationsSql from '../data-access/conversations-queries.js';
-import * as dataProfilesSql from '../data-access/data-profiles-queries.js';
 import * as fallbacksSql from '../data-access/fallbacks-queries.js';
 import * as messageOriginsSql from '../data-access/message-origins-queries.js';
 import * as sessionDataSql from '../data-access/session-data-queries.js';
@@ -172,23 +168,16 @@ export async function applyManualReply(
   customer: string,
   content: string,
 ) {
-  const [assistant] = await assistantsSql.findEnabledWithType(c, [account, session]);
+  const [assistant] = await assistantsSql.findEnabled(c, [account, session]);
   if (!assistant[0]?.enabled) return;
   const [settings] = await settingsSql.shareMemoryLimit(c);
   const limit = settings[0]?.memory_limit ?? defaults.memory_limit;
   await conversationsSql.ensure(c, [account, session, customer]);
   const [rows] = await conversationsSql.lockForReply(c, [account, session, customer]);
-  const earlier = parseMemory(rows[0].messages);
-  const memory = [...earlier, ...(content ? [{ role: 'assistant' as const, content }] : [])].slice(-limit);
-  // Tester AI: pesan manual adalah ucapan pelanggan tiruan itu sendiri, jadi memulai atau mengarahkan obrolan tanpa
-  // menjeda AI. Revisi dinaikkan supaya balasan yang sedang dibuat dibatalkan dan AI melanjutkan dari arahan ini;
-  // status Jeda tidak diubah, jadi obrolan yang dijeda tetap berhenti.
-  if (assistant[0].profile_type === 'tester') {
-    await conversationsSql.updateMessagesAndRevision(c, [JSON.stringify(memory), account, session, customer]);
-    if (!earlier.length && !rows[0].paused)
-      await recordNote(account, session, customer, 'Tester AI mulai menguji nomor ini', c);
-    return;
-  }
+  const memory = [
+    ...parseMemory(rows[0].messages),
+    ...(content ? [{ role: 'assistant' as const, content }] : []),
+  ].slice(-limit);
   await conversationsSql.pauseForManualReply(c, [JSON.stringify(memory), account, session, customer]);
   if (!rows[0].paused && !rows[0].full_auto)
     await recordNote(account, session, customer, 'AI dijeda karena ada balasan manual', c);
@@ -255,37 +244,6 @@ export async function removeFallback(svc: AIService, account: string, session: s
   const [result] = await fallbacksSql.deleteOwned(db, [id, account, session]);
   if (!result.affectedRows) throw new ApiError(404, 'fallback_not_found', 'Tiket fallback tidak tersedia.');
   return { ok: true };
-}
-export async function applyFallbackKnowledge(
-  svc: AIService,
-  account: string,
-  session: string,
-  id: string,
-  body: unknown,
-) {
-  if (!/^FB-[A-Z0-9]{8,48}$/.test(id)) throw fail('ID fallback tidak valid');
-  const content = text(object(body).content, 2000, 'Knowledge dari fallback');
-  if (!content) throw fail('Knowledge dari fallback wajib diisi');
-  return transaction(async c => {
-    await lockAccount(c, account);
-    const [tickets] = await fallbacksSql.lockStatus(c, [id, account, session]);
-    if (!tickets[0] || tickets[0].status !== 'resolved')
-      throw new ApiError(409, 'fallback_not_ready', 'Tiket harus sudah selesai sebelum diterapkan.');
-    const profile = await dataProfiles.ensureDataProfile(svc, c, account, session);
-    const [profiles] = await dataProfilesSql.lockFaq(c, [profile, account]);
-    const previous = String(profiles[0]?.profil_faq ?? ''),
-      faq = (previous ? previous + '\n\n' : '') + content,
-      limit = faqLimit(String(profiles[0]?.profile_type));
-    if (faq.length > limit)
-      throw fail(
-        'Bagian FAQ melebihi batas ' +
-          limit.toLocaleString('id-ID') +
-          ' karakter; kosongkan sebagian sebelum menambah lagi.',
-      );
-    await dataProfilesSql.updateFaq(c, [faq, profile, account]);
-    const knowledge = composeKnowledge({ faq });
-    return { ok: true, knowledge };
-  });
 }
 export async function updateConversation(
   svc: AIService,

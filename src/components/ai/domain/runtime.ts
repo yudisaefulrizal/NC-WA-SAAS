@@ -1,11 +1,9 @@
-// Runtime WhatsApp: mengantrekan pesan masuk per pelanggan, menjalankan pipeline profil, menagih kredit, mengirim
-// jawaban (beserta foto produk dan dokumen), dan menyimpan memori.
-import { type ModelRole, type AgentWorkflow, type AITraceEvent } from './pipeline/models.js';
-import { activeWorkflow, profileDefinition } from './profiles/registry.js';
+// Runtime WhatsApp: mengantrekan pesan masuk per pelanggan, menjalankan graf profil, menagih kredit, mengirim
+// jawaban (beserta media dari node Kirim media), dan menyimpan memori.
+import { type ModelRole, type AITraceEvent } from './pipeline/models.js';
+import { activeGraph, graphSystem } from './profiles/registry.js';
 import { transientAIError } from './pipeline/retry.js';
-import { runAgents, updateRouterContext } from './pipeline/runner.js';
-import { eduData, documentMarker, sentDocuments } from './profiles/pendidikan/tools.js';
-import { eduIdentity } from './profiles/pendidikan/profile.js';
+import { runGraph } from './builder/engine.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { request } from 'node:https';
 import { db } from '../../../libraries/db.js';
@@ -18,12 +16,11 @@ import { recordOutgoing } from './chat.js';
 import { AIMessage, defaults, provider, AITransport } from './provider.js';
 import { text } from './input-validation.js';
 import { countWords, aiFallback, creditCost } from './metering.js';
-import { profileFields, ProfileField, composeKnowledge } from './profiles/cs/knowledge.js';
 import { transaction, lockAccount } from './transaction.js';
 import type { QueuedMedia } from './builder/media.js';
 import { recordFilePath, uploadRecordFile, recordFileLimits } from './builder/record-files.js';
 import { receivesMedia } from './builder/definition.js';
-import type { ToolContext } from './pipeline/runner.js';
+import type { ToolContext } from './pipeline/scope.js';
 import { parseMemory } from './memory.js';
 import type { AIService } from './service.js';
 import * as conversations from './conversations.js';
@@ -42,7 +39,7 @@ export function incoming(
   session: string,
   message: IncomingMessage,
 ) {
-  // Teks selalu diproses; gambar dan dokumen hanya untuk profil dinamis yang punya node Terima media (dicek nanti).
+  // Teks selalu diproses; gambar dan dokumen hanya untuk graf yang punya node Terima media (dicek nanti).
   if (
     message.isGroup ||
     !/^\d{5,20}$/.test(message.from) ||
@@ -92,18 +89,17 @@ export async function handleMessage(
   session: string,
   message: IncomingMessage,
 ) {
-  // Menjalankan pipeline profil milik data profil sesi, selama pemilik menyalakan profil itu.
+  // Menjalankan graf terbit milik profil data profil sesi, selama pemilik menyalakan profil itu.
   const config = await svc.config();
   if (!config.secret) return;
   const assistant = await svc.assistant(account, session),
-    type = assistant.data_profile?.profile_type ?? '',
-    pipeline = type ? (await profileDefinition(type)).pipeline : undefined;
-  if (!assistant.enabled || !pipeline || !assistant.profile_enabled) return;
+    type = assistant.data_profile?.profile_type ?? '';
+  if (!assistant.enabled || !type || !assistant.profile_enabled) return;
+  const graph = await activeGraph(type);
   let incomingMedia: ToolContext['incomingMedia'];
   const attachment = message.type === 'text' ? undefined : message;
   if (attachment) {
-    const workflow = type.startsWith('g_') ? ((await activeWorkflow(type)) as AgentWorkflow) : undefined;
-    if (!workflow?.graph || !receivesMedia(workflow.graph)) return;
+    if (!receivesMedia(graph)) return;
     // Memori dan input alur memakai penanda lampiran ditambah keterangannya.
     message = { ...message, text: mediaText(message) };
   }
@@ -116,16 +112,6 @@ export async function handleMessage(
     if (existing[0]) return;
     const [current] = await assistantsSql.findForRuntime(c, [account, session, type]);
     if (!current[0]?.enabled) return;
-    // Knowledge CS diambil sekali di sini; tool pendidikan membaca data profil saat dijalankan.
-    const knowledge =
-      type === 'cs'
-        ? composeKnowledge(
-            Object.fromEntries(
-              profileFields.map(field => [field, String(current[0]['profil_' + field] ?? '')]),
-            ) as Record<ProfileField, string>,
-          )
-        : '';
-    const identity = type === 'pendidikan' ? eduIdentity(String(current[0].name)) : undefined;
     const [limits] = await settingsSql.shareMemoryLimit(c);
     await conversationsSql.ensure(c, [account, session, message.from]);
     const [conversations] = await conversationsSql.lockForMessage(c, [account, session, message.from]);
@@ -139,7 +125,7 @@ export async function handleMessage(
     const [pending] = await fallbacksSql.findWaitingForCustomer(c, [account, session, message.from]);
     const fallbackNumber = String(current[0].fallback_number ?? '');
     const system: AIMessage[] = [
-      { role: 'system', content: pipeline.system },
+      { role: 'system', content: graphSystem },
       ...([current[0].behavior] as string[]).filter(Boolean).map(content => ({ role: 'system' as const, content })),
     ];
     const messages = [...system, ...memory],
@@ -150,7 +136,6 @@ export async function handleMessage(
       Math.floor((wallet[0].balance - inputWords * config.input_rate) / config.output_rate),
     );
     if (inputWords > 12000 || maxWords < 1) return;
-    system[0].content = system[0].content.replace('300 kata', maxWords + ' kata');
     const reserved = creditCost(inputWords, maxWords, config.input_rate, config.output_rate);
     await walletsSql.debit(c, [reserved, account]);
     await usageSql.insertMessage(c, [
@@ -174,9 +159,7 @@ export async function handleMessage(
       maxWords,
       routerContext: conversations[0].router_context as string | null,
       revision: conversations[0].revision,
-      knowledge,
       behavior: current[0].behavior as string,
-      identity,
       pendingFallbacks: pending.map(row => ({ id: String(row.id), question: String(row.question) })),
       fallbackNumber,
       fallbackNotify: Boolean(current[0].fallback_notify),
@@ -187,13 +170,10 @@ export async function handleMessage(
   if (!prepared) return;
   // Lampiran baru diunduh setelah pesan pasti diproses (tidak dijeda, kredit cukup).
   if (attachment) incomingMedia = await storeIncoming(account, prepared.profileId, attachment);
-  config.workflow = (await activeWorkflow(type)) as AgentWorkflow;
   const jid = message.from + '@s.whatsapp.net';
   // Urutan yang dilihat pelanggan: jeda singkat, centang biru, lalu "mengetik..." selama jawaban dibuat.
   // Status dibaca/mengetik tidak dijamin, dan tidak pernah menambah pesan atau tagihan kredit.
-  // Tester AI menunggu lebih lama seperti orang membaca dulu, supaya dua bot tidak saling membalas secepat kilat
-  // (yang bisa dianggap spam oleh WhatsApp).
-  await svc.wait(type === 'tester' ? randomInt(3000, 8001) : randomInt(200, 1001));
+  await svc.wait(randomInt(200, 1001));
   await manager.read(session, jid, message.messageId).catch(() => {});
   await manager.typing(session, jid, 'composing').catch(() => {});
   // WhatsApp menghapus status "mengetik" setelah beberapa detik, jadi diperbarui terus sampai balasan terkirim.
@@ -209,7 +189,7 @@ export async function handleMessage(
     await manager.typing(session, jid, 'paused').catch(() => {});
   };
   try {
-    // Pengaturan asisten (knowledge/perilaku/fallback) bisa tersimpan otomatis di tengah proses; request yang sedang
+    // Pengaturan asisten (perilaku/fallback) bisa tersimpan otomatis di tengah proses; request yang sedang
     // berjalan diselesaikan dengan pengaturan saat mulai, tidak dibatalkan setiap kali ada suntingan.
     // Mematikan asisten adalah satu-satunya perubahan pengaturan yang langsung membatalkan proses berjalan.
     // Mengganti data profil sesi, atau pemilik mematikan profilnya, juga membatalkan.
@@ -289,16 +269,10 @@ export async function handleMessage(
       agent: string | null = null,
       generationFailed = false,
       fallback: { reason: string; question: string } | undefined;
-    let lastNode: string | undefined,
-      lastTraceError: string | undefined,
-      lastRawOutput: string | undefined,
-      pendingImageId: string | undefined;
-    // Dokumen yang dipilih lewat kirim_dokumen di giliran ini, dikirim sebelum jawaban; penanda di memori mencegah
-    // pengiriman ulang.
-    const alreadySent = sentDocuments(prepared.messages),
-      pendingDocuments: { id: string; filename: string }[] = [];
-    // File dari node Kirim media profil dinamis; dikirim hanya bila jawaban berhasil dan tidak diteruskan ke tim.
+    let lastNode: string | undefined, lastTraceError: string | undefined, lastRawOutput: string | undefined;
+    // File dari node Kirim media; dikirim hanya bila jawaban berhasil dan tidak diteruskan ke tim.
     let queuedMedia: QueuedMedia[] = [];
+    config.checkpoint = guard;
     config.onTrace = event => {
       trace?.(event);
       if (event.node === 'router' && event.state === 'routed')
@@ -310,11 +284,11 @@ export async function handleMessage(
       }
     };
     try {
-      const result = await runAgents(
+      const result = await runGraph(
+        graph,
         trackedTransport,
         config,
         prepared.messages,
-        prepared.maxWords,
         {
           account,
           profile: prepared.profileId,
@@ -324,56 +298,13 @@ export async function handleMessage(
           incomingMedia,
           serviceName: prepared.serviceName,
           requestId: id,
-          knowledge: prepared.knowledge,
           behavior: prepared.behavior,
           fallbackEnabled: true,
           pendingFallbacks: prepared.pendingFallbacks,
-          identity: prepared.identity,
-          sentDocuments: alreadySent,
-        },
-        {
-          execute: async (name, query, base) => {
-            await guard();
-            const context = { ...base, sentDocuments: [...alreadySent, ...pendingDocuments.map(d => d.filename)] };
-            const start = Date.now();
-            trace?.({ node: name, state: 'running', input: query });
-            try {
-              let result = await svc.tools.execute(name, query, context);
-              if (name === 'kirim_dokumen' && (result as { available?: boolean })?.available) {
-                if (pendingDocuments.length >= 3)
-                  result = { available: false, reason: 'Paling banyak tiga dokumen per jawaban.' };
-                else
-                  pendingDocuments.push({
-                    id: (result as { document_id: string }).document_id,
-                    filename: (result as { nama_file: string }).nama_file,
-                  });
-              }
-              trace?.({ node: name, state: 'done', output: result, duration_ms: Date.now() - start });
-              // Menentukan gambar hanyalah data; pengiriman WhatsApp terjadi setelah jawaban akhir pasti di bawah, jadi
-              // langkah tool berikutnya atau pengulangan ai_invalid_tool tidak meninggalkan gambar terkirim untuk
-              // giliran yang dibuang.
-              if (name === 'send_product_image' && (result as { available?: boolean; image_id?: string })?.available)
-                pendingImageId = (result as { image_id: string }).image_id;
-              return result;
-            } catch (error) {
-              if (name === 'create_order' || !transientAIError(error) || Date.now() >= deadline) {
-                trace?.({
-                  node: name,
-                  state: 'error',
-                  error: error instanceof Error ? error.message : 'unknown_error',
-                  duration_ms: Date.now() - start,
-                });
-                throw error;
-              }
-              await retryPause(0);
-              const result = await svc.tools.execute(name, query, context);
-              trace?.({ node: name, state: 'done', output: result, duration_ms: Date.now() - start });
-              return result;
-            }
-          },
         },
         prepared.routerContext,
-        pipeline,
+        undefined,
+        prepared.maxWords,
       );
       fallback = result.fallback;
       if ('media' in result && result.media) queuedMedia = result.media;
@@ -398,43 +329,8 @@ export async function handleMessage(
         ])
         .catch(() => {});
     }
-    // Context bersifat internal dan tidak ditagih. Ringkasan yang gagal mengosongkan context lama bila kiriman berhasil.
-    let routerContext: string | null = null;
-    const contextHistory =
-      config.context_memory_limit > 0
-        ? prepared.messages
-            .filter(m => m.role !== 'system')
-            .slice(0, -1)
-            .slice(-config.context_memory_limit)
-        : [];
-    if (!generationFailed)
-      try {
-        routerContext = await updateRouterContext(
-          trackedTransport,
-          config,
-          message.text,
-          answer,
-          contextHistory,
-          pipeline,
-        );
-      } catch (error) {
-        console.error('Pembaruan konteks router AI gagal.');
-        const errorCode = error instanceof Error ? error.message : 'unknown_error';
-        await agentFailuresSql
-          .insert(db, [
-            account,
-            session,
-            id,
-            'context',
-            (lastTraceError ?? errorCode).slice(0, 100),
-            message.text.slice(0, 4000),
-            lastModel ?? null,
-            lastMessages ? JSON.stringify(lastMessages) : null,
-            lastRawOutput?.slice(0, 65000) ?? null,
-            prepared.routerContext,
-          ])
-          .catch(() => {});
-      }
+    // Ringkasan node Context bersifat internal dan tidak ditagih; jawaban yang gagal tidak menyimpan ringkasan baru.
+    const routerContext = generationFailed ? null : (config.graph_context ?? null);
     const outputWords = generationFailed ? 0 : countWords(answer),
       charged = generationFailed
         ? 0
@@ -469,72 +365,7 @@ export async function handleMessage(
         ]);
     });
     let status = 'sent';
-    const sentMarkers: string[] = [];
     try {
-      // Dikirim sebelum jawaban teks supaya pelanggan melihat produknya sebelum penjelasannya. Tidak dijamin: gambar
-      // yang gagal tidak pernah menahan atau menggagalkan balasan teks sesudahnya.
-      if (!generationFailed && !fallback && pendingImageId) {
-        await guard();
-        const readImage = async (imageId: string) => {
-          const file = await svc.productImages.get(account, imageId);
-          return { path: file.path, mimetype: file.mimetype, cleanup: async () => {} };
-        };
-        const image = await sendBilled(
-          account,
-          manager,
-          session,
-          'media',
-          { to: message.from, type: 'image' as const, url: pendingImageId },
-          'ai_image_' + id,
-          readImage,
-          guard,
-        ).catch(() => undefined);
-        if (image)
-          await recordOutgoing(account, session, {
-            customer: message.from,
-            messageId: image.messageId,
-            origin: 'ai',
-            type: 'image',
-            text: '',
-          }).catch(() => {});
-      }
-      // Setiap dokumen adalah pesan tersendiri yang ditagih: gambar tampil sebagai foto, lainnya sebagai file dengan
-      // namanya.
-      if (!generationFailed && !fallback)
-        for (const [index, document] of pendingDocuments.entries()) {
-          await guard();
-          const readDocument = async () => {
-            const file = await eduData.store.file(account, document.id, prepared.profileId);
-            return { path: file.path, mimetype: file.mimetype, cleanup: async () => {} };
-          };
-          const file = await eduData.store.file(account, document.id, prepared.profileId).catch(() => undefined);
-          if (!file) continue;
-          const sent = await sendBilled(
-            account,
-            manager,
-            session,
-            'media',
-            {
-              to: message.from,
-              type: file.media_type,
-              url: document.id,
-              ...(file.media_type === 'document' ? { filename: file.filename } : {}),
-            },
-            'ai_doc_' + index + '_' + id,
-            readDocument,
-            guard,
-          ).catch(() => undefined);
-          if (sent) {
-            sentMarkers.push(documentMarker(document.filename));
-            await recordOutgoing(account, session, {
-              customer: message.from,
-              messageId: sent.messageId,
-              origin: 'ai',
-              type: file.media_type,
-              text: file.filename,
-            }).catch(() => {});
-          }
-        }
       // Satu pesan berbayar per file; gagal mengirim media tidak pernah menahan jawaban teks.
       const sendMedia = async (when: QueuedMedia['when']) => {
         if (generationFailed || fallback) return;
@@ -647,11 +478,9 @@ export async function handleMessage(
         const [limits] = await settingsSql.shareMemoryLimit(c);
         const [rows] = await conversationsSql.lockMessagesRevision(c, [account, session, message.from]);
         if (!rows[0] || rows[0].revision !== prepared.revision) return;
-        const memory = [
-          ...parseMemory(rows[0].messages),
-          ...sentMarkers.map(content => ({ role: 'assistant' as const, content })),
-          { role: 'assistant' as const, content: answer },
-        ].slice(-(limits[0]?.memory_limit ?? defaults.memory_limit));
+        const memory = [...parseMemory(rows[0].messages), { role: 'assistant' as const, content: answer }].slice(
+          -(limits[0]?.memory_limit ?? defaults.memory_limit),
+        );
         await conversationsSql.updateMessagesAndContext(c, [
           JSON.stringify(memory),
           routerContext,

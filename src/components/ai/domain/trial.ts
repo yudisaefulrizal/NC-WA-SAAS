@@ -1,10 +1,6 @@
-// Uji Coba: menjalankan satu pertanyaan lewat pipeline data profil tanpa WhatsApp, dengan menagih kredit AI.
-import { type AgentWorkflow } from './pipeline/models.js';
-import { activeWorkflow, enabledProfiles, profileDefinition } from './profiles/registry.js';
-import { runAgents } from './pipeline/runner.js';
-import { csPipeline } from './profiles/cs/pipeline.js';
-import { sentDocuments } from './profiles/pendidikan/tools.js';
-import { eduIdentity } from './profiles/pendidikan/profile.js';
+// Uji Coba: menjalankan satu pertanyaan lewat graf terbit data profil tanpa WhatsApp, dengan menagih kredit AI.
+import { activeGraph, enabledProfiles } from './profiles/registry.js';
+import { runGraph } from './builder/engine.js';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../../../libraries/security.js';
 import { ApiError } from '../../../libraries/errors.js';
@@ -36,9 +32,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
   if (!profile) throw new ApiError(409, 'no_profile', 'Pasang profil AI ke sesi ini terlebih dahulu.');
   if (!(await enabledProfiles()).has(profile.profile_type))
     throw new ApiError(409, 'profile_disabled', 'Profil AI ini sedang dinonaktifkan admin.');
-  config.workflow = (await activeWorkflow(profile.profile_type)) as AgentWorkflow;
-  const pipeline = (await profileDefinition(profile.profile_type)).pipeline,
-    identity = profile.profile_type === 'pendidikan' ? eduIdentity(profile.name) : undefined;
+  const graph = await activeGraph(profile.profile_type);
   const id = digest(JSON.stringify(['trial', account, session, randomUUID()]));
   const messages: AIMessage[] = [{ role: 'user', content: question }];
   const inputWords = countWords(question);
@@ -70,15 +64,13 @@ export async function trial(svc: AIService, account: string, body: unknown) {
   let answer: string,
     agent: string | null = null,
     generationFailed = false;
-  const documents: string[] = [];
   const media: { name: string; type: string; when: string }[] = [];
   try {
-    // Uji Coba tidak pernah mengirim WhatsApp; dokumen yang dipilih AI dicantumkan bersama jawabannya.
-    const result = await runAgents(
+    const result = await runGraph(
+      graph,
       svc.transport,
       config,
       messages,
-      prepared.maxWords,
       {
         account,
         profile: profile.id,
@@ -86,21 +78,12 @@ export async function trial(svc: AIService, account: string, body: unknown) {
         customer: '628000000000',
         serviceName: profile.name,
         requestId: id,
-        knowledge: assistant.knowledge,
         behavior: assistant.behavior,
-        identity,
         fallbackEnabled: false,
       },
-      {
-        execute: async (name, query, context) => {
-          const value = await svc.tools.execute(name, query, { ...context, sentDocuments: documents });
-          if (name === 'kirim_dokumen' && (value as { available?: boolean })?.available)
-            documents.push((value as { nama_file: string }).nama_file);
-          return value;
-        },
-      },
       null,
-      pipeline,
+      undefined,
+      prepared.maxWords,
     );
     answer = result.answer;
     agent = result.agent;
@@ -129,5 +112,5 @@ export async function trial(svc: AIService, account: string, body: unknown) {
   });
   if (generationFailed)
     throw new ApiError(502, 'ai_provider_failed', 'AI belum berhasil menjawab; periksa konfigurasi AI.');
-  return { answer, agent, balance: wallet, documents, media };
+  return { answer, agent, balance: wallet, media };
 }

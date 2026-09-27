@@ -1,16 +1,16 @@
-// Tes multi-profil: data profil dipakai bersama beberapa sesi, ganti/cabut, isolasi akun, integrasi lama,
-// menggandakan, dan profil yang dimatikan pemilik.
+// Tes multi-profil: data profil dipakai bersama beberapa sesi, ganti/cabut, isolasi akun, sesi tanpa data profil,
+// menggandakan, profil yang dimatikan pemilik, dan graf terbit yang dijalankan WhatsApp.
 import { blankDefinition } from '../../../src/components/ai/domain/builder/definition.js';
 import { createGraph, saveGraph } from '../../../src/components/ai/domain/builder/store.js';
 import { uploadRecordFile } from '../../../src/components/ai/domain/builder/record-files.js';
 import * as recordStore from '../../../src/components/ai/domain/builder/store.js';
 import { storagePaths } from '../../../src/libraries/storage.js';
-import { test, after } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -24,24 +24,19 @@ import {
   adminProfiles,
   setProfileEnabled,
   clientProfiles,
-  workflowState,
 } from '../../../src/components/ai/domain/profiles/registry.js';
 import { chatMessages } from '../../../src/components/ai/domain/chat.js';
 import { db } from '../../../src/libraries/db.js';
 import { digest } from '../../../src/libraries/security.js';
 import { basicWallet } from '../../../src/components/billing/domain/plans.js';
+import { publishGraph, routedGraph } from './graph-fixture.js';
 
 const root = await mkdtemp(join(tmpdir(), 'ncwa-profiles-'));
 const accounts: string[] = [];
 const graphs: string[] = [];
-// AI menjawab setiap pesan; Router selalu mengarahkan ke profil_perusahaan, yang langsung menjawab.
-const transport: AITransport = async (config, messages) => {
-  if (config.call_role === 'router')
-    return JSON.stringify({
-      s_p_o_konteks: 'pelanggan bertanya',
-      sub_agent: 'profil_perusahaan',
-      isi_pesan: messages.filter(m => m.role === 'user').at(-1)!.content,
-    });
+// AI menjawab setiap pesan: Router graf uji selalu memilih agent "info", yang langsung menjawab.
+const transport: AITransport = async config => {
+  if (config.call_role === 'router') return JSON.stringify({ branch: 'info', fallback_terkait: [] });
   if (config.call_role === 'context') return 'pelanggan-menunggu-jawaban';
   return JSON.stringify({ answer: 'Jawaban AI' });
 };
@@ -90,8 +85,13 @@ await db.execute("INSERT INTO accounts(id,email,password_hash,role) VALUES (?,?,
   owner + '@test.invalid',
   'unused',
 ]);
+// Profil yang dipakai tes data profil: graf berjalur yang diterbitkan dan dinyalakan pemilik.
+let profile = '';
+before(async () => {
+  profile = await publishGraph(owner, routedGraph('Toko uji'));
+  graphs.push(profile);
+});
 after(async () => {
-  await setProfileEnabled(owner, 'cs', true);
   await gateway.stop();
   for (const id of accounts) {
     await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
@@ -145,38 +145,38 @@ const memory = async (account: string, session: string) => {
     : [];
   return { count: messages.length, context: rows[0]?.router_context ?? null };
 };
-const product = { name: 'Kopi Susu', type: 'product', description: 'Gelas', price: 20000, stock: 10, active: true };
 
-test('A data profile is created, shared by two sessions, collects their orders, and keeps AI memory per session', async () => {
+test('A data profile is created, shared by two sessions, and keeps AI memory per session', async () => {
   const t = await tenant(['shop', 'cabang']);
-  assert.deepEqual(
-    (await t.api('get', '/ai/profile-types').expect(200)).body.map((p: any) => [p.id, p.name, p.tabs, p.enabled]),
-    [['cs', 'CS Usaha', ['knowledge', 'orders', 'usage', 'trial'], true]],
-  );
-  await t.api('post', '/ai/data-profiles').send({ profile_type: 'unknown', name: 'X' }).expect(404);
-  await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: '' }).expect(400);
+  const listed = (await t.api('get', '/ai/profile-types').expect(200)).body.find((p: any) => p.id === profile);
+  assert.deepEqual([listed.name, listed.nodes, listed.enabled], ['Toko uji', 8, true]);
+  await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'X' }).expect(404);
+  await t.api('post', '/ai/data-profiles').send({ profile_type: 'g_tidakada', name: 'X' }).expect(404);
+  await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: '' }).expect(400);
   const created = (
-    await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Toko Kopi Senja' }).expect(201)
+    await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Toko Kopi Senja' }).expect(201)
   ).body;
   assert.deepEqual(
-    [created.name, created.profile_type, created.sessions, created.knowledge],
-    ['Toko Kopi Senja', 'cs', [], ''],
+    [created.name, created.profile_type, created.profile_name, created.sessions, created.behavior],
+    ['Toko Kopi Senja', profile, 'Toko uji', [], ''],
   );
-  await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'toko kopi senja' }).expect(409);
+  await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'toko kopi senja' }).expect(409);
   const base = '/ai/data-profiles/' + created.id;
   await t
     .api('patch', base + '/field')
-    .send({ field: 'usaha', value: 'Toko Kopi Senja, Bandung' })
+    .send({ field: 'behavior', value: 'Ramah dan singkat' })
     .expect(200);
   await t
     .api('patch', base + '/field')
     .send({ field: 'fallback_number', value: '628111222333' })
     .expect(200);
-  await t
-    .api('post', base + '/products')
-    .send(product)
-    .expect(200);
-  // Kedua sesi menjalankan data profil yang sama: knowledge dan katalog sama, masing-masing dengan AI menyala.
+  // Bidang isi profil CS lama tidak diterima lagi.
+  for (const field of ['usaha', 'faq', 'products_source', 'edu_lembaga'])
+    await t
+      .api('patch', base + '/field')
+      .send({ field, value: 'x' })
+      .expect(400);
+  // Kedua sesi menjalankan data profil yang sama, masing-masing dengan AI menyala.
   for (const session of ['shop', 'cabang']) {
     const attached = (
       await t
@@ -185,42 +185,19 @@ test('A data profile is created, shared by two sessions, collects their orders, 
         .expect(200)
     ).body;
     assert.deepEqual(
-      [attached.enabled, attached.data_profile.name, attached.profile.usaha, attached.fallback_number],
-      [true, 'Toko Kopi Senja', 'Toko Kopi Senja, Bandung', '628111222333'],
+      [attached.enabled, attached.data_profile.name, attached.behavior, attached.fallback_number],
+      [true, 'Toko Kopi Senja', 'Ramah dan singkat', '628111222333'],
     );
   }
-  assert.deepEqual(
-    (await t.api('get', '/sessions/cabang/ai/products').expect(200)).body.map((p: any) => p.name),
-    ['Kopi Susu'],
-  );
-  const listed = (await t.api('get', '/sessions').expect(200)).body;
-  assert.deepEqual(listed.map((s: any) => [s.id, s.aiEnabled, s.aiProfile?.name]).sort(), [
+  const sessions = (await t.api('get', '/sessions').expect(200)).body;
+  assert.deepEqual(sessions.map((s: any) => [s.id, s.aiEnabled, s.aiProfile?.name]).sort(), [
     ['cabang', true, 'Toko Kopi Senja'],
     ['shop', true, 'Toko Kopi Senja'],
   ]);
-  // Pesanan dari kedua sesi masuk ke satu data profil, dengan catatan asal sesinya.
-  const order = (session: string, key: string) =>
-    t
-      .api('post', '/sessions/' + session + '/ai/orders')
-      .set('Idempotency-Key', key)
-      .send({ customer, items: [{ product_name: 'Kopi Susu', quantity: 1 }] })
-      .expect(200);
-  await order('shop', 'order-shop');
-  await order('cabang', 'order-cabang');
-  await t
-    .api('post', base + '/orders')
-    .set('Idempotency-Key', 'order-page')
-    .send({ customer, items: [{ product_name: 'Kopi Susu', quantity: 2 }] })
-    .expect(200);
-  assert.deepEqual(
-    (await t.api('get', base + '/orders').expect(200)).body.map((o: any) => o.session_id).sort(),
-    ['cabang', 'shop', null].sort(),
-  );
-  assert.equal((await t.api('get', '/sessions/shop/ai/orders').expect(200)).body.length, 3);
   const summary = (await t.api('get', '/ai/data-profiles').expect(200)).body;
   assert.deepEqual(
-    summary.map((p: any) => [p.name, p.sessions, p.products, p.orders]),
-    [['Toko Kopi Senja', ['cabang', 'shop'], 1, 3]],
+    summary.map((p: any) => [p.name, p.sessions, p.records]),
+    [['Toko Kopi Senja', ['cabang', 'shop'], 0]],
   );
   // Satu pelanggan menulis ke kedua nomor: setiap sesi menjawab dan menyimpan memorinya sendiri.
   t.send('shop', 'S1', 'Halo toko');
@@ -231,29 +208,28 @@ test('A data profile is created, shared by two sessions, collects their orders, 
   );
   assert.deepEqual([await answers(t.id, 'shop'), await answers(t.id, 'cabang')], [1, 1]);
   const [usage] = await db.execute<any[]>(
-    'SELECT session_id,profile_type,data_profile_id FROM ai_usage WHERE account_id=? ORDER BY session_id',
+    'SELECT session_id,profile_type,data_profile_id,agent FROM ai_usage WHERE account_id=? ORDER BY session_id',
     [t.id],
   );
   assert.deepEqual(
-    usage.map(u => [u.session_id, u.profile_type, u.data_profile_id]),
+    usage.map(u => [u.session_id, u.profile_type, u.data_profile_id, u.agent]),
     [
-      ['cabang', 'cs', created.id],
-      ['shop', 'cs', created.id],
+      ['cabang', profile, created.id, 'info'],
+      ['shop', profile, created.id, 'info'],
     ],
   );
-  // Data profil yang terpasang tidak bisa dihapus; menghapus sesi tetap menyimpan data profil dan pesanannya.
+  // Data profil yang terpasang tidak bisa dihapus; menghapus sesi tetap menyimpan data profilnya.
   await t.api('delete', base).expect(409);
   await t.api('delete', '/sessions/cabang').expect(200);
   const after = (await t.api('get', base).expect(200)).body;
   assert.deepEqual(after.sessions, ['shop']);
-  assert.equal((await t.api('get', base + '/orders').expect(200)).body.length, 3);
 });
 
 test('Switching or detaching a data profile empties the session AI memory, leaves notes, and stops a detached session', async () => {
   const t = await tenant();
-  const first = (await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Pertama' }).expect(201))
+  const first = (await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Pertama' }).expect(201))
       .body,
-    second = (await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Kedua' }).expect(201)).body;
+    second = (await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Kedua' }).expect(201)).body;
   await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: first.id, enabled: true }).expect(200);
   // Jawaban disimpan ke memori AI tepat setelah dikirim, jadi yang ditunggu memorinya, bukan riwayat chat.
   t.send('shop', 'M1', 'Halo');
@@ -276,7 +252,7 @@ test('Switching or detaching a data profile empties the session AI memory, leave
   );
   assert.equal(await answers(t.id, 'shop'), 2);
   const detached = (await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: null }).expect(200)).body;
-  assert.deepEqual([detached.enabled, detached.data_profile, detached.knowledge], [false, null, '']);
+  assert.deepEqual([detached.enabled, detached.data_profile, detached.behavior], [false, null, '']);
   t.send('shop', 'M3', 'Halo lagi');
   const history = await eventually(
     async () => (await chatMessages(t.id, 'shop', customer)).messages,
@@ -296,21 +272,14 @@ test('Switching or detaching a data profile empties the session AI memory, leave
 test('Data profiles stay inside their account', async () => {
   const a = await tenant(),
     b = await tenant();
-  const mine = (await a.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Milik A' }).expect(201))
+  const mine = (await a.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Milik A' }).expect(201))
       .body,
     base = '/ai/data-profiles/' + mine.id;
-  await a
-    .api('post', base + '/products')
-    .send(product)
-    .expect(200);
   for (const [method, path, body] of [
     ['get', base, undefined],
     ['patch', base, { name: 'Curian' }],
-    ['patch', base + '/field', { field: 'usaha', value: 'x' }],
+    ['patch', base + '/field', { field: 'behavior', value: 'x' }],
     ['delete', base, undefined],
-    ['get', base + '/products', undefined],
-    ['post', base + '/products', product],
-    ['get', base + '/orders', undefined],
   ] as const) {
     const call = b.api(method, path);
     await (body ? call.send(body) : call).expect(404);
@@ -321,114 +290,77 @@ test('Data profiles stay inside their account', async () => {
   await a.api('get', '/ai/data-profiles/not-an-id').expect(404);
 });
 
-test('Integrations written before profiles still configure a session, which gets its own CS data profile', async () => {
+test('A session without a data profile cannot switch AI on or save fields, and nothing is created for it', async () => {
   const t = await tenant();
   assert.deepEqual((await t.api('get', '/sessions/shop/ai').expect(200)).body.data_profile, null);
-  assert.deepEqual((await t.api('get', '/sessions/shop/ai/products').expect(200)).body, []);
+  await t.api('patch', '/sessions/shop/ai/enabled').send({ enabled: true }).expect(409);
+  await t.api('patch', '/sessions/shop/ai/field').send({ field: 'behavior', value: 'Ramah' }).expect(409);
+  // Rute isi profil CS lama sudah tidak ada.
+  for (const path of ['/sessions/shop/ai/products', '/sessions/shop/ai/orders', '/sessions/shop/ai/programs'])
+    await t.api('get', path).expect(404);
+  await t.api('put', '/sessions/shop/ai').send({ enabled: true }).expect(404);
+  assert.deepEqual((await t.api('get', '/ai/data-profiles').expect(200)).body, []);
+  // Setelah data profil dipasang, bidangnya bisa disimpan lewat sesi dan nama data profil tetap unik.
+  const p = (await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Laundry' }).expect(201))
+    .body;
+  const other = (await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Cadangan' }).expect(201))
+    .body;
+  await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: p.id }).expect(200);
   const saved = (
-    await t
-      .api('put', '/sessions/shop/ai')
-      .send({ enabled: true, profile: { usaha: 'Laundry Bersih' }, behavior: 'Ramah' })
-      .expect(200)
+    await t.api('patch', '/sessions/shop/ai/field').send({ field: 'behavior', value: 'Ramah' }).expect(200)
   ).body;
-  assert.deepEqual(
-    [saved.enabled, saved.data_profile.name, saved.profile.usaha, saved.behavior],
-    [true, 'CS – shop', 'Laundry Bersih', 'Ramah'],
-  );
-  await t.api('post', '/sessions/shop/ai/products').send(product).expect(200);
-  assert.deepEqual(
-    (await t.api('get', '/ai/data-profiles/' + saved.data_profile.id + '/products').expect(200)).body.map(
-      (p: any) => p.name,
-    ),
-    ['Kopi Susu'],
-  );
-  // Setelah dicabut, penulisan lewat jalur lama memasang data profil baru dengan nama bebas berikutnya dan AI mati.
-  await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: null }).expect(200);
-  const again = (
-    await t.api('patch', '/sessions/shop/ai/field').send({ field: 'faq', value: 'Buka 24 jam' }).expect(200)
-  ).body;
-  assert.deepEqual(
-    [again.enabled, again.data_profile.name, again.profile.faq],
-    [false, 'CS – shop (2)', 'Buka 24 jam'],
-  );
+  assert.deepEqual([saved.enabled, saved.data_profile.name, saved.behavior], [false, 'Laundry', 'Ramah']);
+  await t.api('patch', '/sessions/shop/ai/enabled').send({ enabled: true }).expect(200);
   await t
-    .api('patch', '/ai/data-profiles/' + saved.data_profile.id)
-    .send({ name: 'CS – shop (2)' })
+    .api('patch', '/ai/data-profiles/' + other.id)
+    .send({ name: 'Laundry' })
     .expect(409);
-  assert.equal(
-    (
-      await t
-        .api('patch', '/ai/data-profiles/' + saved.data_profile.id)
-        .send({ name: 'Laundry' })
-        .expect(200)
-    ).body.name,
-    'Laundry',
-  );
 });
 
-test('Duplicating a data profile copies content, sources and its own photo files; photos never cross data profiles', async () => {
+test('Duplicating a data profile copies its behavior and fallback settings into a separate data profile', async () => {
   const t = await tenant();
-  const original = (await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Asli' }).expect(201))
+  const original = (await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Asli' }).expect(201))
       .body,
     base = '/ai/data-profiles/' + original.id;
   await t
     .api('patch', base + '/field')
     .send({ field: 'behavior', value: 'Formal' })
     .expect(200);
-  const png = await sharp({ create: { width: 20, height: 20, channels: 3, background: { r: 1, g: 2, b: 3 } } })
-    .png()
-    .toBuffer();
-  const photo = (
-    await t
-      .api('post', base + '/products-image')
-      .set('X-Filename', 'p.png')
-      .set('Content-Type', 'application/octet-stream')
-      .send(png)
-      .expect(200)
-  ).body;
   await t
-    .api('post', base + '/products')
-    .send({ ...product, image_id: photo.id })
+    .api('patch', base + '/field')
+    .send({ field: 'fallback_number', value: '628111222333' })
     .expect(200);
-  const other = (await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Lain' }).expect(201)).body;
-  await t
-    .api('post', '/ai/data-profiles/' + other.id + '/products')
-    .send({ ...product, image_id: photo.id })
-    .expect(400);
   const copy = (await t.api('post', '/ai/data-profiles').send({ name: 'Salinan', copy_from: original.id }).expect(201))
     .body;
-  assert.deepEqual([copy.behavior, copy.profile_type, copy.sessions], ['Formal', 'cs', []]);
-  const copied = (await t.api('get', '/ai/data-profiles/' + copy.id + '/products').expect(200)).body[0];
-  assert.ok(copied.image_id && copied.image_id !== photo.id);
+  assert.deepEqual(
+    [copy.behavior, copy.fallback_number, copy.profile_type, copy.sessions],
+    ['Formal', '628111222333', profile, []],
+  );
   await t.api('delete', base).expect(200);
-  await assert.rejects(stat(join(root, 'files', 'product-images', t.id, photo.id)));
-  await t
-    .api('get', '/ai/data-profiles/' + copy.id + '/products-image/' + copied.image_id)
-    .expect(200)
-    .expect('Content-Type', 'image/jpeg');
+  assert.equal((await t.api('get', '/ai/data-profiles/' + copy.id).expect(200)).body.behavior, 'Formal');
 });
 
 test('The owner switches a profile off for everyone: clients cannot pick it and attached sessions stop answering', async () => {
   const t = await tenant();
-  const profile = (await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Toko' }).expect(201))
-    .body;
-  await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: profile.id, enabled: true }).expect(200);
-  const listed = (await adminProfiles()).find(p => p.id === 'cs')!;
-  assert.equal(listed.enabled, true);
+  const p = (await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Toko' }).expect(201)).body;
+  await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: p.id, enabled: true }).expect(200);
+  const listed = (await adminProfiles()).find(x => x.id === profile)!;
+  assert.deepEqual([listed.enabled, listed.published, listed.nodes], [true, true, 8]);
   assert.ok(listed.sessions >= 1 && listed.data_profiles >= 1);
-  assert.equal(listed.nodes, 8);
   try {
-    await setProfileEnabled(owner, 'cs', false);
+    await setProfileEnabled(owner, profile, false);
     // Tetap terdaftar untuk akun yang memakainya, tapi tidak bisa dipilih lagi; akun yang belum pernah memakainya tidak
-    // melihat apa pun.
+    // melihatnya.
     assert.deepEqual(
-      (await clientProfiles(t.id)).map(p => [p.id, p.enabled]),
-      [['cs', false]],
+      (await clientProfiles(t.id)).filter(x => x.id === profile).map(x => x.enabled),
+      [false],
     );
-    assert.deepEqual(await clientProfiles(randomUUID()), []);
-    assert.equal((await workflowState('cs')).enabled, false);
-    await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Baru' }).expect(409);
-    await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: profile.id }).expect(409);
+    assert.deepEqual(
+      (await clientProfiles(randomUUID())).filter(x => x.id === profile),
+      [],
+    );
+    await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Baru' }).expect(409);
+    await t.api('put', '/sessions/shop/ai/profile').send({ data_profile_id: p.id }).expect(409);
     assert.equal((await t.api('get', '/sessions/shop/ai').expect(200)).body.profile_enabled, false);
     t.send('shop', 'OFF1', 'Halo');
     await eventually(
@@ -438,7 +370,7 @@ test('The owner switches a profile off for everyone: clients cannot pick it and 
     await new Promise(r => setTimeout(r, 200));
     assert.equal(await answers(t.id, 'shop'), 0);
   } finally {
-    await setProfileEnabled(owner, 'cs', true);
+    await setProfileEnabled(owner, profile, true);
   }
   t.send('shop', 'ON1', 'Halo lagi');
   await eventually(
@@ -446,30 +378,31 @@ test('The owner switches a profile off for everyone: clients cannot pick it and 
     n => n === 1,
   );
   await assert.rejects(setProfileEnabled(owner, 'unknown', true), { code: 'profile_not_found' });
+  await assert.rejects(setProfileEnabled(owner, 'cs', true), { code: 'profile_not_found' });
   const [audit] = await db.execute<any[]>(
     "SELECT action FROM audit_events WHERE account_id=? AND action LIKE 'ai_profile_%' ORDER BY id",
     [owner],
   );
   assert.deepEqual(
     audit.slice(-2).map(a => a.action),
-    ['ai_profile_disabled:cs', 'ai_profile_enabled:cs'],
+    ['ai_profile_disabled:' + profile, 'ai_profile_enabled:' + profile],
   );
 });
 
 test('Uji Coba runs a data profile directly, even one not attached to any session', async () => {
   const t = await tenant();
-  const profile = (
-    await t.api('post', '/ai/data-profiles').send({ profile_type: 'cs', name: 'Belum dipasang' }).expect(201)
+  const p = (
+    await t.api('post', '/ai/data-profiles').send({ profile_type: profile, name: 'Belum dipasang' }).expect(201)
   ).body;
-  const result = await service.trial(t.id, { question: 'Apa saja produknya?', data_profile: profile.id });
-  assert.equal(result.answer, 'Jawaban AI');
+  const result = await service.trial(t.id, { question: 'Apa saja produknya?', data_profile: p.id });
+  assert.deepEqual([result.answer, result.agent], ['Jawaban AI', 'info']);
   const [usage] = await db.execute<any[]>(
     "SELECT session_id,profile_type,data_profile_id FROM ai_usage WHERE account_id=? AND customer='trial'",
     [t.id],
   );
   assert.deepEqual(
     usage.map(u => [u.session_id, u.profile_type, u.data_profile_id]),
-    [['', 'cs', profile.id]],
+    [['', profile, p.id]],
   );
   await assert.rejects(service.trial(t.id, { question: 'Halo', session: 'shop' }), { code: 'no_profile' });
   await assert.rejects(service.trial(t.id, { question: 'Halo', data_profile: randomUUID() }), {

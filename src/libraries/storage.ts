@@ -10,9 +10,7 @@ export function storagePaths(root = storageRoot) {
   return {
     whatsapp: join(root, 'whatsapp'),
     media: join(root, 'files', 'media'),
-    productImages: join(root, 'files', 'product-images'),
-    aiDocuments: join(root, 'files', 'ai-documents'),
-    // File di field File/gambar koleksi profil dinamis.
+    // File di field File/gambar koleksi profil AI.
     recordFiles: join(root, 'files', 'record-files'),
     shareAssets: join(root, 'files', 'share-assets'),
   };
@@ -21,10 +19,10 @@ export function storagePaths(root = storageRoot) {
 // Folder di auth/ lama dan tujuannya sekarang; entri lain adalah folder sesi milik sebuah akun.
 const legacyFolders: Record<string, Exclude<keyof ReturnType<typeof storagePaths>, 'whatsapp'>> = {
   _media: 'media',
-  '_product-images': 'productImages',
-  '_ai-documents': 'aiDocuments',
   '_share-assets': 'shareAssets',
 };
+// File profil CS dan Pendidikan yang sudah dihapus; tidak dipindah (lihat dropStaticProfiles di data-access AI).
+const retiredFolders = ['_product-images', '_ai-documents'];
 
 // Memindahkan auth/ lama ke storage/ sekali, per entri, sehingga proses yang terputus dilanjutkan saat
 // start berikutnya. Tujuan yang hanya berisi folder kosong (sisa start sebelum pemindahan) diganti; tujuan
@@ -44,6 +42,10 @@ export async function moveLegacyStorage(root = storageRoot, legacy = resolve('au
   await mkdir(join(root, 'files'), { recursive: true, mode: 0o700 });
   let moved = 0;
   for (const name of entries) {
+    if (retiredFolders.includes(name)) {
+      await rm(join(legacy, name), { recursive: true, force: true });
+      continue;
+    }
     const target = legacyFolders[name] ? paths[legacyFolders[name]] : join(paths.whatsapp, name);
     if (await hasFiles(target))
       throw Error(

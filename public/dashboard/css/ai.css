@@ -325,10 +325,7 @@
 .client-workspace #ai .table-wrap {
   margin-top: 15px;
 }
-.client-workspace #ai-dialog,
-.client-workspace #ai-product-dialog,
-.client-workspace #ai-order-dialog,
-.client-workspace #ai-order-edit-dialog {
+.client-workspace #ai-dialog {
   background: #fff;
 }
 @media (max-width: 760px) {

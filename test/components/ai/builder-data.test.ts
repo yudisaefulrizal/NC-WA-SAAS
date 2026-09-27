@@ -108,7 +108,6 @@ const run = (d: GraphDefinition, profile: string, customer: string, message = 'h
     session: 'test',
     customer,
     requestId: randomUUID(),
-    knowledge: '',
     fallbackEnabled: false,
   });
 

@@ -1,4 +1,4 @@
-# Profil AI dinamis
+# Profil AI (graf)
 
 Implementasi berdasarkan diskusi pemilik: editor visual dengan graf bebas, struktur data per profil, impor/ekspor definisi, serta pengujian terpisah dari data klien. Pemilik mengarahkan implementasi langsung di workspace; desain dan keputusan teknis dicatat di sini.
 
@@ -10,9 +10,9 @@ Implementasi berdasarkan diskusi pemilik: editor visual dengan graf bebas, struk
 4. Susun node dan koneksi pada **Alur**. Klik/tarik palet untuk menambah, tarik header node untuk memindahkan, sambungkan port keluar ke port masuk. Pengaturan node juga menyediakan pemilih tujuan koneksi untuk keyboard/ponsel.
 5. Jalankan **Pengujian** dengan pesan dan data contoh. Lihat hasil per node di jejak eksekusi. Data contoh hanya berlaku untuk simulasi.
 6. Simpan draft dan periksa masalah pada **Ringkasan**. Terbitkan sesudah diuji. Aktifkan profil melalui daftar **Profil AI** agar bisa dipilih akun.
-7. Akun membuat **Data Profil**, memilih profil tersebut, lalu **Kelola isi** untuk mengisi koleksi. Pasang Data Profil ke sesi melalui mekanisme yang sama dengan profil bawaan.
+7. Akun membuat **Data Profil**, memilih profil tersebut, lalu **Kelola isi** untuk mengisi koleksi. Pasang Data Profil ke sesi di halaman Asisten AI; Knowledge sesi berisi Perilaku AI, tautan data koleksi, dan Fallback Tim.
 
-Profil bawaan dan AI Studio lamanya tetap tersedia. Template Katalog sederhana/Pendidikan adalah titik awal dengan koleksi umum. Builder hanya berisi perkakas umum: tidak ada operasi khusus satu jenis usaha, dan profil dinamis tidak memakai tabel produk/pesanan CS bawaan. Tidak ada konversi otomatis data profil lama.
+Semua profil AI adalah graf. Profil statis lama (CS Usaha, CS Lembaga Pendidikan, Tester AI) dan AI Studio sudah dihapus beserta data profil, tabel isi, dan filenya; tidak ada konversi otomatis. Template Katalog sederhana/Pendidikan/Tester adalah titik awal dengan koleksi umum. Builder hanya berisi perkakas umum: tidak ada operasi khusus satu jenis usaha.
 
 ## Node dan kontrak eksekusi
 
@@ -105,7 +105,7 @@ Keluaran `files`, `count`, dan `skipped`. Maksimal tiga file per balasan untuk s
 
 Setiap koleksi pada sebuah Data Profil memakai **tabel aplikasi** (bawaan, `ai_data_records`) atau **API sendiri** milik klien. Pilihan ini diatur klien di halaman data koleksi, per data profil, dan disimpan di `ai_collection_sources` (tanpa baris berarti tabel aplikasi). Pemilik tetap merancang alur dan struktur koleksi; klien menyambungkan datanya tanpa mengubah alur. Tidak ada node Webhook terpisah.
 
-Bila memakai API, keenam operasi node Data dikirim ke API dengan pola yang sama seperti endpoint produk/pesanan CS: `POST` JSON `{action, collection, query, context}`, token Bearer terenkripsi, header `Idempotency-Key`, HTTPS publik tanpa redirect, timeout 15 detik, dan balasan maksimal 64 KB.
+Bila memakai API, keenam operasi node Data dikirim ke API: `POST` JSON `{action, collection, query, context}`, token Bearer terenkripsi, header `Idempotency-Key`, HTTPS publik tanpa redirect, timeout 15 detik, dan balasan maksimal 64 KB.
 
 | `action` | `query` | Balasan |
 | --- | --- | --- |
@@ -202,11 +202,12 @@ Pencarian dan filter membaca JSON dalam cakupan akun/profil/koleksi (dan pelangg
 - `test/components/ai/builder-extract-compute.test.ts`: kontrak dan urutan langkah, Ekstrak dengan riwayat, JSON Schema dan fallback-nya, nilai hilang/tidak valid, serta semua operasi Set / Hitung.
 - `scripts/checks/browser-ai-builder-fields-check.ts`: Ekstrak, Set / Hitung, tipe field baru, nilai bawaan, unik, simpan-buka ulang, dan unggah file di formulir klien pada 1280/390 px.
 - `scripts/checks/browser-ai-builder-data-check.ts`: kepemilikan koleksi, node Data, Kondisi berkelompok, simpan-buka ulang, halaman record milik pelanggan, dan dialog duplikat pada 1280/390 px.
-- `test/components/ai/profiles.test.ts`: integrasi sesi WhatsApp dengan engine tiruan; hanya graf terbit dijalankan, draft tidak memengaruhi jawaban.
+- `test/components/ai/profiles.test.ts`: data profil dipakai bersama sesi, ganti/cabut, isolasi akun, sesi tanpa data profil, duplikasi, profil yang dimatikan pemilik, Uji Coba, dan sesi WhatsApp dengan engine tiruan; hanya graf terbit dijalankan, draft tidak memengaruhi jawaban.
+- `test/components/ai/service.test.ts`: runtime WhatsApp di atas graf uji (`graph-fixture.ts`): tagihan per kata, memori, tiket fallback, konteks Context, jeda dan balasan manual, pengulangan saat provider gagal, node Data yang dibatasi akun dan tidak menulis setelah admin mengambil alih, serta tier model per node.
 - `scripts/checks/browser-ai-builder-check.ts`: editor dan formulir data pada 1280/390 px, termasuk simpan lalu buka ulang dan impor.
-- Tes profil lama/AI Studio/agent serta pemeriksaan browser profil lama untuk regresi integrasi.
+- `scripts/checks/browser-ai-profiles-check.ts` dan `browser-ai-conversation-check.ts`: strip sesi, dialog pasang, Data Profil, halaman Profil AI pemilik, dan tampilan Percakapan pada 1280/390 px.
 
-Pengujian otomatis menggunakan MySQL sementara, transport AI tiruan, serta engine WhatsApp tiruan. Model AI sungguhan dan HP WhatsApp nyata belum diuji untuk profil dinamis.
+Pengujian otomatis menggunakan MySQL sementara, transport AI tiruan, serta engine WhatsApp tiruan. Model AI sungguhan dan HP WhatsApp nyata belum diuji untuk profil graf.
 
 
 ## Shared Memory

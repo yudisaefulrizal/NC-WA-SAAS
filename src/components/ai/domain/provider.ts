@@ -1,14 +1,6 @@
 // Memanggil provider AI (SumoPod, OpenRouter, atau yang kompatibel OpenAI): konfigurasi, bentuk request, dan
 // pembatasan ukuran jawaban.
-import { routerResponseFormat } from './pipeline/router-schema.js';
-import { isJevModel } from './pipeline/jev-router.js';
-import {
-  schemaEnabled,
-  type ModelRole,
-  type ModelTier,
-  type AgentWorkflow,
-  type AITraceEvent,
-} from './pipeline/models.js';
+import { isJevModel, type ModelRole, type ModelTier, type AITraceEvent } from './pipeline/models.js';
 import { request } from 'node:https';
 import { decrypt } from '../../../libraries/crypto.js';
 import { validatePublicUrl } from '../../../libraries/download.js';
@@ -26,7 +18,9 @@ export interface AIConfig {
   graph_context?: string | null;
   trace_node?: string;
   signal?: AbortSignal;
-  workflow?: AgentWorkflow;
+  // Dipanggil sebelum setiap node Data dijalankan; runtime WhatsApp melempar ai_cancelled bila percakapan dijeda,
+  // diambil alih admin, atau asistennya berubah, supaya tidak ada record yang ditulis setelah itu.
+  checkpoint?: () => Promise<void>;
   onTrace?: (event: AITraceEvent) => void;
   model_cheap?: string;
   model_medium?: string;
@@ -37,7 +31,6 @@ export interface AIConfig {
     Record<ModelTier, { id: string; provider: AIProvider; endpoint: string; secret: string; model: string }>
   >;
   call_role?: ModelRole;
-  router_agents?: readonly string[];
   response_format?: Record<string, unknown>;
   decision_request?: DecisionRequest;
   provider: AIProvider;
@@ -105,11 +98,7 @@ export function aiRequestPayload(config: AIConfig, messages: AIMessage[]) {
     messages: [...messages],
     stream: false,
     max_tokens: 2048,
-    ...(config.response_format
-      ? { response_format: config.response_format }
-      : config.call_role === 'router' && schemaEnabled(config, 'router')
-        ? { response_format: routerResponseFormat(config.router_agents) }
-        : {}),
+    ...(config.response_format ? { response_format: config.response_format } : {}),
   };
 }
 export const callAI: AITransport = async (config, messages, maxWords) => {

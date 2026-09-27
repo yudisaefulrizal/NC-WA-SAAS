@@ -2,9 +2,7 @@
 // - kode di luar sebuah komponen hanya mengimpor index.ts komponen itu;
 // - arah lapisan entry-points → domain → data-access, tidak pernah dibalik;
 // - src/libraries tidak mengimpor komponen atau src/http.
-// Import yang hanya tipe (`import type`) tidak dihitung karena hilang saat dijalankan. Satu pengecualian:
-// data-access/schema.ts (migrasi) boleh memakai konstanta domain, karena migrasi menyiapkan data awal dari
-// definisi domain (alur bawaan, daftar profil, bidang knowledge).
+// Import yang hanya tipe (`import type`) tidak dihitung karena hilang saat dijalankan.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
@@ -31,7 +29,6 @@ for (const file of files(root)) {
   const specifiers = [
     ...source.matchAll(/^import\s+(?!type\s)[^;]*?from\s+'(\.[^']+)'|import\s*\(\s*'(\.[^']+)'/gm),
   ].map(match => (match[1] ?? match[2])!);
-  const migration = file.endsWith('/data-access/schema.ts');
   for (const specifier of specifiers) {
     const target = resolve(dirname(file), specifier.replace(/\.js$/, '.ts'));
     const to = place(target);
@@ -41,7 +38,7 @@ for (const file of files(root)) {
     if (to.component && to.component !== from.component && to.layer !== 'index')
       problems.push(`${where}: dari luar komponen ${to.component} hanya boleh lewat index.ts`);
     if (to.component && to.component === from.component && from.layer in depth && to.layer in depth)
-      if (depth[to.layer]! < depth[from.layer]! && !(migration && to.layer === 'domain'))
+      if (depth[to.layer]! < depth[from.layer]!)
         problems.push(`${where}: ${from.layer} tidak boleh mengimpor ${to.layer}`);
   }
 }

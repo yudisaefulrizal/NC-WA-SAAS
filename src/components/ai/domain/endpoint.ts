@@ -1,5 +1,5 @@
-// Endpoint HTTPS milik klien yang menggantikan data bawaan (produk/pesanan CS, atau koleksi profil dinamis): alamat,
-// token terenkripsi, dan pemanggilnya. Server yang memanggil; model tidak pernah memegang URL atau token.
+// Endpoint HTTPS milik klien yang menggantikan tabel aplikasi untuk sebuah koleksi profil: alamat, token terenkripsi,
+// dan pemanggilnya. Server yang memanggil; model tidak pernah memegang URL atau token.
 import { request } from 'node:https';
 import { decrypt } from '../../../libraries/crypto.js';
 import { ApiError } from '../../../libraries/errors.js';

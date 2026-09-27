@@ -107,7 +107,6 @@ export async function simulate(
       serviceName: 'Data profil simulasi',
       incomingMedia,
       requestId: randomUUID(),
-      knowledge: '',
       fallbackEnabled: true,
     },
     typeof body.context === 'string' ? text(body.context, 200) : null,

@@ -8,13 +8,10 @@ Cara kerja dan arsitektur ada di [AGENT.MD](AGENT.MD).
 
 - **Akun dan paket.** Registrasi dan login, peran pengguna dan pemilik, API key per akun, serta paket bulanan dengan kredit dan batas nomor. Paket dasar gratis direset tiap tanggal 1 WIB. Pembayaran memakai QRIS Midtrans. 1 kredit dipakai untuk 1 pesan keluar.
 - **Gateway WhatsApp.** Session per akun (Baileys) dengan QR, reconnect, dan pemulihan saat restart. Kirim teks dan media, grup, read, typing, antrean, webhook, event realtime, dan kompatibel dengan node n8n NC-WA.
-- **Asisten AI.** AI dipasang per nomor dengan kredit AI terpisah (dihitung per kata). Setiap sesi memakai satu **profil**, yaitu pipeline dari sistem, dan satu **data profil**, yaitu isi milik klien yang bisa dipakai di banyak sesi.
-  - **CS Usaha:** knowledge, produk, dan pesanan.
-  - **CS Lembaga Pendidikan:** profil lembaga, program, jadwal, dokumen yang dikirim ke WhatsApp, dan kontak. Profil ini tidak menyimpan data pribadi.
-  - **Tester AI:** AI berperan sebagai pelanggan sesuai Peran pelanggan untuk menguji nomor CS mana pun. Obrolan dimulai dari pesan manual di HP nomor tester dan berjalan sampai dijeda.
+- **Asisten AI.** AI dipasang per nomor dengan kredit AI terpisah (dihitung per kata). Setiap sesi memakai satu **profil**, yaitu alur AI yang dibuat pemilik, dan satu **data profil**, yaitu isi milik klien (perilaku, nomor fallback, record koleksi) yang bisa dipakai di banyak sesi.
+  - **Editor profil:** alur drag-and-drop dengan Router, Agent, Data, Kondisi, Ekstrak, Set / Hitung, Kirim dan Terima media, Context, Output, dan Fallback; koleksi dengan struktur sendiri (tabel aplikasi atau API klien); impor/ekspor JSON, simulasi, draft dan riwayat versi terbit. Mulai dari **Profil AI → Buat profil**. [Panduan dan arsitektur](docs/dynamic-ai-profiles-design.md).
   - Juga tersedia: riwayat chat gaya WhatsApp dengan balasan manual, jeda, dan full auto; fallback ke tim; Uji Coba.
-  - **Profil dinamis:** editor alur drag-and-drop, Router/Agent/Tool/Kondisi/Context/Output/Fallback, koleksi dengan struktur sendiri, impor/ekspor JSON, simulasi, draft dan riwayat versi terbit. Mulai dari **Profil AI → Buat profil**. [Panduan dan arsitektur](docs/dynamic-ai-profiles-design.md).
-  - Pemilik menyetel prompt dan model tiap node di **AI Studio**, dan menyalakan atau mematikan profil di **Profil AI**.
+  - Pemilik menyalakan atau mematikan profil untuk semua klien di **Profil AI**.
 - **Auto Share.** Kontak dan kelompok, template (teks atau media, bisa mengambil data dari endpoint, bisa dirapikan AI), serta pengiriman sekali atau berulang dengan rotasi template dan riwayat per tujuan.
 - **Referral**, audit dan status layanan, serta backup dan restore.
 

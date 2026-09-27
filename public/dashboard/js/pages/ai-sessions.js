@@ -30,7 +30,6 @@ function selectSession(id) {
   renderAISessionFilters();
   run(async () => {
     aiTab('knowledge');
-    for (const dialog of ['ai-product-dialog', 'ai-order-dialog', 'ai-order-edit-dialog']) $(dialog).close();
     aiFallbacksPage = 1;
     await loadAssistant();
   });
@@ -233,7 +232,7 @@ function renderSessionCards() {
 }
 // Menjadikan slot yang di tengah (setelah geser atau klik titik) benar-benar sesi aktif, bukan hanya tampak di tengah
 // sementara form di bawah masih menampilkan sesi sebelumnya. Sesi sungguhan di tengah → selectSession() (sama seperti
-// mengeklik kartunya): menyamakan $('ai-session').value dan memuat ulang tab knowledge/produk/pesanannya. Kartu
+// mengeklik kartunya): menyamakan $('ai-session').value dan memuat ulang tab knowledge-nya. Kartu
 // pengganti di tengah → tidak ada sesi aktif, jadi form disembunyikan seperti saat belum ada sesi.
 function settleSession() {
   const slots = buildSessionSlots();

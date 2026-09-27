@@ -403,18 +403,3 @@ button.ai-session-status {
     grid-template-columns: 1fr;
   }
 }
-
-/* Pengaturan sumber produk/pesanan: sekunder, tertutup secara bawaan, di bawah tabel. */
-.ai-source-settings {
-  margin-top: 24px;
-}
-.ai-source-settings summary:before {
-  content: '⚙' !important;
-  font-family: inherit !important;
-}
-.ai-source-settings [type='submit'] {
-  margin-top: 14px;
-}
-.ai-source-settings details {
-  margin-top: 12px;
-}

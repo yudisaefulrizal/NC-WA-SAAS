@@ -35,17 +35,6 @@
 .trace-error {
   color: #b84444;
 }
-.ai-product-thumb {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 6px;
-}
-#ai-product-image-preview {
-  object-fit: cover;
-  border-radius: 8px;
-  margin: 4px 0;
-}
 
 #share-template-form .field-hint {
   font-size: 12px;

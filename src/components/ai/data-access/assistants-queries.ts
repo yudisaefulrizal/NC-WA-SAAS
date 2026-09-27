@@ -8,12 +8,8 @@ export function findFallbackNumber(c: Executor, params: SqlValue[]) {
     params,
   );
 }
-// Saklar AI sesi beserta jenis profil data profil yang terpasang (NULL bila belum ada).
-export function findEnabledWithType(c: Executor, params: SqlValue[]) {
-  return c.execute<RowDataPacket[]>(
-    'SELECT a.enabled,p.profile_type FROM ai_assistants a LEFT JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=? AND a.session_id=?',
-    params,
-  );
+export function findEnabled(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>('SELECT enabled FROM ai_assistants WHERE account_id=? AND session_id=?', params);
 }
 export function deleteBySession(c: Executor, params: SqlValue[]) {
   return c.execute('DELETE FROM ai_assistants WHERE account_id=? AND session_id=?', params);
@@ -39,12 +35,6 @@ export function upsertEnabled(c: Executor, params: SqlValue[]) {
 export function lockDataProfileId(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
     'SELECT data_profile_id FROM ai_assistants WHERE account_id=? AND session_id=? FOR UPDATE',
-    params,
-  );
-}
-export function attachNew(c: Executor, params: SqlValue[]) {
-  return c.execute(
-    'INSERT INTO ai_assistants(account_id,session_id,enabled,data_profile_id) VALUES (?,?,FALSE,?) ON DUPLICATE KEY UPDATE data_profile_id=VALUES(data_profile_id),revision=revision+1',
     params,
   );
 }
@@ -87,12 +77,6 @@ export function upsertAttachment(c: Executor, params: SqlValue[]) {
 export function findWithProfile(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
     'SELECT a.enabled,a.data_profile_id,p.* FROM ai_assistants a LEFT JOIN ai_data_profiles p ON p.id=a.data_profile_id WHERE a.account_id=? AND a.session_id=?',
-    params,
-  );
-}
-export function updateEnabled(c: Executor, params: SqlValue[]) {
-  return c.execute(
-    'UPDATE ai_assistants SET enabled=?,revision=revision+1 WHERE account_id=? AND session_id=?',
     params,
   );
 }

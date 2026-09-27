@@ -78,7 +78,6 @@ const run = (d: GraphDefinition, profile: string, message = 'halo') =>
     session: 'wa',
     customer: '62811',
     requestId: randomUUID(),
-    knowledge: '',
     fallbackEnabled: false,
   });
 

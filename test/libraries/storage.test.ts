@@ -30,8 +30,9 @@ async function assertMoved(root: string, legacy: string) {
   assert.equal(await readFile(join(paths.whatsapp, account, 'toko', 'auth', 'creds.json'), 'utf8'), '{"login":true}');
   assert.equal(await readFile(join(paths.whatsapp, account, 'toko', 'session.json'), 'utf8'), '{"id":"toko"}');
   assert.equal(await readFile(join(paths.media, account, 'IN1'), 'utf8'), 'media');
-  assert.equal(await readFile(join(paths.productImages, account, 'foto'), 'utf8'), 'foto');
-  assert.equal(await readFile(join(paths.aiDocuments, account, 'brosur'), 'utf8'), 'pdf');
+  // File profil CS dan Pendidikan yang sudah dihapus dibuang, tidak dipindah.
+  assert.equal(existsSync(join(root, 'files', 'product-images')), false);
+  assert.equal(existsSync(join(root, 'files', 'ai-documents')), false);
   assert.equal(await readFile(join(paths.shareAssets, account, 'aset'), 'utf8'), 'aset');
   assert.equal(existsSync(legacy), false, 'auth/ lama masih tersisa');
 }
@@ -41,7 +42,7 @@ test('auth/ moves into storage/ once, and a second start finds nothing to move',
   try {
     const legacy = await legacyInstall(base),
       root = join(base, 'storage');
-    assert.equal(await moveLegacyStorage(root, legacy), 5);
+    assert.equal(await moveLegacyStorage(root, legacy), 3);
     await assertMoved(root, legacy);
     assert.equal(await moveLegacyStorage(root, legacy), 0);
     // Instalasi baru tidak punya auth/ sama sekali.
@@ -86,7 +87,7 @@ test(
     try {
       const legacy = await legacyInstall(legacyBase),
         root = join(rootBase, 'storage');
-      assert.equal(await moveLegacyStorage(root, legacy), 5);
+      assert.equal(await moveLegacyStorage(root, legacy), 3);
       await assertMoved(root, legacy);
       assert.equal(existsSync(join(storagePaths(root).whatsapp, account + '.moving')), false);
     } finally {

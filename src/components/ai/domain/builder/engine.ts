@@ -3,9 +3,8 @@ import { summarizeSPO } from '../pipeline/context.js';
 import { createHash } from 'node:crypto';
 import { validatedAI } from '../pipeline/retry.js';
 import type { AIConfig, AITransport, AIMessage } from '../provider.js';
-import { tierConfig } from '../pipeline/models.js';
-import { isJevModel } from '../pipeline/jev-router.js';
-import type { ToolContext } from '../pipeline/runner.js';
+import { isJevModel, tierConfig } from '../pipeline/models.js';
+import type { ToolContext } from '../pipeline/scope.js';
 import { assertRunnable, type GraphDefinition, type GraphNode } from './definition.js';
 import { queryRecords, countCollection, getRecord, writeRecord } from './store.js';
 import { conditionMatches, systemVariables } from './conditions.js';
@@ -154,6 +153,7 @@ export async function runGraph(
         : v;
   const tool: GraphTool = async (n, value, _key) => {
     guard();
+    await config.checkpoint?.();
     const key =
       scope.requestId +
       ':' +
@@ -268,7 +268,6 @@ export async function runGraph(
                   state: {
                     ...state,
                     tiket_menunggu: pending,
-                    identitas_layanan: scope.identity ?? '',
                     perilaku_layanan: scope.behavior ?? '',
                   },
                   questions: {

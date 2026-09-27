@@ -22,7 +22,6 @@ const scope = {
   customer: '62811',
   customerName: 'Rina',
   requestId: randomUUID(),
-  knowledge: '',
   fallbackEnabled: false,
 };
 function node(id: string, type: GraphNode['type'], extra: Partial<GraphNode> = {}): GraphNode {

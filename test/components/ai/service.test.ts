@@ -1,7 +1,6 @@
-// Tes layanan Asisten AI: tagihan per kata, memori, tiket fallback, pengiriman ganda, foto produk, dan pengulangan
-// saat provider gagal.
-import { type AITools } from '../../../src/components/ai/domain/pipeline/runner.js';
-import { test, after } from 'node:test';
+// Tes layanan Asisten AI: tagihan per kata, memori, tiket fallback, pengiriman ganda, konteks, dan pengulangan saat
+// provider gagal. Sesi menjalankan graf uji (graph-fixture.ts) yang diterbitkan pemilik.
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -18,8 +17,54 @@ import { SessionManager } from '../../../src/components/whatsapp/domain/sessions
 import { ApiError } from '../../../src/libraries/errors.js';
 import { basicWallet } from '../../../src/components/billing/domain/plans.js';
 import { digest } from '../../../src/libraries/security.js';
+import { graphSystem } from '../../../src/components/ai/domain/profiles/registry.js';
+import { blankDefinition } from '../../../src/components/ai/domain/builder/definition.js';
+import { writeRecord } from '../../../src/components/ai/domain/builder/store.js';
+import { publishGraph, routedGraph, simpleGraph } from './graph-fixture.js';
 const ids: string[] = [],
-  managers: SessionManager[] = [];
+  managers: SessionManager[] = [],
+  graphs: string[] = [];
+const owner = randomUUID();
+let simple = '',
+  routed = '',
+  withData = '';
+before(async () => {
+  await db.execute("INSERT INTO accounts(id,email,password_hash,role) VALUES (?,?,?,'owner')", [
+    owner,
+    owner + '@test.invalid',
+    'unused',
+  ]);
+  // Agent "info" pada graf data boleh memanggil Cari dan Simpan pada koleksi Catatan.
+  const data = simpleGraph('Profil uji data');
+  data.collections = [
+    {
+      id: 'catatan',
+      name: 'Catatan',
+      owner: 'shared',
+      fields: [{ id: 'isi', label: 'Isi', type: 'text', required: true, options: [], collection: '' }],
+    },
+  ];
+  const tool = { ...blankDefinition().nodes[1], type: 'tool' as const, collection: 'catatan', x: 500 };
+  data.nodes.push(
+    { ...tool, id: 'cari', label: 'Cari', operation: 'search' },
+    { ...tool, id: 'simpan', label: 'Simpan', operation: 'create' },
+  );
+  data.nodes.find(n => n.id === 'info')!.tools = ['cari', 'simpan'];
+  for (const d of [simpleGraph(), routedGraph(), data]) graphs.push(await publishGraph(owner, d));
+  [simple, routed, withData] = graphs;
+});
+after(async () => {
+  for (const m of managers) await m.stop();
+  for (const id of graphs) {
+    await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [id]);
+    await db.execute('DELETE FROM ai_profile_types WHERE id=?', [id]);
+  }
+  for (const id of [...ids, owner]) {
+    await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
+    await db.execute('DELETE FROM accounts WHERE id=?', [id]);
+  }
+  await db.end();
+});
 class FixtureAI extends AIService {
   settings = { ...defaults, memory_limit: 3, secret: 'fixture' };
   override async config() {
@@ -33,7 +78,7 @@ async function fixture(
   events: string[] = [],
   presenceFail = false,
   raw = false,
-  tools?: AITools,
+  graph: 'simple' | 'routed' | 'data' = 'simple',
 ) {
   const id = randomUUID();
   ids.push(id);
@@ -43,24 +88,21 @@ async function fixture(
     raw
       ? call
       : async (c, m, max) => {
-          if (m[0]?.content.startsWith('Anda adalah ROUTER'))
-            return JSON.stringify({
-              s_p_o_konteks: 'Pelanggan meminta bantuan',
-              sub_agent: 'profil_perusahaan',
-              isi_pesan: m.filter(x => x.role === 'user').at(-1)!.content,
-            });
-          if (m[0]?.content.startsWith('Anda adalah Context Agent')) return 'pelanggan-menunggu-informasi';
+          if (c.call_role === 'router') return JSON.stringify({ branch: 'info', fallback_terkait: [] });
+          if (c.call_role === 'context') return 'pelanggan-menunggu-informasi';
           return JSON.stringify({ answer: await call(c, m, max) });
         },
     wait,
-    tools,
   );
   await service.adjust(id, id, { amount: 10000, reason: 'fixture', requestId: 'fixture' });
-  await service.saveAssistant(id, 'shop', {
-    enabled: true,
-    profile: { faq: 'Produk tersedia' },
-    behavior: 'Gunakan bahasa Indonesia',
-  });
+  const profile = (
+    await service.createDataProfile(id, {
+      profile_type: { simple, routed, data: withData }[graph],
+      name: 'Toko',
+    })
+  ).id;
+  await service.saveDataProfileField(id, profile, 'behavior', 'Gunakan bahasa Indonesia');
+  await service.attachProfile(id, 'shop', { data_profile_id: profile, enabled: true });
   let sent = 0;
   const manager = new SessionManager(async (_id, update) => {
     update({ status: 'connected' });
@@ -97,7 +139,7 @@ async function fixture(
     type: 'text' as const,
     timestamp: 1,
   });
-  return { id, service, manager, message, sent: () => sent };
+  return { id, service, manager, message, profile, sent: () => sent };
 }
 async function rows(id: string) {
   return await db
@@ -123,14 +165,6 @@ test('AI history pagination separates accounts and provides stable pages and bou
   assert.equal((await other.service.usagePage(other.id, '1')).total, 0);
   for (const page of ['0', '-1', '1.5', 'x', ['1']]) await assert.rejects(f.service.usagePage(f.id, page));
 });
-after(async () => {
-  for (const m of managers) await m.stop();
-  for (const id of ids) {
-    await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
-    await db.execute('DELETE FROM accounts WHERE id=?', [id]);
-  }
-  await db.end();
-});
 test('Word billing is deterministic for whitespace, punctuation, URLs, emoji and unspaced language', () => {
   assert.equal(countWords(' \n\t '), 0);
   assert.equal(countWords('Halo,  dunia!\nhttps://example.com 🙂 中文'), 5);
@@ -142,32 +176,19 @@ test('Word billing is deterministic for whitespace, punctuation, URLs, emoji and
 });
 test('Fallback ticket stays scoped to its session and forwards a team reply to the right customer', async () => {
   const f = await fixture(
-    async c => {
-      if (c.call_role === 'router')
-        return JSON.stringify({
-          s_p_o_konteks: 'pelanggan meminta keputusan',
-          sub_agent: 'lainnya',
-          isi_pesan: 'Bisa diskon khusus?',
-        });
-      if (c.call_role === 'context') return 'pelanggan-menunggu-konfirmasi';
-      return JSON.stringify({
+    async () =>
+      JSON.stringify({
         fallback: 'Diskon perlu persetujuan',
         question: 'Apakah diskon khusus dapat diberikan?',
-      });
-    },
+      }),
     false,
     async () => {},
     [],
     false,
     true,
   );
-  await f.service.saveAssistant(f.id, 'shop', {
-    enabled: true,
-    profile: {},
-    behavior: '',
-    fallback_number: '628999999999',
-    fallback_notify: true,
-  });
+  await f.service.saveField(f.id, 'shop', 'fallback_number', '628999999999');
+  await f.service.saveField(f.id, 'shop', 'fallback_notify', true);
   await f.service.incoming(f.id, f.manager, 'shop', f.message('fallback-one', 'Bisa diskon khusus?'));
   const [tickets] = await db.execute<any[]>('SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=?', [
     f.id,
@@ -190,16 +211,7 @@ test('Fallback ticket stays scoped to its session and forwards a team reply to t
 });
 test('Web-only fallback creates a ticket without team notification and can resolve it', async () => {
   const f = await fixture(
-    async c =>
-      c.call_role === 'router'
-        ? JSON.stringify({
-            s_p_o_konteks: 'pelanggan meminta keputusan',
-            sub_agent: 'lainnya',
-            isi_pesan: 'Butuh persetujuan',
-          })
-        : c.call_role === 'context'
-          ? 'pelanggan-menunggu-konfirmasi'
-          : JSON.stringify({ fallback: 'Butuh keputusan', question: 'Setujui permintaan pelanggan?' }),
+    async () => JSON.stringify({ fallback: 'Butuh keputusan', question: 'Setujui permintaan pelanggan?' }),
     false,
     async () => {},
     [],
@@ -215,10 +227,6 @@ test('Web-only fallback creates a ticket without team notification and can resol
     { ok: true, status: 'resolved' },
   );
   assert.equal(f.sent(), 2);
-  const applied = await f.service.applyFallbackKnowledge(f.id, 'shop', tickets[0].id, {
-    content: 'Persetujuan khusus diproses setelah konfirmasi tim.',
-  });
-  assert.ok(applied.knowledge.includes('Persetujuan khusus'));
 });
 test('Duplicate messages charge and send once; rates are snapshotted and latest input appears once', async () => {
   let seen: AIMessage[] = [];
@@ -238,9 +246,10 @@ test('Duplicate messages charge and send once; rates are snapshotted and latest 
   assert.equal(usage[0].status, 'sent');
   assert.equal(usage[0].input_rate, 1);
   assert.equal(usage[0].output_rate, 2);
+  // Yang ditagih adalah pesan sistem, perilaku, dan memori percakapan; prompt node tidak ikut dihitung.
   assert.equal(
     usage[0].input_words,
-    seen.slice(0, -1).reduce((n, m) => n + countWords(m.content), 0),
+    [graphSystem, 'Gunakan bahasa Indonesia', 'Halo pelanggan'].reduce((n, text) => n + countWords(text), 0),
   );
   assert.equal(seen.filter(m => m.content === 'Halo pelanggan').length, 1);
   assert.equal(usage[0].charged, usage[0].input_words + 4);
@@ -267,7 +276,7 @@ test('Memory holds individual messages within the global limit and is isolated b
     await f.service.incoming(f.id, f.manager, 'shop', f.message('new', 'Pelanggan lain', '628999999999'));
     assert.equal(calls[3].filter(m => m.role !== 'system').length, 1);
     await f.manager.create('other');
-    await f.service.saveAssistant(f.id, 'other', { enabled: true, profile: {}, behavior: '' });
+    await f.service.attachProfile(f.id, 'other', { data_profile_id: f.profile, enabled: true });
     await f.service.incoming(f.id, f.manager, 'other', f.message('same', 'Nomor lain'));
     assert.equal(calls[4].filter(m => m.role !== 'system').length, 1);
     const other = await fixture();
@@ -326,15 +335,19 @@ test('Concurrent customers cannot overspend, groups/media and disabled/paused as
       f.service.incoming(f.id, f.manager, 'shop', f.message('m' + i, 'Halo', '62812345000' + i)),
     ),
   );
+  // Sisa 50 kredit hanya cukup untuk sebagian pelanggan: setiap panggilan punya reservasi dan totalnya tidak melebihi saldo.
+  const usage = await rows(f.id);
   assert.ok((await f.service.wallet(f.id)).balance >= 0);
-  assert.ok(calls <= 1);
-  await f.service.saveAssistant(f.id, 'shop', { enabled: false, profile: {}, behavior: '' });
+  assert.equal(calls, usage.length);
+  assert.ok(calls >= 1 && calls < 5);
+  assert.ok(usage.reduce((n, r) => n + Number(r.charged), 0) <= 50);
+  await f.service.setEnabled(f.id, 'shop', false);
   const before = calls;
   await f.service.incoming(f.id, f.manager, 'shop', f.message('off'));
   await f.service.incoming(f.id, f.manager, 'shop', { ...f.message('group'), isGroup: true });
   await f.service.incoming(f.id, f.manager, 'shop', { ...f.message('image'), type: 'image' });
   assert.equal(calls, before);
-  await f.service.saveAssistant(f.id, 'shop', { enabled: true, profile: {}, behavior: '' });
+  await f.service.setEnabled(f.id, 'shop', true);
   await f.service.conversation(f.id, 'shop', '628123456789', { paused: true });
   await f.service.incoming(f.id, f.manager, 'shop', f.message('paused'));
   assert.equal(calls, before);
@@ -445,23 +458,22 @@ test('Gateway assistant routes verify session ownership and account isolation', 
       .set('Origin', origin)
       .send({ id: 'shop' })
       .expect(200);
-    await request(app)
-      .put('/sessions/shop/ai')
+    const mine = await request(app)
+      .patch('/sessions/shop/ai/field')
       .set('Cookie', 'ncwa_session=' + tokens[0])
       .set('Origin', origin)
-      .send({ enabled: true, profile: { faq: 'Tenant A only' }, behavior: '', accountId: g.id })
+      .send({ field: 'behavior', value: 'Tenant A only', accountId: g.id })
       .expect(200);
+    assert.equal(mine.body.behavior, 'Tenant A only');
     const other = await request(app)
       .get('/sessions/shop/ai')
       .set('Cookie', 'ncwa_session=' + tokens[1])
       .expect(200);
-    assert.equal(other.body.profile.faq, 'Produk tersedia');
-    assert.ok(other.body.knowledge.includes('Produk tersedia'));
-    assert.ok(!other.body.knowledge.includes('Tenant A only'));
+    assert.equal(other.body.behavior, 'Gunakan bahasa Indonesia');
     await request(app)
-      .put('/sessions/shop/ai')
+      .patch('/sessions/shop/ai/field')
       .set('Cookie', 'ncwa_session=' + tokens[0])
-      .send({ enabled: false, profile: {}, behavior: '' })
+      .send({ field: 'behavior', value: '' })
       .expect(403);
   } finally {
     await gateway.stop();
@@ -581,23 +593,24 @@ test('Manual media pauses conversation, but groups and disabled assistants are i
   assert.equal((await f.service.conversations(f.id, 'shop')).length, 0);
   await f.service.manualOutgoing(f.id, 'shop', { ...f.message('image', 'Foto produk'), type: 'image' });
   assert.equal(((await f.service.conversations(f.id, 'shop')) as any[])[0].paused, 1);
-  await f.service.saveAssistant(f.id, 'shop', { enabled: false, profile: {}, behavior: '' });
+  await f.service.setEnabled(f.id, 'shop', false);
   await f.service.manualOutgoing(f.id, 'shop', f.message('disabled', 'Halo', '628999999999'));
   assert.equal((await f.service.conversations(f.id, 'shop')).length, 1);
 });
 
-test('Multi-agent WhatsApp flow switches agents, persists shared memory across restart, and isolates identical customer IDs', async () => {
+test('Routed WhatsApp flow switches agents, persists shared memory across restart, and isolates identical customer IDs', async () => {
   const observed: { input: string; history: AIMessage[] }[] = [];
-  const transport: AITransport = async (_config, m) => {
-    if (m[0].content.startsWith('Anda adalah Context Agent')) return 'pelanggan-menunggu-layanan';
+  const transport: AITransport = async (c, m) => {
+    if (c.call_role === 'context') return 'pelanggan-menunggu-layanan';
+    if (c.call_role === 'router') {
+      const input = JSON.parse(m.at(-1)!.content).input.message as string;
+      return JSON.stringify({ branch: input.startsWith('info') ? 'info' : 'layanan', fallback_terkait: [] });
+    }
     const input = m.filter(x => x.role === 'user').at(-1)!.content;
-    const agent = input.startsWith('info') ? 'profil_perusahaan' : 'layanan';
-    if (m[0].content.startsWith('Anda adalah ROUTER'))
-      return JSON.stringify({ sub_agent: agent, s_p_o_konteks: 'Pelanggan meminta layanan', isi_pesan: input });
     observed.push({ input, history: m.filter(x => x.role !== 'system') });
-    return JSON.stringify({ answer: 'Balasan ' + agent });
+    return JSON.stringify({ answer: 'Balasan ' + c.call_role });
   };
-  const f = await fixture(transport, false, async () => {}, [], false, true);
+  const f = await fixture(transport, false, async () => {}, [], false, true, 'routed');
   await Promise.all(
     ['info produk', 'saran produk', 'pesan produk'].map((input, i) =>
       f.service.incoming(f.id, f.manager, 'shop', f.message('switch-' + i, input)),
@@ -611,72 +624,55 @@ test('Multi-agent WhatsApp flow switches agents, persists shared memory across r
   const restarted = new FixtureAI(transport, async () => {});
   await restarted.incoming(f.id, f.manager, 'shop', f.message('restart', 'status pesanan'));
   assert.ok(observed[3].history.some(x => x.content === 'Balasan layanan'));
-  assert.deepEqual((await rows(f.id)).map(x => x.agent).sort(), ['layanan', 'layanan', 'layanan', 'profil_perusahaan']);
-  const g = await fixture(transport, false, async () => {}, [], false, true);
-  await g.service.saveAssistant(g.id, 'shop', {
-    enabled: true,
-    profile: { faq: 'Tenant B only' },
-    behavior: '',
-    products_source: { mode: 'endpoint', endpoint: 'https://8.8.8.8/products' },
-    orders_source: { mode: 'builtin' },
-  });
+  assert.deepEqual((await rows(f.id)).map(x => x.agent).sort(), ['info', 'layanan', 'layanan', 'layanan']);
+  const g = await fixture(transport, false, async () => {}, [], false, true, 'routed');
   await g.service.incoming(g.id, g.manager, 'shop', g.message('switch-0', 'info tenant B'));
   assert.deepEqual(observed.at(-1)!.history, [{ role: 'user', content: 'info tenant B' }]);
-  assert.equal((await f.service.assistant(f.id, 'shop')).products_source.mode, 'builtin');
-  assert.equal((await g.service.assistant(g.id, 'shop')).products_source.mode, 'endpoint');
   const [stored] = await db.execute<any[]>('SELECT messages FROM ai_conversations WHERE account_id=?', [f.id]);
   const json = JSON.stringify(stored);
-  assert.ok(!json.includes('s_p_o_konteks'));
-  assert.ok(!json.includes('sub_agent'));
-  assert.ok(!json.includes('Tenant B'));
+  assert.ok(!json.includes('fallback_terkait'));
+  assert.ok(!json.includes('pelanggan-menunggu-layanan'));
+  assert.ok(!json.includes('tenant B'));
 });
 
-test('Tool calls use authenticated tenant context and cannot run after manual takeover', async () => {
-  const executed: string[] = [];
-  const tools: AITools = {
-    async execute(name, _query, scope) {
-      executed.push(scope.account);
-      assert.equal(scope.session, 'shop');
-      assert.equal(scope.customer, '628123456789');
-      assert.equal(name, 'get_knowledge');
-      return { knowledge: scope.knowledge };
-    },
-  };
+test('Data nodes run with the authenticated tenant scope and never write after manual takeover', async () => {
+  const prompts: string[] = [];
+  // Giliran pertama agent memanggil Cari; setelah ada hasil tool, agent menjawab.
   const transport: AITransport = async (_c, m) => {
-    if (m[0].content.startsWith('Anda adalah Context Agent')) return 'pelanggan-menunggu-pesanan';
-    if (m[0].content.startsWith('Anda adalah ROUTER'))
-      return JSON.stringify({
-        sub_agent: 'profil_perusahaan',
-        s_p_o_konteks: 'Pelanggan meminta informasi',
-        isi_pesan: m.filter(x => x.role === 'user').at(-1)!.content,
-      });
-    return m.some(x => x.content.startsWith('Tool result'))
-      ? JSON.stringify({ answer: 'Informasi tersedia' })
-      : JSON.stringify({ tool: 'get_knowledge', query: '' });
+    prompts.push(m[0].content);
+    return m[0].content.includes('Hasil tool: []')
+      ? JSON.stringify({ tool: 'cari', query: '' })
+      : JSON.stringify({ answer: 'Informasi tersedia' });
   };
-  const f = await fixture(transport, false, async () => {}, [], false, true, tools),
-    g = await fixture(transport, false, async () => {}, [], false, true, tools);
-  await Promise.all([
-    f.service.incoming(f.id, f.manager, 'shop', f.message('tool')),
-    g.service.incoming(g.id, g.manager, 'shop', g.message('tool')),
-  ]);
-  assert.deepEqual(executed.sort(), [f.id, g.id].sort());
+  const f = await fixture(transport, false, async () => {}, [], false, true, 'data'),
+    g = await fixture(transport, false, async () => {}, [], false, true, 'data');
+  await writeRecord(f.id, f.profile, 'catatan', 'create', { data: { isi: 'Rahasia toko A' } });
+  await writeRecord(g.id, g.profile, 'catatan', 'create', { data: { isi: 'Rahasia toko B' } });
+  await f.service.incoming(f.id, f.manager, 'shop', f.message('tool'));
+  const seen = prompts.at(-1)!;
+  assert.ok(seen.includes('Rahasia toko A'));
+  assert.ok(!seen.includes('Rahasia toko B'));
+  assert.equal(f.sent(), 1);
+  // Admin mengambil alih saat agent memutuskan menyimpan: node Simpan tidak pernah dijalankan.
   const paused = await fixture(
-    async (c, m, max) => {
-      if (!m[0].content.startsWith('Anda adalah ROUTER'))
-        await paused.service.manualOutgoing(paused.id, 'shop', paused.message('manual-takeover', 'Admin membantu'));
-      return transport(c, m, max);
+    async () => {
+      await paused.service.manualOutgoing(paused.id, 'shop', paused.message('manual-takeover', 'Admin membantu'));
+      return JSON.stringify({ tool: 'simpan', query: { data: { isi: 'Tidak boleh tersimpan' } } });
     },
     false,
     async () => {},
     [],
     false,
     true,
-    tools,
+    'data',
   );
   await paused.service.incoming(paused.id, paused.manager, 'shop', paused.message('paused-tool'));
-  assert.ok(!executed.includes(paused.id));
+  const [records] = await db.execute<any[]>('SELECT COUNT(*) AS n FROM ai_data_records WHERE account_id=?', [
+    paused.id,
+  ]);
+  assert.equal(Number(records[0].n), 0);
   assert.equal(paused.sent(), 0);
+  assert.equal((await rows(paused.id))[0].status, 'cancelled');
   assert.equal((await paused.service.wallet(paused.id)).balance, 10000);
 });
 
@@ -688,6 +684,7 @@ test('Malformed router output refunds reservation and sends one safe fallback wi
     [],
     false,
     true,
+    'routed',
   );
   await f.service.incoming(f.id, f.manager, 'shop', f.message('invalid-route'));
   assert.equal(f.sent(), 1);
@@ -695,169 +692,27 @@ test('Malformed router output refunds reservation and sends one safe fallback wi
   assert.equal((await rows(f.id))[0].status, 'fallback_sent');
 });
 
-test('WhatsApp transaction creates a built-in order, support reads it using shared memory, and Knowledge stays behind its tool', async () => {
-  const { aiData } = await import('../../../src/components/ai/domain/profiles/cs/store.js');
-  let orderId = '';
-  const transport: AITransport = async (_c, m) => {
-    if (m[0].content.startsWith('Anda adalah Context Agent')) return 'pelanggan-menunggu-pesanan';
-    if (m[0].content.startsWith('Anda adalah Agent Pesanan')) {
-      assert.deepEqual(JSON.parse(m[1].content).produk, ['Produk asli tenant']);
-      return JSON.stringify({
-        lengkap: true,
-        items: [{ product_name: 'Produk asli tenant', quantity: 2 }],
-        notes: 'Pesanan pelanggan',
-      });
-    }
-    const input = m.filter(x => x.role === 'user').at(-1)!.content,
-      checking = input === 'Bagaimana statusnya?';
-    assert.ok(!JSON.stringify(m).includes('KNOWLEDGE_PRIVATE'));
-    if (m[0].content.startsWith('Anda adalah ROUTER')) {
-      if (checking) assert.ok(m[1].content.includes('pelanggan-menunggu-pesanan'));
-      return JSON.stringify({ sub_agent: 'layanan', s_p_o_konteks: 'Pelanggan meminta pesanan', isi_pesan: input });
-    }
-    const result = m.find(x => x.content.startsWith('Tool result ' + (checking ? 'check_order' : 'create_order')));
-    if (result) {
-      const data = JSON.parse(result.content.slice(result.content.indexOf('{')));
-      orderId = data.order.id;
-      return JSON.stringify({ answer: checking ? 'Status ' + data.order.status : 'Pesanan ' + orderId + ' tercatat' });
-    }
-    if (checking) {
-      assert.ok(m.some(x => x.content.includes(orderId)));
-      return JSON.stringify({ tool: 'check_order', query: orderId });
-    }
-    if (m.some(x => x.content.startsWith('Tool result get_products')))
-      return JSON.stringify({ tool: 'create_order', query: '2 Produk asli tenant, catatan: Pesanan pelanggan' });
-    return JSON.stringify({ tool: 'get_products', query: 'Produk asli tenant' });
-  };
-  const f = await fixture(transport, false, async () => {}, [], false, true);
-  await f.service.saveAssistant(f.id, 'shop', {
-    enabled: true,
-    profile: { faq: 'KNOWLEDGE_PRIVATE' },
-    behavior: 'Ramah',
-  });
-  const profile = (await f.service.assistant(f.id, 'shop')).data_profile!.id;
-  await aiData.saveProduct(f.id, profile, '', {
-    name: 'Produk asli tenant',
-    description: 'Produk harian',
-    type: 'product',
-    price: 100000,
-    stock: 5,
-    active: true,
-  });
-  await f.service.incoming(f.id, f.manager, 'shop', f.message('order-create', 'Pesankan dua produk'));
-  assert.ok(orderId);
-  assert.equal((await aiData.orders(f.id, profile))[0].total, 200000);
-  await f.service.incoming(f.id, f.manager, 'shop', f.message('order-check', 'Bagaimana statusnya?'));
-  assert.equal(f.sent(), 2);
-  assert.equal((await aiData.orders(f.id, profile)).length, 1);
-});
-
-test('Product photo is sent before the text answer, via WhatsApp media, and only for the final answer', async () => {
-  const { aiData } = await import('../../../src/components/ai/domain/profiles/cs/store.js');
-  const { ProductImageStore } = await import('../../../src/components/ai/domain/profiles/cs/product-images.js');
-  const { mkdtemp, rm } = await import('node:fs/promises'),
-    { tmpdir } = await import('node:os'),
-    { join } = await import('node:path');
-  const sharp = (await import('sharp')).default;
-  const { Readable } = await import('node:stream');
-  const root = await mkdtemp(join(tmpdir(), 'ncwa-ai-image-test-'));
-  const images = new ProductImageStore(root);
-  const id = randomUUID();
-  ids.push(id);
-  await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)', [id, id + '@test.invalid', 'unused']);
-  await basicWallet(id);
-  const transport: AITransport = async (_c, m) => {
-    if (m[0].content.startsWith('Anda adalah Context Agent')) return 'pelanggan-menunggu-foto';
-    const input = m.filter(x => x.role === 'user').at(-1)!.content;
-    if (m[0].content.startsWith('Anda adalah ROUTER'))
-      return JSON.stringify({ sub_agent: 'layanan', s_p_o_konteks: 'Pelanggan meminta foto produk', isi_pesan: input });
-    if (m.some(x => x.content.startsWith('Tool result send_product_image')))
-      return JSON.stringify({ answer: 'Ini fotonya ya.' });
-    return JSON.stringify({ tool: 'send_product_image', query: 'Produk berfoto' });
-  };
-  const service = new FixtureAI(transport);
-  service.productImages = images;
-  await service.adjust(id, id, { amount: 10000, reason: 'fixture', requestId: 'fixture' });
-  await service.saveAssistant(id, 'shop', { enabled: true, profile: { faq: 'Produk tersedia' }, behavior: 'Ramah' });
-  const photo = await sharp({ create: { width: 100, height: 100, channels: 3, background: { r: 1, g: 2, b: 3 } } })
-    .png()
-    .toBuffer();
-  // Produk dan foto berada di data profil milik sesi.
-  const profile = (await service.assistant(id, 'shop')).data_profile!.id;
-  const saved = await images.save(id, profile, 'photo.png', Readable.from(photo));
-  await aiData.saveProduct(id, profile, '', {
-    name: 'Produk berfoto',
-    description: 'Ada fotonya',
-    type: 'product',
-    price: 50000,
-    stock: 5,
-    active: true,
-    image_id: saved.id,
-  });
-  const sentContent: unknown[] = [];
-  const manager = new SessionManager(async (_id, update) => {
-    update({ status: 'connected' });
-    return {
-      close() {},
-      async logout() {},
-      async exists() {
-        return true;
-      },
-      async read() {},
-      async typing() {},
-      async send(jid: string, content: unknown) {
-        sentContent.push(content);
-        return 'reply-' + sentContent.length;
-      },
-    };
-  });
-  managers.push(manager);
-  await manager.create('shop');
-  const message = (messageId: string, text = 'Halo', from = '628123456789') => ({
-    messageId,
-    text,
-    from,
-    sender: from,
-    isGroup: false,
-    groupId: null,
-    type: 'text' as const,
-    timestamp: 1,
-  });
-  const whatsappBalanceBefore = (await basicWallet(id)).balance;
-  await service.incoming(id, manager, 'shop', message('photo-request', 'Boleh lihat foto produknya?'));
-  assert.equal(sentContent.length, 2);
-  assert.equal((sentContent[0] as { type?: string }).type, 'image');
-  assert.ok(String((sentContent[0] as { url: string }).url).includes(saved.id));
-  assert.deepEqual(sentContent[1], { text: 'Ini fotonya ya.' });
-  // Dua pesan keluar (gambar + teks) sama-sama memotong wallet kredit WhatsApp, bukan wallet kredit AI.
-  assert.equal((await basicWallet(id)).balance, whatsappBalanceBefore - 2);
-  await rm(root, { recursive: true, force: true });
-});
-
 test('Router context persists, feeds next turn, stays isolated and clears with memory', async () => {
   const seen: AIMessage[][] = [];
-  const transport: AITransport = async (_c, m) => {
-    if (m[0].content.startsWith('Anda adalah ROUTER')) {
+  const transport: AITransport = async (c, m) => {
+    if (c.call_role === 'router') {
       seen.push(m);
-      return JSON.stringify({
-        sub_agent: 'layanan',
-        s_p_o_konteks: 'Pelanggan memesan barang',
-        isi_pesan: m.at(-1)!.content,
-      });
+      return JSON.stringify({ branch: 'layanan', fallback_terkait: [] });
     }
-    if (m[0].content.startsWith('Anda adalah Context Agent')) return 'pelanggan-mengonfirmasi-pesanan';
+    if (c.call_role === 'context') return 'pelanggan-mengonfirmasi-pesanan';
     return JSON.stringify({ answer: 'Ingin memesan produk ini?' });
   };
-  const f = await fixture(transport, false, async () => {}, [], false, true);
+  // Router membaca pesan terbaru dan konteks Shared Memory dari data eksekusi.
+  const input = (m: AIMessage[]) => JSON.parse(m.at(-1)!.content).input;
+  const f = await fixture(transport, false, async () => {}, [], false, true, 'routed');
   await f.service.incoming(f.id, f.manager, 'shop', f.message('first'));
   const restarted = new FixtureAI(transport, async () => {});
   await restarted.incoming(f.id, f.manager, 'shop', f.message('next', 'ya'));
-  assert.equal(seen[0][1].content, 'Konteks S-P-O sebelumnya: null');
-  assert.equal(seen[1][1].content, 'Konteks S-P-O sebelumnya: "pelanggan-mengonfirmasi-pesanan"');
-  assert.equal(seen[1].at(-1)!.content, 'ya');
-  assert.equal(seen[1].length, 3);
+  assert.equal(input(seen[0]).context, null);
+  assert.equal(input(seen[1]).context, 'pelanggan-mengonfirmasi-pesanan');
+  assert.equal(input(seen[1]).message, 'ya');
   await restarted.incoming(f.id, f.manager, 'shop', f.message('other', 'ya', '628999999999'));
-  assert.equal(seen[2][1].content, 'Konteks S-P-O sebelumnya: null');
+  assert.equal(input(seen[2]).context, null);
   const [stored] = await db.execute<any[]>(
     'SELECT messages,router_context FROM ai_conversations WHERE account_id=? AND customer=?',
     [f.id, '628123456789'],
@@ -876,14 +731,9 @@ test('Failed delivery, failed context updates and manual takeover cannot leave m
   assert.equal(((await failed.service.conversations(failed.id, 'shop')) as any[])[0].router_context, null);
   let failContext = false;
   const f = await fixture(
-    async (_c, m) => {
-      if (m[0].content.startsWith('Anda adalah ROUTER'))
-        return JSON.stringify({
-          sub_agent: 'profil_perusahaan',
-          s_p_o_konteks: 'Pelanggan meminta informasi',
-          isi_pesan: m.at(-1)!.content,
-        });
-      if (m[0].content.startsWith('Anda adalah Context Agent')) {
+    async c => {
+      if (c.call_role === 'router') return JSON.stringify({ branch: 'info', fallback_terkait: [] });
+      if (c.call_role === 'context') {
         if (failContext) throw Error('timeout');
         return 'pelanggan-menunggu-informasi';
       }
@@ -894,15 +744,18 @@ test('Failed delivery, failed context updates and manual takeover cannot leave m
     [],
     false,
     true,
+    'routed',
   );
   await f.service.incoming(f.id, f.manager, 'shop', f.message('first'));
   assert.equal(
     ((await f.service.conversations(f.id, 'shop')) as any[])[0].router_context,
     'pelanggan-menunggu-informasi',
   );
+  // Ringkasan yang gagal menggagalkan jawaban graf: pelanggan menerima jawaban aman dan konteks lama dikosongkan.
   failContext = true;
   await f.service.incoming(f.id, f.manager, 'shop', f.message('second'));
   assert.equal(f.sent(), 2);
+  assert.equal((await rows(f.id)).find(r => r.status !== 'sent')?.status, 'fallback_sent');
   assert.equal(((await f.service.conversations(f.id, 'shop')) as any[])[0].router_context, null);
   failContext = false;
   await f.service.incoming(f.id, f.manager, 'shop', f.message('third'));
@@ -935,7 +788,7 @@ test('Transient provider failures retry with backoff, retain billing and record 
   const usage = (await rows(f.id))[0],
     trace = typeof usage.model_calls === 'string' ? JSON.parse(usage.model_calls) : usage.model_calls;
   assert.deepEqual(
-    trace.filter((c: any) => c.role === 'profil_perusahaan').map((c: any) => [c.status, c.attempt]),
+    trace.filter((c: any) => c.role === 'info').map((c: any) => [c.status, c.attempt]),
     [
       ['failed', 1],
       ['failed', 2],
@@ -980,43 +833,6 @@ test('Pause during retry cancels further calls and suppresses fallback', async (
   assert.equal(f.sent(), 0);
   assert.equal((await rows(f.id))[0].status, 'cancelled');
   assert.equal((await f.service.wallet(f.id)).balance, 10000);
-});
-
-test('Read tools retry once but uncertain order mutations are never replayed', async () => {
-  for (const name of ['get_products', 'create_order'] as const) {
-    let executions = 0;
-    const f = await fixture(
-      async (c, m) => {
-        if (c.call_role === 'router')
-          return JSON.stringify({
-            sub_agent: 'layanan',
-            s_p_o_konteks: 'Pelanggan memesan barang',
-            isi_pesan: m.filter(x => x.role === 'user').at(-1)!.content,
-          });
-        if (c.call_role === 'context') return 'pelanggan-menunggu-pesanan';
-        if (c.call_role === 'pesanan')
-          return JSON.stringify({ lengkap: true, items: [{ product_name: 'Produk', quantity: 1 }], notes: '' });
-        if (m.some(x => x.content.startsWith('Tool result'))) return JSON.stringify({ answer: 'Baik' });
-        return JSON.stringify({ tool: name, query: '' });
-      },
-      false,
-      async () => {},
-      [],
-      false,
-      true,
-      {
-        execute: async tool => {
-          if (tool !== name) return { products: [{ name: 'Produk' }] };
-          if (++executions === 1) throw Error('endpoint_http_503');
-          return [];
-        },
-      },
-    );
-    await f.service.incoming(f.id, f.manager, 'shop', f.message('tool-retry'));
-    assert.equal(executions, name === 'get_products' ? 2 : 1);
-    assert.equal(f.sent(), 1);
-    assert.equal((await rows(f.id))[0].status, name === 'get_products' ? 'sent' : 'fallback_sent');
-  }
 });
 
 test('Full auto persists per conversation, survives manual replies, and explicit pause disables it', async () => {
@@ -1103,7 +919,7 @@ test('Owner model configuration persists, legacy fallback works, tests select ea
       );
     }
   }
-  const tiered = await fixture();
+  const tiered = await fixture(undefined, false, async () => {}, [], false, false, 'routed');
   Object.assign(tiered.service.settings, {
     model_cheap: 'cheap-fixture',
     model_medium: 'medium-fixture',
@@ -1116,7 +932,7 @@ test('Owner model configuration persists, legacy fallback works, tests select ea
     trace.map((c: any) => [c.role, c.model]),
     [
       ['router', 'cheap-fixture'],
-      ['profil_perusahaan', 'medium-fixture'],
+      ['info', 'medium-fixture'],
       ['context', 'cheap-fixture'],
     ],
   );

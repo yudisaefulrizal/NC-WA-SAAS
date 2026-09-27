@@ -1,6 +1,6 @@
 // Sumber data per koleksi: tabel aplikasi (bawaan) atau API milik klien. Bila API, semua operasi node Data untuk
-// koleksi itu dikirim ke API dengan kontrak yang sama dengan endpoint CS (action, query, context), lalu hasilnya
-// diperiksa terhadap struktur koleksi sebelum dipakai alur.
+// koleksi itu dikirim ke API (action, collection, query, context), lalu hasilnya diperiksa terhadap struktur koleksi
+// sebelum dipakai alur.
 import type { PoolConnection } from 'mysql2/promise';
 import { db } from '../../../../libraries/db.js';
 import { encrypt } from '../../../../libraries/crypto.js';
@@ -8,13 +8,13 @@ import { digest } from '../../../../libraries/security.js';
 import { record } from '../../../../libraries/validation.js';
 import { ApiError } from '../../../../libraries/errors.js';
 import { transaction, lockAccount } from '../transaction.js';
-import { callEndpoint, sourceInput, type DataSource, type EndpointTransport } from '../endpoint.js';
+import { builtinSource, callEndpoint, sourceInput, type DataSource, type EndpointTransport } from '../endpoint.js';
 import * as sourcesSql from '../../data-access/collection-sources-queries.js';
 import { recordDefinition, type RecordSearch } from './store.js';
 import { fieldValue, validateRecord, type Collection } from './definition.js';
 import type { RecordAdapter } from './record-tools.js';
 import type { StoredRecord } from './record-query.js';
-import type { ToolContext } from '../pipeline/runner.js';
+import type { ToolContext } from '../pipeline/scope.js';
 
 export const collectionResponseBytes = 64000;
 let transport: EndpointTransport = callEndpoint;
@@ -28,7 +28,7 @@ export async function collectionSource(account: string, profile: string, collect
   const [rows] = await sourcesSql.find(db, [account, profile, collection]);
   return rows[0]
     ? { mode: 'endpoint', endpoint: String(rows[0].endpoint), secret: String(rows[0].secret) }
-    : { mode: 'builtin', endpoint: '', secret: '' };
+    : builtinSource;
 }
 export async function listCollectionSources(account: string, profile: string) {
   const d = await recordDefinition(account, profile);
@@ -43,7 +43,7 @@ export async function listCollectionSources(account: string, profile: string) {
     };
   });
 }
-// Token lama tetap dipakai bila URL sama dan token tidak diisi ulang, sama seperti sumber data CS.
+// Token lama tetap dipakai bila URL sama dan token tidak diisi ulang.
 export async function saveCollectionSource(account: string, profile: string, collection: string, body: unknown) {
   const d = await recordDefinition(account, profile);
   if (!d.collections.some(c => c.id === collection))
@@ -77,7 +77,7 @@ export async function testCollectionSource(account: string, profile: string, col
   const source = await collectionSource(account, profile, collection);
   if (!c || source.mode !== 'endpoint')
     throw new ApiError(409, 'collection_not_api', 'Koleksi ini memakai tabel aplikasi.');
-  const context = { account, profile, session: '', customer: '', requestId: 'test_' + Date.now(), knowledge: '' };
+  const context = { account, profile, session: '', customer: '', requestId: 'test_' + Date.now() };
   return remoteRecords(source, context).search(c, { keyword: '', groups: [], limit: 10 });
 }
 // Membungkus adapter tabel aplikasi: koleksi yang diganti API diteruskan ke adapter API.

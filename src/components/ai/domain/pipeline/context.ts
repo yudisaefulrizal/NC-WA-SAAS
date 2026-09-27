@@ -1,4 +1,4 @@
-// Kontrak ringkasan S-P-O yang dipakai bersama oleh pipeline bawaan dan node Context graf.
+// Kontrak ringkasan S-P-O node Context graf.
 import type { AIConfig, AIMessage, AITransport } from '../provider.js';
 import { validatedAI } from './retry.js';
 

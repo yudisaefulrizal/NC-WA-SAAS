@@ -261,7 +261,7 @@ test('HTTP: redeem endpoint works through the authenticated app router', async (
     referred = await account();
   const service = await enableReferral(referrer, { referrer_signup_wa_credits: 0 });
   const code = await service.code(referrer);
-  const app = createApp(undefined, undefined, undefined, service);
+  const app = createApp(undefined, undefined, service);
   const token = randomUUID();
   await db.execute('INSERT INTO login_sessions VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR))', [
     digest(token),

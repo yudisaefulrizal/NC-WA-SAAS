@@ -1,6 +1,6 @@
 // Tes riwayat chat: urutan pesan dari semua asal, status terkirim, catatan kendali AI, daftar percakapan, dan asal
 // pesan yang tidak pernah turun.
-import { test, after } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
@@ -16,9 +16,22 @@ import { db } from '../../../src/libraries/db.js';
 import { digest } from '../../../src/libraries/security.js';
 import { basicWallet } from '../../../src/components/billing/domain/plans.js';
 import { recordOutgoing, chatMessages } from '../../../src/components/ai/domain/chat.js';
+import { publishGraph, simpleGraph } from './graph-fixture.js';
 
 const root = await mkdtemp(join(tmpdir(), 'ncwa-chat-'));
 const accounts: string[] = [];
+// Sesi uji memakai data profil dari graf terbit, supaya AI-nya menyala dan balasan manual bisa menjedanya.
+const owner = randomUUID();
+let profile = '';
+before(async () => {
+  accounts.push(owner);
+  await db.execute("INSERT INTO accounts(id,email,password_hash,role) VALUES (?,?,?,'owner')", [
+    owner,
+    owner + '@test.invalid',
+    'unused',
+  ]);
+  profile = await publishGraph(owner, simpleGraph());
+});
 // WhatsApp tiruan: mengingat callback pembaruan tiap sesi dan, seperti konektor Baileys, mendaftarkan setiap kiriman
 // sebagai pesan sistem sebelum "dikirim".
 const updates = new Map<string, (event: Update) => void>();
@@ -49,6 +62,8 @@ app.use((e: Error, _q: express.Request, r: express.Response, _n: express.NextFun
 );
 after(async () => {
   await gateway.stop();
+  await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [profile]);
+  await db.execute('DELETE FROM ai_profile_types WHERE id=?', [profile]);
   for (const id of accounts) {
     await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
     await db.execute('DELETE FROM accounts WHERE id=?', [id]);
@@ -65,7 +80,8 @@ async function tenant() {
   await db.execute('INSERT INTO api_keys(id,account_id,key_hash) VALUES (?,?,?)', [randomUUID(), id, digest(key)]);
   await basicWallet(id);
   await request(app).post('/sessions').set('X-API-Key', key).send({ id: 'shop' }).expect(200);
-  await ai.saveAssistant(id, 'shop', { enabled: true, profile: {}, behavior: '' });
+  const data = await ai.createDataProfile(id, { profile_type: profile, name: 'Toko' });
+  await ai.attachProfile(id, 'shop', { data_profile_id: data.id, enabled: true });
   const send = (event: Update) => updates.get(id + '/shop')!(event);
   const history = async () => (await chatMessages(id, 'shop', customer)).messages;
   return { id, key, send, history };

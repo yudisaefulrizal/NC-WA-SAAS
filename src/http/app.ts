@@ -1,8 +1,7 @@
-// Aplikasi HTTP: middleware, urutan pendaftaran rute semua komponen, halaman dashboard dan AI Studio dengan aset
+// Aplikasi HTTP: middleware, urutan pendaftaran rute semua komponen, halaman dashboard dan Editor profil dengan aset
 // berhash, file statis, 404, dan penanganan error.
 import {
   ai,
-  studio as defaultStudio,
   aiAccountRoutes,
   aiAdminRoutes,
   builderAdminRoutes,
@@ -21,12 +20,7 @@ import { publicAccountRoutes, sessionAuth, accountRoutes, accountAdminRoutes } f
 import { billingPublicRoutes, billingRoutes, billingAdminRoutes } from '../components/billing/index.js';
 import { assetPublicRoutes } from '../components/auto-share/index.js';
 
-export function createApp(
-  gateway = defaultGateway,
-  payments = defaultPayments,
-  studio = defaultStudio,
-  referral = defaultReferral,
-) {
+export function createApp(gateway = defaultGateway, payments = defaultPayments, referral = defaultReferral) {
   const app = express();
   const configuredOrigin = new URL(process.env.APP_ORIGIN ?? 'http://127.0.0.1:8067');
   if (
@@ -41,18 +35,11 @@ export function createApp(
   app.disable('x-powered-by');
   app.set('trust proxy', process.env.TRUST_PROXY_HOPS ? Number(process.env.TRUST_PROXY_HOPS) : false);
   app.use(helmet());
-  // Teks panjang (jadwal sampai 8.000 karakter, deskripsi program) bisa melewati 16 KB setelah di-encode UTF-8.
-  const largeText =
-    /^\/(?:sessions\/[A-Za-z0-9_-]+\/ai|ai\/data-profiles\/[0-9a-f-]{36})\/(?:field|programs(?:\/[0-9a-f-]{36})?)$/;
+  // Definisi graf Editor profil bisa jauh melewati 16 KB.
   const normalJson = express.json({ limit: '16kb' }),
-    assistantJson = express.json({ limit: '64kb' }),
-    studioJson = express.json({ limit: '128kb' });
+    builderJson = express.json({ limit: '128kb' });
   app.use((req, res, next) =>
-    (req.path.startsWith('/api/admin/ai/studio') || req.path.startsWith('/api/admin/ai/builder')
-      ? studioJson
-      : (req.method === 'PUT' && /^\/sessions\/[A-Za-z0-9_-]+\/ai$/.test(req.path)) || largeText.test(req.path)
-        ? assistantJson
-        : normalJson)(req, res, next),
+    (req.path.startsWith('/api/admin/ai/builder') ? builderJson : normalJson)(req, res, next),
   );
   billingPublicRoutes(app, { payments, gateway });
   assetPublicRoutes(app, { gateway });
@@ -98,8 +85,7 @@ export function createApp(
   });
   accountAdminRoutes(app, { gateway });
   billingAdminRoutes(app, { payments });
-  app.get('/dashboard/admin/ai-studio', (_req, res) => res.type('html').send(page('ai-studio/index.html')));
-  aiAdminRoutes(app, { studio });
+  aiAdminRoutes(app);
   builderAdminRoutes(app);
   app.get('/dashboard/admin/ai-builder', (_req, res) => res.type('html').send(page('ai-builder/index.html')));
   app.get('/dashboard/ai-data', (_req, res) => res.type('html').send(page('ai-builder/data.html')));

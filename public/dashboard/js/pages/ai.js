@@ -1,5 +1,5 @@
 // Asisten AI: tab, tampilan Sesi dan Data Profil, katalog profil, dan pemuatan halaman.
-const aiTabNames = ['knowledge', 'orders', 'conversations', 'usage', 'trial', 'integrasi'];
+const aiTabNames = ['knowledge', 'conversations', 'usage', 'trial', 'integrasi'];
 function aiTab(tab) {
   for (const name of aiTabNames) {
     const section = $('ai-tab-' + name);
@@ -8,63 +8,15 @@ function aiTab(tab) {
   document
     .querySelectorAll('[data-ai-tab]')
     .forEach(b => b.setAttribute('aria-pressed', String(b.dataset.aiTab === tab)));
-  if (tab === 'knowledge') knowledgeTab(firstKnowledgeTab(aiTargetType()));
+  if (tab === 'knowledge') knowledgeTab(knowledgeTabNames[0]);
   if (tab === 'conversations' && $('ai-session').value && aiView === 'sessions') void run(loadConversations);
 }
 document.querySelectorAll('[data-ai-tab]').forEach(b => (b.onclick = () => aiTab(b.dataset.aiTab)));
-const knowledgeTabNames = [
-  'records',
-  'usaha',
-  'products',
-  'behavior',
-  'lembaga',
-  'program',
-  'jadwal',
-  'dokumen',
-  'kontak',
-  'cara_pemesanan',
-  'pembayaran',
-  'kebijakan',
-  'faq',
-  'fallback',
-];
-// Bagian Knowledge berbeda per profil: CS Usaha punya bidang usaha dan produk, CS Lembaga Pendidikan punya profil
-// lembaga; Perilaku AI, FAQ, dan Fallback Tim dimiliki keduanya. Tester AI hanya punya Peran pelanggan, yang disimpan
-// di bidang Perilaku AI. Profil dinamis menyimpan isinya di koleksi, dikelola di halaman data koleksi.
-const knowledgeTabsFor = type =>
-  type?.startsWith('g_')
-    ? ['behavior', 'records', 'fallback']
-    : type === 'tester'
-      ? ['behavior']
-      : type === 'pendidikan'
-        ? ['behavior', 'lembaga', 'program', 'jadwal', 'dokumen', 'kontak', 'faq', 'fallback']
-        : ['behavior', 'usaha', 'products', 'cara_pemesanan', 'pembayaran', 'kebijakan', 'faq', 'fallback'];
-// Bagian yang dibuka pertama: bagian isi utama profil, atau satu-satunya bagian bila hanya ada satu.
-const firstKnowledgeTab = type => knowledgeTabsFor(type)[1] ?? knowledgeTabsFor(type)[0];
+// Bagian Knowledge: isi bisnis ada di koleksi data profil (dikelola di halaman data koleksi); di sini hanya tautannya,
+// Perilaku AI, dan Fallback Tim.
+const knowledgeTabNames = ['records', 'behavior', 'fallback'];
 function renderKnowledgeTabs() {
-  const allowed = knowledgeTabsFor(aiTargetType());
   $('ai-records-link').href = '/dashboard/ai-data?profile=' + encodeURIComponent(aiTarget());
-  document
-    .querySelectorAll('[data-knowledge-tab]')
-    .forEach(b => (b.hidden = !allowed.includes(b.dataset.knowledgeTab)));
-  for (const option of $('ai-knowledge-select').options) option.hidden = !allowed.includes(option.value);
-  $('ai-form').elements.profile_faq.maxLength = aiTargetType() === 'pendidikan' ? 4000 : 2000;
-  // Di Tester AI bidang Perilaku AI berisi peran pelanggan yang dimainkan AI.
-  const tester = aiTargetType() === 'tester',
-    behaviorLabel = tester ? 'Peran pelanggan' : 'Perilaku AI';
-  document.querySelector('[data-knowledge-tab="behavior"]').textContent = behaviorLabel;
-  $('ai-knowledge-select').querySelector('option[value="behavior"]').textContent = behaviorLabel;
-  $('ai-behavior-tester-help').hidden = !tester;
-  {
-    const behavior = $('ai-form').elements.behavior;
-    behavior.dataset.csPlaceholder ??= behavior.placeholder;
-    behavior.placeholder = tester
-      ? 'Tulis siapa pelanggan yang diperankan, apa yang dicari, dan sifatnya. Contoh: Ibu rumah tangga di Bandung yang mau pesan kue ulang tahun untuk hari Sabtu; tanyakan ukuran dan harga, lalu tawar sekali. Balas singkat seperti chat WhatsApp biasa.'
-      : aiTargetType() === 'pendidikan'
-        ? "Tulis gaya bahasa dan cara menyebut orang. Contoh: Sopan dan ringkas, awali dengan salam Assalamu'alaikum. Sebut peserta didik sebagai santri, orang tua sebagai wali santri, dan pengajar sebagai ustadz/ustadzah. Nama asistennya Admin PSB."
-        : behavior.dataset.csPlaceholder;
-  }
-  if (!allowed.includes($('ai-knowledge-select').value)) knowledgeTab(firstKnowledgeTab(aiTargetType()));
 }
 function knowledgeTab(tab) {
   $('ai-knowledge-select').value = tab;
@@ -170,7 +122,7 @@ const sessionStatusMeta = {
 let aiSessions = [],
   aiSessionIndex = 0,
   aiSessionLimit = 1;
-// Multi-profil: profil adalah pipeline bawaan NC-WA (CS Usaha, …); data profil adalah isi milik akun ini untuk satu
+// Multi-profil: profil adalah alur AI yang disiapkan pemilik NC-WA; data profil adalah isi milik akun ini untuk satu
 // profil, bisa dipasang ke sesi mana pun. "Sesi" menyunting data profil yang terpasang di sesi terpilih; "Data
 // Profil" menampilkan semua data profil dan bisa mengelolanya langsung, terpasang atau tidak.
 let aiView = 'sessions',
@@ -181,23 +133,17 @@ const profileType = id => aiProfileTypes.find(t => t.id === id);
 const selectedSession = () => aiSessions.find(s => s.id === $('ai-session').value);
 // Data profil yang sedang disunting: yang sedang dikelola, atau yang terpasang di sesi terpilih.
 const aiTarget = () => (aiView === 'profiles' ? (aiManaged?.id ?? '') : (selectedSession()?.aiProfile?.id ?? ''));
-const aiTargetType = () =>
-  aiView === 'profiles' ? (aiManaged?.profile_type ?? '') : (selectedSession()?.aiProfile?.profile_type ?? '');
 aiTab('knowledge');
 const profileBase = (id = aiTarget()) => '/ai/data-profiles/' + encodeURIComponent(id);
-// Tampilan Sesi tetap memakai rute sesi, supaya pesanan mengingat dari nomor mana asalnya.
+// Tampilan Sesi memakai rute sesi, yang diarahkan ke data profil yang terpasang.
 const dataBase = () =>
   aiView === 'profiles' ? profileBase() : '/sessions/' + encodeURIComponent($('ai-session').value) + '/ai';
-// Percakapan, Uji Pesan, dan Integrasi dimiliki setiap sesi; profil menambahkan tabnya sendiri.
+// Percakapan, Uji Pesan, dan Integrasi dimiliki setiap sesi; Knowledge dan Riwayat pemakaian butuh data profil.
 function allowedAITabs() {
-  if (aiView === 'profiles')
-    return aiManaged
-      ? (profileType(aiManaged.profile_type)?.tabs ?? ['knowledge', 'orders', 'trial']).filter(t => t !== 'usage')
-      : [];
+  if (aiView === 'profiles') return aiManaged ? ['knowledge', 'trial'] : [];
   const session = selectedSession();
   if (!session) return [];
-  const type = session.aiProfile && profileType(session.aiProfile.profile_type);
-  return ['conversations', 'trial', 'integrasi', ...(type ? type.tabs : [])];
+  return ['conversations', 'trial', 'integrasi', ...(session.aiProfile ? ['knowledge', 'usage'] : [])];
 }
 function renderAITabs() {
   const allowed = allowedAITabs();

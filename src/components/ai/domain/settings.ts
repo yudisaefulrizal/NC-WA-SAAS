@@ -8,7 +8,7 @@ import { ApiError } from '../../../libraries/errors.js';
 import { validatePublicUrl } from '../../../libraries/download.js';
 import { object } from '../../../libraries/validation.js';
 import { AIProvider, AIConfig, defaults, provider, chatEndpoint, jevConnectionProbe } from './provider.js';
-import { isJevModel } from './pipeline/jev-router.js';
+import { isJevModel } from './pipeline/models.js';
 import { fail, integer, text } from './input-validation.js';
 import { transaction } from './transaction.js';
 import { parseMemory } from './memory.js';
@@ -61,7 +61,7 @@ export async function loadConfig(svc: AIService): Promise<AIConfig> {
   return config;
 }
 export async function configuration(svc: AIService) {
-  const { secret, workflow, onTrace, tier_profiles, ...config } = await svc.config();
+  const { secret, onTrace, checkpoint, tier_profiles, ...config } = await svc.config();
   return { ...config, configured: Boolean(secret), apiKey: secret ? '********' : null };
 }
 export async function providerProfiles(svc: AIService) {

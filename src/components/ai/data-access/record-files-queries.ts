@@ -1,4 +1,4 @@
-// File field File/gambar koleksi profil dinamis; semua query dibatasi akun dan data profil.
+// File field File/gambar koleksi profil; semua query dibatasi akun dan data profil.
 import type { RowDataPacket } from 'mysql2/promise';
 import type { Executor, SqlValue } from '../../../libraries/db.js';
 const columns = 'id,record_id,filename,mimetype,media_type,size_bytes';

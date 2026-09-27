@@ -1,4 +1,4 @@
-// Sumber API per koleksi profil dinamis; semua query dibatasi akun dan data profil.
+// Sumber API per koleksi profil; semua query dibatasi akun dan data profil.
 import type { RowDataPacket } from 'mysql2/promise';
 import type { Executor, SqlValue } from '../../../libraries/db.js';
 export function find(c: Executor, p: SqlValue[]) {
