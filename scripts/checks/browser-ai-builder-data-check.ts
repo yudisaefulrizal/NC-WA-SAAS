@@ -186,17 +186,24 @@ try {
       await page.locator('#ai-records-owner-note').waitFor();
     };
     await openBooking();
-    await page.locator('#ai-records-new').click();
-    await page.locator('#ai-record-form [name=__customer]').fill('62811');
-    await page.locator('#ai-record-form [name=tanggal]').fill('2026-09-27');
-    await page.locator('#ai-record-form [name=keluhan]').fill('Gusi bengkak');
-    await page.locator('#ai-record-form').getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#ai-record-panel').waitFor({ state: 'hidden' });
+    // Tabel inline: fokus sel baris baru, Enter membuka editor, Tab/Enter menyimpan isinya.
+    const newCell = (col: string) => page.locator(`#ai-records tr.ai-grid-new td[data-col="${col}"]`);
+    const fillCell = async (col: string, value: string, key = 'Tab') => {
+      await newCell(col).focus();
+      await page.keyboard.press('Enter');
+      await newCell(col).locator('input').fill(value);
+      await newCell(col).locator('input').press(key);
+    };
+    await fillCell('__customer', '62811');
+    await fillCell('tanggal', '2026-09-27');
+    await fillCell('keluhan', 'Gusi bengkak', 'Enter');
+    await page.locator('#ai-records tr[data-row="0"]:not(.ai-grid-new)').waitFor();
     await openBooking();
     await page.locator('#ai-records').getByText('62811', { exact: true }).waitFor();
     await page.locator('#ai-records-customer').fill('62899');
     await page.locator('#ai-records-customer').press('Enter');
-    await page.locator('#ai-records').getByText('Belum ada data yang sesuai.').waitFor();
+    await page.locator('#ai-records td', { hasText: '62811' }).waitFor({ state: 'detached' });
+    assert.equal(await page.locator('#ai-records tbody tr:not(.ai-grid-new)').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: join(screenshots, 'ai-builder-owned-records-' + width + '.png'), fullPage: true });
 

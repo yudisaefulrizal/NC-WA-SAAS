@@ -1,4 +1,4 @@
-// Pemeriksaan browser Tahap 2–4 pada 1280/390 px: node Ekstrak, Set / Hitung, Terima media, dan Kirim media, tipe field baru dengan nilai bawaan dan
+// Pemeriksaan browser Tahap 2–4 pada 1280/390 px: node Ekstrak, Set / Hitung, Terima media, Kirim media, dan Buat file, tipe field baru dengan nilai bawaan dan
 // unik, simpan-buka ulang, serta formulir record klien (jam, tanggal-jam, pilihan ganda, telepon, unggah file).
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
@@ -146,6 +146,18 @@ try {
     await page.locator('#add-node').click();
     await page.locator('#node-types').getByRole('button', { name: 'Terima media', exact: true }).click();
     await inspector.getByLabel(/^Dokumen \(PDF/).uncheck();
+    // Buat file: Markdown dari variabel; template JSON yang tidak valid ditandai sebelum diperbaiki.
+    await page.locator('#add-node').click();
+    await page.locator('#node-types').getByRole('button', { name: 'Buat file Markdown', exact: true }).click();
+    await inspector.getByLabel('Nama file', { exact: true }).fill('artikel-{{system.today}}');
+    await inspector.getByLabel('Isi Markdown', { exact: true }).fill('# Artikel\n\n{{input.message}}');
+    await page.locator('#add-node').click();
+    await page.locator('#node-types').getByRole('button', { name: 'Buat file JSON', exact: true }).click();
+    await inspector.getByLabel('Template JSON', { exact: true }).fill('{"pesan": {{input.message}}}');
+    const jsonIssue = page.locator('#issues-list').getByText(/Template JSON tidak valid/);
+    await jsonIssue.waitFor({ state: 'attached' });
+    await inspector.getByLabel('Template JSON', { exact: true }).fill('{"pesan": "{{input.message}}"}');
+    await jsonIssue.waitFor({ state: 'detached' });
     await page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
     await page.reload();
     await page.locator('#editor').waitFor();
@@ -170,6 +182,9 @@ try {
       [media.value, media.caption, media.send_when, media.media_as],
       ['{{input.message}}', 'Brosur terbaru', 'after', 'document'],
     );
+    const md = definition.nodes.find((n: any) => n.type === 'file_md');
+    assert.deepEqual([md.filename, md.value], ['artikel-{{system.today}}', '# Artikel\n\n{{input.message}}']);
+    assert.equal(definition.nodes.find((n: any) => n.type === 'file_json').value, '{"pesan": "{{input.message}}"}');
     const produkDef = definition.collections.find((c: any) => c.id === 'produk');
     assert.deepEqual(produkDef.fields.find((f: any) => f.id === 'kategori').default, ['Reguler']);
     assert.equal(produkDef.fields.find((f: any) => f.id === 'kontak').unique, true);
@@ -191,39 +206,56 @@ try {
       await page.locator('#ai-records-title').waitFor();
     };
     await openData();
-    await page.locator('#ai-records-new').click();
-    const form = page.locator('#ai-record-form');
-    assert.equal(await form.getByLabel('Tahfidz', { exact: true }).isChecked(), true);
-    await form.locator('[name=nama]').fill('Ahmad');
-    await form.locator('[name=jam]').fill('07:30');
-    await form.locator('[name=mulai]').fill('2026-10-01T08:00');
-    await form.getByLabel('Bahasa', { exact: true }).check();
-    await form.locator('[name=hp]').fill('0812-3456-789');
-    await form.locator('[name=foto]').setInputFiles({ name: 'pas foto.png', mimeType: 'image/png', buffer: png });
-    await form.getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#ai-record-panel').waitFor({ state: 'hidden' });
+    // Tabel inline: fokus sel baris baru, Enter membuka editor, Tab/Enter menyimpan isinya.
+    const newCell = (col: string) => page.locator(`#ai-records tr.ai-grid-new td[data-col="${col}"]`);
+    const fillCell = async (col: string, value: string, key = 'Tab') => {
+      await newCell(col).focus();
+      await page.keyboard.press('Enter');
+      await newCell(col).locator('input').fill(value);
+      await newCell(col).locator('input').press(key);
+    };
+    // Nilai bawaan multi pilihan langsung terisi di baris baru.
+    await newCell('minat').getByText('Tahfidz', { exact: true }).waitFor();
+    const chooser = page.waitForEvent('filechooser');
+    await newCell('foto').getByRole('button', { name: '+ Unggah' }).click();
+    await (await chooser).setFiles({ name: 'pas foto.png', mimeType: 'image/png', buffer: png });
+    await newCell('foto').getByText('pas foto.png').waitFor();
+    await fillCell('nama', 'Ahmad');
+    await fillCell('jam', '07:30');
+    await fillCell('mulai', '2026-10-01T08:00');
+    // Multi pilihan memakai popover centang.
+    await newCell('minat').focus();
+    await page.keyboard.press('Enter');
+    await page.locator('.ai-grid-pop').getByLabel('Bahasa').check();
+    await page.locator('.ai-grid-pop').getByRole('button', { name: 'Simpan' }).click();
+    await fillCell('hp', '0812-3456-789', 'Enter');
+    await page.locator('#ai-records tr[data-row="0"]:not(.ai-grid-new)').waitFor();
     await openData();
     const link = page.locator('#ai-records a', { hasText: 'pas foto.png' });
     await link.waitFor();
-    await page.locator('#ai-records').getByText('Tahfidz, Bahasa', { exact: true }).waitFor();
+    const saved = page.locator('#ai-records tr[data-row="0"] td[data-col="minat"]');
+    await saved.getByText('Tahfidz', { exact: true }).waitFor();
+    await saved.getByText('Bahasa', { exact: true }).waitFor();
     await page.locator('#ai-records').getByText('628123456789', { exact: true }).waitFor();
     await page.locator('#ai-records').getByText('2026-10-01 08:00', { exact: true }).waitFor();
     const file = await context.request.get(origin + (await link.getAttribute('href')));
     assert.equal(file.status(), 200);
     assert.deepEqual(Buffer.from(await file.body()), png);
     // Nomor unik yang sama ditolak dengan pesan yang jelas.
-    await page.locator('#ai-records-new').click();
-    await form.locator('[name=nama]').fill('Budi');
-    await form.locator('[name=hp]').fill('628123456789');
-    await form.getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#message').filter({ hasText: 'sudah dipakai record lain' }).waitFor();
+    await fillCell('nama', 'Budi');
+    await fillCell('hp', '628123456789', 'Enter');
+    await page.locator('#ai-grid-note').filter({ hasText: 'sudah dipakai record lain' }).waitFor();
+    await newCell('hp').and(page.locator('.invalid')).waitFor();
+    // Field wajib dicek per sel sebelum dikirim.
+    await fillCell('nama', '', 'Enter');
+    await page.locator('#ai-grid-note').filter({ hasText: 'nama wajib diisi' }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: join(screenshots, 'ai-builder-field-types-' + width + '.png'), fullPage: true });
     assert.deepEqual(errors, []);
     await context.close();
   }
   console.log(
-    'Tahap 2–4: Ekstrak, Set / Hitung, Terima media, Kirim media, tipe field baru, nilai bawaan, unik, dan unggah file lulus pada 1280 dan 390px.',
+    'Tahap 2–4: Ekstrak, Set / Hitung, Terima media, Kirim media, Buat file, tipe field baru, nilai bawaan, unik, dan unggah file lulus pada 1280 dan 390px.',
   );
 } finally {
   await browser?.close();

@@ -60,6 +60,9 @@ function nodeSummary(n) {
       return n.send_when === 'after' ? 'Sesudah jawaban' : 'Sebelum jawaban';
     case 'receive':
       return (n.accept ?? []).map(t => (t === 'image' ? 'Gambar' : 'Dokumen')).join(', ') || 'Tidak ada jenis';
+    case 'file_json':
+    case 'file_md':
+      return (n.filename?.trim() || n.label) + (n.type === 'file_json' ? '.json' : '.md');
     case 'output':
       return 'Kirim jawaban';
     default:

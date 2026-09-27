@@ -1,6 +1,6 @@
-/* Asisten AI › Knowledge: sub-menu koleksi (label grup, ikon milik pelanggan, jumlah record), tabel record dengan
-   panel tambah/ubah di sampingnya, dan dialog sumber data. Di layar sempit sub-menu digeser ke samping, baris tabel
-   menjadi kartu, dan panel record tampil di atas tabel. */
+/* Asisten AI › Knowledge: sub-menu koleksi (label grup, ikon milik pelanggan, jumlah record), tabel record inline,
+   dan dialog sumber data. Di layar sempit sub-menu dan tabel digeser ke samping dengan kolom pertama tetap terlihat,
+   dan popover sel tampil sebagai lembar dari bawah. */
 #ai-tab-knowledge .ai-knowledge-tabs {
   align-items: center;
 }
@@ -80,7 +80,8 @@
   align-items: flex-start;
   gap: 18px;
 }
-.ai-records-body > .table-wrap {
+/* Semua jenis koleksi (tabel, teks, isian) memakai lebar penuh area isi. */
+.ai-records-body > #ai-records {
   flex: 1;
   min-width: 0;
 }
@@ -96,34 +97,6 @@
 .ai-records-empty {
   margin: 0;
   padding: 18px;
-}
-.ai-record-panel {
-  width: 360px;
-  flex-shrink: 0;
-  margin-top: 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgba(20, 40, 32, 0.08);
-}
-.ai-record-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 12px 14px 18px;
-  border-bottom: 1px solid var(--line);
-}
-.ai-record-panel-head > div {
-  flex: 1;
-  min-width: 0;
-}
-.ai-record-panel-head strong,
-.ai-record-panel-head small {
-  display: block;
-}
-.ai-record-panel-head small {
-  font-size: 12px;
-  color: var(--muted);
 }
 .ai-record-form {
   display: flex;
@@ -220,10 +193,6 @@
     flex-direction: column;
     align-items: stretch;
   }
-  .ai-record-panel {
-    order: -1;
-    width: auto;
-  }
 }
 @media (max-width: 760px) {
   #ai-tab-knowledge nav.ai-knowledge-tabs {
@@ -254,48 +223,6 @@
     flex: 1;
     min-height: 44px;
   }
-  /* Baris tabel menjadi kartu: setiap sel memakai judul kolomnya sebagai label. */
-  #ai-records table,
-  #ai-records tbody,
-  #ai-records tr,
-  #ai-records td {
-    display: block;
-    width: 100%;
-  }
-  #ai-records thead {
-    display: none;
-  }
-  #ai-records.table-wrap {
-    border: 0;
-  }
-  #ai-records tr {
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 8px 12px;
-    margin-bottom: 10px;
-    background: #fff;
-  }
-  #ai-records td {
-    display: flex;
-    gap: 12px;
-    padding: 4px 0;
-    border: 0;
-  }
-  #ai-records td::before {
-    content: attr(data-label);
-    flex: 0 0 38%;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--muted);
-  }
-  #ai-records td[data-label='']::before {
-    display: none;
-  }
-  #ai-records .row-actions button {
-    flex: 1;
-    min-height: 40px;
-    white-space: nowrap;
-  }
   #ai-tab-knowledge .ai-records-pager button {
     min-height: 44px;
   }
@@ -320,6 +247,242 @@
   color: var(--muted);
 }
 #ai-records .ai-single-form {
-  max-width: 560px;
+  max-width: 640px;
   padding: 16px 0 0;
+}
+
+/* Tabel inline: sel bisa difokus dan diubah di tempat; tipe field tampil kecil di judul kolom. */
+#ai-records.table-wrap {
+  overflow: auto;
+  max-height: 70vh;
+}
+.ai-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 13px;
+}
+.ai-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f6f8f7;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ai-grid th small {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+.ai-grid-required {
+  color: #c2410c;
+}
+.ai-grid td {
+  /* Acuan posisi label sr-only agar ikut terpotong wadah tabel yang digeser. */
+  position: relative;
+  height: 44px;
+  padding: 0 12px;
+  white-space: nowrap;
+  border-right: 1px solid #eef1ef;
+  outline: none;
+}
+.ai-grid td[tabindex='0'] {
+  cursor: text;
+}
+.ai-grid td[tabindex='0']:focus {
+  box-shadow: inset 0 0 0 2px rgba(15, 122, 90, 0.45);
+}
+.ai-grid td.editing {
+  box-shadow: inset 0 0 0 2px #0f7a5a;
+  background: #fff;
+  padding: 0;
+}
+.ai-grid td.invalid,
+.ai-grid td.invalid:focus {
+  background: #fdf1ef;
+  box-shadow: inset 0 0 0 2px #d4574a;
+}
+.ai-grid .ai-grid-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ai-grid .ai-grid-locked {
+  background: #f8f9f8;
+  color: var(--muted);
+}
+.ai-grid th.ai-grid-locked {
+  background: #f1f3f2;
+}
+.ai-grid .ai-grid-no {
+  width: 40px;
+  text-align: center;
+  color: #9aa39c;
+  font-size: 12px;
+}
+.ai-grid-text {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.ai-grid-empty {
+  color: #9aa39c;
+}
+.ai-grid-pill,
+.ai-grid-chip {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-right: 4px;
+  font-size: 12px;
+  background: #e6f2fb;
+  color: #1d5b8c;
+}
+.ai-grid-chip {
+  border-radius: 999px;
+  background: #eef2f0;
+  color: #39443e;
+}
+.ai-grid input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #0f7a5a;
+}
+.workspace .ai-grid .ai-grid-input {
+  width: 100%;
+  min-width: 120px;
+  height: 42px;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0 12px;
+  background: transparent;
+  font: inherit;
+  box-shadow: none;
+}
+.ai-grid-num .ai-grid-input {
+  text-align: right;
+}
+#ai-records .ai-grid button.ai-grid-upload,
+#ai-records .ai-grid button.ai-grid-remove {
+  min-height: 30px;
+  padding: 4px 8px;
+  margin-left: 6px;
+  border: 0;
+  background: transparent;
+  color: #0f6b4f;
+  box-shadow: none;
+}
+#ai-records .ai-grid button.ai-grid-remove {
+  color: #9aa39c;
+}
+#ai-records .ai-grid button.ai-grid-remove:hover {
+  color: #b42318;
+}
+.ai-grid .ai-grid-status {
+  width: 30px;
+  text-align: center;
+  color: #1f8a5f;
+}
+.ai-grid-status[data-status='error'] {
+  color: #b42318;
+}
+.ai-grid-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d9a55b;
+}
+.ai-grid-dot.saving {
+  background: #9aa39c;
+}
+.ai-grid tr.ai-grid-dirty td:first-child {
+  box-shadow: inset 3px 0 0 #d9a55b;
+}
+.ai-grid tr.ai-grid-new td {
+  background: #fbfdfc;
+}
+.ai-grid tr.ai-grid-new .ai-grid-no {
+  color: #0f7a5a;
+}
+.ai-grid-note {
+  margin: 8px 12px;
+  font-size: 12px;
+  color: #b42318;
+}
+.ai-grid-note:empty {
+  display: none;
+}
+.ai-grid-pop {
+  position: fixed;
+  z-index: 50;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(20, 40, 30, 0.16);
+  font-size: 13px;
+}
+.ai-grid-pop label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px;
+}
+.ai-grid-pop textarea {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  line-height: 1.5;
+}
+.ai-grid-pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+@media (max-width: 760px) {
+  #ai-records.table-wrap {
+    max-height: none;
+  }
+  /* Kolom pertama (field pertama atau pelanggan) tetap terlihat saat tabel digeser. */
+  .ai-grid .ai-grid-no {
+    display: none;
+  }
+  .ai-grid tr > :nth-child(2) {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #fff;
+    box-shadow: 4px 0 8px -6px rgba(0, 0, 0, 0.25);
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ai-grid th:nth-child(2) {
+    z-index: 3;
+    background: #f6f8f7;
+  }
+  .ai-grid-pop {
+    left: 0 !important;
+    right: 0;
+    top: auto !important;
+    bottom: 0;
+    width: auto;
+    border-radius: 16px 16px 0 0;
+    padding: 16px 16px 24px;
+  }
+  .ai-grid-pop label {
+    min-height: 44px;
+  }
 }

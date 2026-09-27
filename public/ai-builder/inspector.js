@@ -183,6 +183,7 @@ function renderInspector() {
   if (n.type === 'compute') renderCompute(host.appendChild(section()), n);
   if (n.type === 'media') renderMedia(host.appendChild(section()), n);
   if (n.type === 'receive') renderReceive(host.appendChild(section()), n);
+  if (n.type === 'file_json' || n.type === 'file_md') renderFile(host.appendChild(section()), n);
   if (n.type === 'context') {
     const box = section();
     box.append(
@@ -444,9 +445,19 @@ function availableVariables(n) {
     if (x.type === 'memory' && x.id !== n?.memory) continue;
     if (x.type === 'context_memory' && x.id !== n?.context_memory) continue;
     if (
-      !['memory', 'context_memory', 'agent', 'context', 'router', 'extract', 'compute', 'media', 'receive'].includes(
-        x.type,
-      ) &&
+      ![
+        'memory',
+        'context_memory',
+        'agent',
+        'context',
+        'router',
+        'extract',
+        'compute',
+        'media',
+        'receive',
+        'file_json',
+        'file_md',
+      ].includes(x.type) &&
       !isDataNode(x)
     )
       continue;
@@ -465,7 +476,9 @@ function availableVariables(n) {
                   ? ['files', 'count', 'skipped']
                   : x.type === 'receive'
                     ? ['file', 'filename', 'type', 'mimetype', 'caption']
-                    : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]];
+                    : x.type === 'file_json' || x.type === 'file_md'
+                      ? ['file', 'filename', 'size']
+                      : [{ agent: 'answer', context: 'context', router: 'branch' }[x.type]];
     groups.push([x.label, keys.map(key => 'nodes.' + x.id + '.' + key)]);
   }
   return groups;
@@ -1264,6 +1277,36 @@ function renderMedia(host, n) {
     el(
       'p',
       'Dikirim setelah alur selesai dan tidak dikirim bila percakapan diteruskan ke tim. Maksimal 3 file per balasan, 1 kredit WhatsApp per file. Simulasi dan Uji Coba hanya menampilkan daftarnya.',
+      'hint',
+    ),
+  );
+}
+// Node Buat file: nama file dan template isi; hasilnya file data profil yang bisa dikirim atau disimpan.
+function renderFile(host, n) {
+  n.filename ??= '';
+  const json = n.type === 'file_json';
+  host.append(
+    nodeField(n, 'filename', 'Nama file'),
+    el(
+      'p',
+      'Boleh berisi variabel, misalnya artikel-{{system.today}}. Kosong berarti memakai nama node. Ekstensi ' +
+        (json ? '.json' : '.md') +
+        ' dipasang otomatis.',
+      'hint',
+    ),
+    nodeField(n, 'value', json ? 'Template JSON' : 'Isi Markdown', 'textarea'),
+    el(
+      'p',
+      json
+        ? 'Harus JSON valid; tulis variabel di dalam tanda kutip. Kutipan yang hanya berisi satu variabel menjadi nilai aslinya (angka, daftar, objek), misalnya "{{nodes.cari.records}}".'
+        : 'Teks Markdown dengan {{variabel}}, misalnya jawaban Agent penulis: {{nodes.penulis.answer}}.',
+      'hint',
+    ),
+    el(
+      'p',
+      'Tanpa AI dan tanpa kredit, maksimal 1 MB. Kirim hasilnya lewat Kirim media ({{nodes.' +
+        n.id +
+        '.file}}) atau simpan ke field File lewat node Data; file yang tidak disimpan ke record terhapus setelah sehari.',
       'hint',
     ),
   );

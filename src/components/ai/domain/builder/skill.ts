@@ -172,6 +172,20 @@ const nodeDocs: Record<NodeType, NodeDoc> = {
     ports: '`received`, `none`',
     outputs: '`file`, `filename`, `type`, `mimetype`, `caption`',
   },
+  file_json: {
+    name: 'Buat file JSON',
+    purpose: 'Membuat file .json dari template dan variabel alur, tanpa AI dan tanpa kredit.',
+    keys: '`filename`: nama file, boleh variabel (ekstensi .json dipasang otomatis). `value`: template JSON yang valid; variabel ditulis di dalam tanda kutip. String yang hanya berisi satu variabel menjadi nilai aslinya, misalnya `{"judul": "{{nodes.penulis.answer}}", "produk": "{{nodes.cari.records}}"}`. Maksimal 1 MB.',
+    ports: '`next`',
+    outputs: '`file` (ID file), `filename`, `size`',
+  },
+  file_md: {
+    name: 'Buat file Markdown',
+    purpose: 'Membuat file .md (teks berformat) dari template dan variabel alur, tanpa AI dan tanpa kredit.',
+    keys: '`filename`: nama file, boleh variabel (ekstensi .md dipasang otomatis). `value`: isi Markdown dengan `{{variabel}}`, misalnya `# {{nodes.isian.judul}}\\n\\n{{nodes.penulis.answer}}`. Maksimal 1 MB.',
+    ports: '`next`',
+    outputs: '`file` (ID file), `filename`, `size`',
+  },
 };
 const kindDocs: Record<CollectionKind, string> = {
   list: 'tabel banyak baris berfield (produk, jadwal, booking)',
@@ -265,7 +279,7 @@ export const contextVariablePaths = Object.entries(contextVariables).flatMap(([r
   keys.map(key => root + '.' + key),
 );
 const code = (values: readonly string[]) => values.map(v => '`' + v + '`').join(', ');
-// Contoh lengkap pola S-P-O: Router (memori konteks) → Informasi / Layanan / Sapaan → Context S-P-O → Jawaban;
+// Contoh lengkap pola S-P-O: Router (memori konteks) → Informasi / Layanan / Sapaan / Penutup → Context S-P-O → Jawaban;
 // Layanan boleh meneruskan ke Tim. Diuji lolos validasi dan dijalankan dengan model tiruan di builder-skill.test.ts.
 export const spoExampleFile = 'examples/cs-spo.json';
 export function spoExample(): GraphDefinition {
@@ -350,7 +364,16 @@ export function spoExample(): GraphDefinition {
           description:
             'Memesan, melanjutkan atau mengonfirmasi pesanan, menanyakan status pesanan, atau menyampaikan keluhan.',
         },
-        { id: 'sapaan', label: 'Sapaan', description: 'Salam, terima kasih, atau pamit tanpa pertanyaan.' },
+        {
+          id: 'sapaan',
+          label: 'Sapaan',
+          description: 'Salam pembuka seperti halo atau assalamualaikum tanpa pertanyaan.',
+        },
+        {
+          id: 'penutup',
+          label: 'Penutup',
+          description: 'Terima kasih, oke, atau pamit tanpa pertanyaan baru.',
+        },
       ],
     }),
     node('informasi', 'Informasi', 'agent', 580, 80, {
@@ -370,7 +393,13 @@ export function spoExample(): GraphDefinition {
     node('sapaan', 'Sapaan', 'agent', 580, 460, {
       ...contextMemory,
       tier: 'cheap',
-      prompt: 'Balas salam, terima kasih, atau pamit, lalu tawarkan bantuan.',
+      prompt: 'Balas salam pelanggan, lalu tawarkan bantuan.',
+    }),
+    node('penutup', 'Penutup', 'agent', 580, 620, {
+      ...contextMemory,
+      tier: 'cheap',
+      prompt:
+        'Tutup percakapan dengan satu kalimat singkat. Jangan bertanya, jangan menawarkan bantuan atau produk lain, agar percakapan selesai di sini.',
     }),
     node('cari_produk', 'Cari_produk', 'data_table', 850, 20, { collection: 'produk', operation: 'search', limit: 5 }),
     node('catat_pesanan', 'Catat_pesanan', 'data_table', 850, 180, {
@@ -400,6 +429,8 @@ export function spoExample(): GraphDefinition {
     edge('layanan', 'next', 'ringkas_konteks'),
     edge('layanan', 'fallback', 'tim'),
     edge('sapaan', 'next', 'ringkas_konteks'),
+    edge('maksud', 'penutup', 'penutup'),
+    edge('penutup', 'next', 'ringkas_konteks'),
     edge('ringkas_konteks', 'next', 'jawaban'),
   ];
   return d;
@@ -438,12 +469,14 @@ Ukur setiap keputusan rancangan dengan lima hal ini. Setiap node harus punya ala
 ## Kenapa polanya begini
 
 - **Multi-agent (Router → beberapa Agent)**: setiap Agent punya prompt pendek dan fokus serta hanya tool yang relevan, sehingga lebih akurat, lebih murah, dan tidak salah memakai tool. Bila usaha sederhana (1–2 jenis pertanyaan), satu Agent tanpa Router sudah cukup; jangan memecah tanpa alasan.
+- **Agent Sapaan dan Penutup wajib ada bila ada Router**: salam ("assalamualaikum", "halo") dan penutup ("makasih", "oke kak") tidak butuh data apa pun, cukup Perilaku AI klien. Beri cabang sendiri dengan Agent \`cheap\` tanpa tool dan tanpa riwayat, sehingga pesan seperti ini tidak memicu pencarian data atau Agent mahal dan tokennya hemat. Prompt-nya cukup satu kalimat tugas; gaya salamnya diatur klien. **Penutup tidak boleh bertanya atau menawarkan apa pun** ("ada yang lain lagi?", "mau lihat produk lain?"): pertanyaan membuat pelanggan membalas "tidak ada kak", lalu dibalas lagi, dan percakapan berputar tanpa ujung.
 - **Konteks S-P-O**: Router tetap paham balasan pendek tanpa membaca seluruh riwayat, sehingga murah, cepat, dan tidak terganggu obrolan lama.
 - **Dua memori**: memori konteks untuk arah percakapan, riwayat untuk detail. Pasang riwayat hanya pada node yang butuh detail (misalnya Agent yang mencatat pesanan dan Context), karena setiap riwayat menambah biaya.
-- **Tier model**: \`cheap\` untuk memilah dan meringkas (Router, Context, Sapaan); tier lebih tinggi hanya untuk Agent yang menangani hal rumit.
+- **Tier model**: \`cheap\` untuk memilah dan meringkas (Router, Context, Sapaan, Penutup); tier lebih tinggi hanya untuk Agent yang menangani hal rumit.
 - **Node data**: jawaban diambil dari koleksi, sehingga tidak ada data karangan dan klien cukup memperbarui datanya tanpa mengubah profil.
 - **Fallback**: meneruskan ke tim lebih baik daripada menjawab salah; pasang pada Agent yang menangani hal di luar data (keluhan, pengecualian, pembayaran bermasalah).
 - **Terima media**: pasang bila bisnisnya menerima file dari pelanggan (bukti transfer, berkas pendaftaran, foto kerusakan untuk klaim). **Tanpa node ini, pesan gambar dan dokumen pelanggan tidak diproses sama sekali.** Isi gambar tidak dibaca AI: node ini untuk menyimpan berkas lewat node Data, pemeriksaan isinya tetap oleh tim.
+- **Buat file (JSON, Markdown)**: pasang bila hasil alur perlu menjadi file, misalnya Agent penulis artikel yang hasilnya dijadikan .md, atau data pesanan yang diekspor sebagai .json. Isi file dibentuk dari variabel (biasanya jawaban Agent atau hasil node Data), jadi AI cukup menulis isinya sekali. Hasilnya (\`{{nodes.<id>.file}}\`) dikirim lewat Kirim media atau disimpan ke field File koleksi lewat node Data; file yang tidak disimpan ke record terhapus setelah sehari.
 - **Kirim media**: pasang bila file menjawab lebih baik dari teks (brosur, daftar harga, foto produk, denah, formulir). Simpan file di field File koleksi agar klien bisa menggantinya sendiri; URL tetap hanya untuk file umum. Kirim hanya di jalur yang memang meminta atau menawarkan file, bukan di setiap jawaban.
 
 ## Alur kerja
@@ -512,6 +545,7 @@ Context: memory = memori percakapan (dibaca), context_memory = memori konteks (d
 - [ ] Field \`choice\`/\`multichoice\` punya \`options\`; relasi menunjuk koleksi yang ada, dan koleksi umum tidak berelasi ke koleksi milik pelanggan.
 - [ ] Setiap node punya alasan ada (lihat Tujuan profil); tidak ada Agent, riwayat, tier tinggi, atau Kirim media yang tidak diperlukan.
 - [ ] Bila pelanggan perlu mengirim berkas, ada node Terima media yang hasilnya disimpan lewat node Data.
+- [ ] Bila ada Router: ada cabang dan Agent Sapaan serta Penutup, masing-masing \`cheap\`, tanpa \`tools\`, dan tanpa \`memory\`; prompt Penutup melarang bertanya atau menawarkan.
 - [ ] Prompt node tidak memuat gaya bahasa, persona, nama asisten, atau panjang jawaban (itu Perilaku AI klien).
 - [ ] Setiap \`{{variabel}}\` dikenal (lihat referensi) dan tersedia di semua jalur; \`memory\` hanya menunjuk node Shared Memory.
 `;

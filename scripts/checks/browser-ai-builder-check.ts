@@ -165,11 +165,16 @@ try {
       await page.locator('#ai-records-title').filter({ hasText: 'Produk' }).waitFor();
     };
     await openData();
-    await page.locator('#ai-records-new').click();
-    await page.locator('#ai-record-form [name=nama]').fill('Produk Basic');
-    await page.locator('#ai-record-form [name=biaya]').fill('150000');
-    await page.locator('#ai-record-form').getByRole('button', { name: 'Simpan', exact: true }).click();
-    await page.locator('#ai-record-panel').waitFor({ state: 'hidden' });
+    // Tabel inline: fokus sel baris baru, Enter membuka editor, Tab/Enter menyimpan isinya.
+    const newCell = (col: string) => page.locator(`#ai-records tr.ai-grid-new td[data-col="${col}"]`);
+    const fillCell = async (col: string, value: string, key = 'Tab') => {
+      await newCell(col).focus();
+      await page.keyboard.press('Enter');
+      await newCell(col).locator('input').fill(value);
+      await newCell(col).locator('input').press(key);
+    };
+    await fillCell('nama', 'Produk Basic');
+    await fillCell('biaya', '150000', 'Enter');
     await page
       .locator('#ai-knowledge-collections')
       .getByRole('button', { name: /Produk\s*1$/ })

@@ -9,6 +9,7 @@ import { collectionKind, parseDefinition, validateRecord, text, type Collection 
 import { keywords, queryMemory, sumMemory, filterGroup, type StoredRecord } from './record-query.js';
 import { runRecordTool, type RecordAdapter } from './record-tools.js';
 import { previewMedia } from './media.js';
+import { previewFiles } from './generated-files.js';
 // Nomor pelanggan tiruan untuk koleksi milik pelanggan di simulasi.
 export const simulationCustomer = '628000000001';
 import { runGraph } from './engine.js';
@@ -120,6 +121,7 @@ export async function simulate(
     (n, v, key) => runRecordTool(memoryRecords(records), d, n, v, key),
     300,
     previewMedia,
+    previewFiles,
   );
   emit({
     node: 'output',

@@ -48,6 +48,29 @@ export async function uploadRecordFile(account: string, profile: string, name: u
   const type = documentFileType(content.subarray(0, 64), file);
   if (type.media_type === 'image' && content.length > recordFileLimits.imageBytes)
     throw new ApiError(413, 'document_too_large', 'Ukuran gambar melebihi 5 MB');
+  return storeFile(account, profile, file, content, type);
+}
+// File hasil node Buat file (JSON, Markdown): jenisnya ditentukan node, bukan ditebak dari isi, karena file teks tidak
+// punya tanda byte awal. Sama seperti unggahan, file terhapus sendiri bila tidak dipakai record dalam sehari.
+export async function saveGeneratedFile(
+  account: string,
+  profile: string,
+  name: string,
+  content: Buffer,
+  mimetype: 'application/json' | 'text/markdown',
+) {
+  if (!content.length) throw new ApiError(400, 'invalid_request', 'File kosong');
+  if (content.length > recordFileLimits.documentBytes)
+    throw new ApiError(413, 'document_too_large', 'Ukuran file melebihi 10 MB');
+  return storeFile(account, profile, filename(name), content, { media_type: 'document', mimetype });
+}
+async function storeFile(
+  account: string,
+  profile: string,
+  file: string,
+  content: Buffer,
+  type: { media_type: 'image' | 'document'; mimetype: string },
+) {
   await purgeStale(account);
   const id = randomUUID(),
     temporary = join(dir(account), id + '.part');

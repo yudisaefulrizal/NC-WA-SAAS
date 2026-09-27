@@ -30,6 +30,18 @@ const kinds = {
   compute: ['Set / Hitung', 'Olah nilai dengan aturan pasti, tanpa AI', 'logic', 'hitung set rumus angka tanggal'],
   media: ['Kirim media', 'Gambar atau dokumen ke pelanggan', 'media', 'gambar dokumen kirim foto brosur file'],
   receive: ['Terima media', 'Simpan lampiran dari pelanggan', 'media', 'lampiran bukti upload terima gambar file'],
+  file_json: [
+    'Buat file JSON',
+    'Susun file .json dari variabel, tanpa AI',
+    'media',
+    'file json ekspor data buat berkas',
+  ],
+  file_md: [
+    'Buat file Markdown',
+    'Susun file .md (artikel, catatan) dari variabel',
+    'media',
+    'file md markdown artikel catatan dokumen buat berkas cetak',
+  ],
 };
 // Urutan kelompok di popover Tambah node.
 const paletteGroups = [
@@ -38,6 +50,7 @@ const paletteGroups = [
   ['Data', ['data_table', 'data_text', 'data_form']],
   ['Memori', ['context_memory', 'memory']],
   ['Media', ['media', 'receive']],
+  ['File', ['file_md', 'file_json']],
   ['Alur', ['input', 'output', 'fallback']],
 ];
 // Warna ikon node; Fallback memakai warna peringatan agar jalurnya ke manusia mudah dikenali.
@@ -104,6 +117,9 @@ const icons = {
   media: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   receive: '<path d="M3 13h5l1.5 3h5l1.5-3h5"/><path d="M5 5h14l2 8v6H3v-6z"/>',
 };
+icons.file_json =
+  '<path d="M6 3h9l3 3v15H6z"/><path d="M11 10c-1.5 0-1.5 1-1.5 2s0 1.5-1 2c1 .5 1 1 1 2s0 2 1.5 2M13 10c1.5 0 1.5 1 1.5 2s0 1.5 1 2c-1 .5-1 1-1 2s0 2-1.5 2"/>';
+icons.file_md = '<path d="M6 3h9l3 3v15H6z"/><path d="M10 9l-1 6M13 9l-1 6M8.5 11h5M8 13.5h5M9 18h6"/>';
 icons.context_memory = '<path d="M4 6h16M4 12h11M4 18h7"/><circle cx="19" cy="16" r="2.5"/>';
 icons.data_table = '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/>';
 icons.data_text = '<path d="M6 3h9l3 3v15H6z"/><path d="M9 10h6M9 14h6M9 18h4"/>';
@@ -154,6 +170,10 @@ const illustrations = {
     '<rect x="4" y="4" width="56" height="56" rx="16" fill="#E6F6F2"/><path d="M14 18h36v30H14z" fill="#fff" stroke="#1F7A6D" stroke-width="2.2" stroke-linejoin="round" transform="rotate(-4 32 33)"/><path d="M20 30h24M20 37h16" stroke="#7CC5B8" stroke-width="2.4" stroke-linecap="round"/><circle cx="32" cy="16" r="5.5" fill="#E0655A"/><circle cx="30.5" cy="14.5" r="1.8" fill="#F3A49C"/>',
   media:
     '<rect x="4" y="4" width="56" height="56" rx="16" fill="#FBEFF5"/><rect x="10" y="16" width="26" height="22" rx="3" fill="#fff" stroke="#B0467F" stroke-width="2" transform="rotate(-8 23 27)"/><circle cx="18" cy="23" r="2.6" fill="#F2B9D3"/><path d="M13 35l7-6 5 4 7-6" stroke="#E2A9C6" stroke-width="2" fill="none" transform="rotate(-8 23 27)"/><path d="M24 22h14l6 6v20H24z" fill="#fff" stroke="#B0467F" stroke-width="2" stroke-linejoin="round"/><path d="M38 22v6h6" fill="#F6D9E7" stroke="#B0467F" stroke-width="2"/><rect x="27" y="34" width="12" height="6" rx="1.5" fill="#B0467F"/><path d="M29 37h8" stroke="#fff" stroke-width="1.6"/><path d="M40 46l16-8-5 16-4-5z" fill="#B0467F" stroke="#8C2F62" stroke-width="1.4" stroke-linejoin="round"/><path d="M47 49l9-11" stroke="#fff" stroke-width="1.4"/>',
+  file_json:
+    '<rect x="4" y="4" width="56" height="56" rx="16" fill="#FFF4E0"/><path d="M17 10h21l10 10v34H17z" fill="#fff" stroke="#B7791F" stroke-width="2.2" stroke-linejoin="round"/><path d="M38 10v10h10" fill="#FBE3B8" stroke="#B7791F" stroke-width="2.2" stroke-linejoin="round"/><path d="M28 27c-3 0-3 2-3 4.5s0 3.5-2.5 4.5c2.5 1 2.5 2 2.5 4.5s0 4.5 3 4.5" stroke="#B7791F" stroke-width="2.4" fill="none" stroke-linecap="round"/><path d="M38 27c3 0 3 2 3 4.5s0 3.5 2.5 4.5c-2.5 1-2.5 2-2.5 4.5s0 4.5-3 4.5" stroke="#B7791F" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="33" cy="36" r="1.8" fill="#E0A94A"/>',
+  file_md:
+    '<rect x="4" y="4" width="56" height="56" rx="16" fill="#EEF1FB"/><path d="M17 10h21l10 10v34H17z" fill="#fff" stroke="#4B5BA8" stroke-width="2.2" stroke-linejoin="round"/><path d="M38 10v10h10" fill="#D9DEF5" stroke="#4B5BA8" stroke-width="2.2" stroke-linejoin="round"/><path d="M26 24l-2 11M32 24l-2 11M22.5 28h11M22 32h11" stroke="#4B5BA8" stroke-width="2.4" fill="none" stroke-linecap="round"/><path d="M23 41h19M23 47h13" stroke="#A9B4E3" stroke-width="2.6" stroke-linecap="round"/>',
   receive:
     '<rect x="4" y="4" width="56" height="56" rx="16" fill="#FBEFF5"/><rect x="22" y="10" width="20" height="16" rx="3" fill="#fff" stroke="#B0467F" stroke-width="2"/><circle cx="28" cy="16" r="2" fill="#E2A9C6"/><path d="M24 24l6-5 4 3 6-5" stroke="#E2A9C6" stroke-width="2" fill="none"/><path d="M32 28v8m-4-4l4 4 4-4" stroke="#B0467F" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 38h12l3 6h14l3-6h12v14H10z" fill="#fff" stroke="#B0467F" stroke-width="2.2" stroke-linejoin="round"/>',
 };
@@ -397,6 +417,8 @@ function newNode(type, x = 120, y = 140, nodes = state.document?.nodes ?? []) {
     ...(type === 'compute' ? { steps: [{ name: 'hasil', op: 'value', args: ['{{input.message}}'] }] } : {}),
     ...(type === 'media' ? { value: '', caption: '', send_when: 'before', media_as: 'auto' } : {}),
     ...(type === 'receive' ? { accept: ['image', 'document'] } : {}),
+    ...(type === 'file_md' ? { value: '# Judul\n\n{{input.message}}', filename: '' } : {}),
+    ...(type === 'file_json' ? { value: '{\n  "pesan": "{{input.message}}"\n}', filename: '' } : {}),
   };
 }
 
@@ -1294,6 +1316,9 @@ const traceErrors = {
   ai_graph_step_limit: 'Alur melewati batas langkah.',
   ai_invalid_context: 'Ringkasan konteks tidak valid.',
   ai_graph_failed: 'Langkah gagal dijalankan.',
+  ai_file_invalid_json: 'Template JSON tidak valid.',
+  ai_file_empty: 'Isi file kosong.',
+  ai_file_too_large: 'Isi file melebihi 1 MB.',
 };
 const errorText = code => traceErrors[code] ?? code;
 function resetTest() {

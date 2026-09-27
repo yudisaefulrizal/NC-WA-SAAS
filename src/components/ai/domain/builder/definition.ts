@@ -21,6 +21,8 @@ export const nodeTypes = [
   'compute',
   'media',
   'receive',
+  'file_json',
+  'file_md',
 ] as const;
 export type NodeType = (typeof nodeTypes)[number];
 export const fieldTypes = [
@@ -210,6 +212,8 @@ export interface GraphNode {
   caption?: string;
   send_when?: 'before' | 'after';
   media_as?: 'auto' | 'image' | 'document';
+  // Node Buat file (JSON, Markdown): nama file hasil, boleh berisi variabel; isinya template di `value`.
+  filename?: string;
   // Node Terima media: jenis lampiran pelanggan yang diterima.
   accept?: ('image' | 'document')[];
   context_format?: 'text' | 'spo';
@@ -359,6 +363,7 @@ export function parseDefinition(value: unknown): GraphDefinition {
       ...(n.steps !== undefined ? { steps: list(n.steps, limits.steps).map(computeStep) } : {}),
       ...(n.max_chars !== undefined ? { max_chars: maxChars(n.max_chars) } : {}),
       ...(n.caption !== undefined ? { caption: text(n.caption, 1000) } : {}),
+      ...(n.filename !== undefined ? { filename: text(n.filename, 200) } : {}),
       ...(n.send_when !== undefined ? { send_when: choice(n.send_when, ['before', 'after'] as const) } : {}),
       ...(n.media_as !== undefined ? { media_as: choice(n.media_as, ['auto', 'image', 'document'] as const) } : {}),
       ...(n.accept !== undefined
@@ -533,6 +538,14 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
           add('Field pilihan ' + f.id + ' membutuhkan opsi.', n.id);
     }
     if (n.type === 'media' && !n.value.trim()) add('Isi file yang dikirim, misalnya variabel field File.', n.id);
+    if ((n.type === 'file_json' || n.type === 'file_md') && !n.value.trim())
+      add('Isi template file wajib diisi.', n.id);
+    if (n.type === 'file_json' && n.value.trim())
+      try {
+        JSON.parse(n.value);
+      } catch {
+        add('Template JSON tidak valid. Tulis variabel di dalam tanda kutip, misalnya "{{nodes.agent.answer}}".', n.id);
+      }
     if (n.type === 'receive' && !(n.accept ?? ['image', 'document']).length)
       add('Pilih minimal satu jenis media yang diterima.', n.id);
     if (n.type === 'compute') {
@@ -710,6 +723,8 @@ export function outputFields(source: GraphNode): string[] {
     compute: (source.steps ?? []).map(s => s.name),
     media: ['files', 'count', 'skipped'],
     receive: ['file', 'filename', 'type', 'mimetype', 'caption'],
+    file_json: ['file', 'filename', 'size'],
+    file_md: ['file', 'filename', 'size'],
   };
   return fields[source.type];
 }

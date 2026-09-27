@@ -108,12 +108,20 @@ try {
       await page.locator('#ai-knowledge-collections').getByRole('button', { name }).click();
     };
     await open(/^SOP/);
+    // Koleksi teks memakai lebar penuh area isi, tidak menyusut selebar isinya.
+    const fullWidth = () =>
+      page.evaluate(() => {
+        const host = document.querySelector('#ai-records')!.getBoundingClientRect().width;
+        return host >= document.querySelector('.ai-records-head')!.getBoundingClientRect().width - 2;
+      });
+    assert.equal(await fullWidth(), true);
     await page.locator('#ai-single-text').fill('Pembayaran lewat QRIS.\n\nKeluhan diteruskan ke tim.');
     await page.locator('.ai-single-status').filter({ hasText: 'Tersimpan' }).waitFor();
     await open(/^SOP/);
     assert.match(await page.locator('#ai-single-text').inputValue(), /Pembayaran lewat QRIS/);
     assert.equal(await page.locator('#ai-records-new').isHidden(), true);
     await open(/^Info usaha/);
+    assert.equal(await fullWidth(), true);
     await page.locator('#ai-single-form [name=alamat]').fill('Jl. Dago 12');
     await page.locator('#ai-single-form [name=ongkir]').fill('10000');
     await page.locator('#ai-single-form').getByRole('button', { name: 'Simpan' }).click();

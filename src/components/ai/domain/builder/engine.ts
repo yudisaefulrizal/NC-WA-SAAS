@@ -28,7 +28,8 @@ import {
   type MediaResolver,
   type QueuedMedia,
 } from './media.js';
-import { recordFileInfo } from './record-files.js';
+import { recordFileInfo, saveGeneratedFile } from './record-files.js';
+import { buildFile, isFileNode, type FileWriter } from './generated-files.js';
 export type GraphTool = (node: GraphNode, value: unknown, key: string) => Promise<unknown>;
 export function lookup(path: string, state: Record<string, unknown>): unknown {
   let v: unknown = state;
@@ -60,6 +61,19 @@ function databaseMedia(scope: ToolContext): MediaResolver {
     const file = await recordFileInfo(scope.account, scope.profile, ref);
     if (!file) throw Error('ai_media_not_found');
     return { kind: 'file', ref, type: as === 'auto' ? file.media_type : as, filename: file.filename };
+  };
+}
+// File node Buat file disimpan di data profil sesi ini.
+function databaseFiles(scope: ToolContext): FileWriter {
+  return async file => {
+    const saved = await saveGeneratedFile(
+      scope.account,
+      scope.profile,
+      file.filename,
+      file.content,
+      file.mimetype as 'application/json' | 'text/markdown',
+    );
+    return { file: saved.id, filename: saved.filename, size: saved.size_bytes };
   };
 }
 // Record milik pelanggan selalu dibatasi ke pelanggan dari sesi, bukan dari argumen model.
@@ -100,6 +114,7 @@ export async function runGraph(
   toolOverride?: GraphTool,
   maxWords = 300,
   resolveMedia: MediaResolver = databaseMedia(scope),
+  writeFile: FileWriter = databaseFiles(scope),
 ) {
   const media: QueuedMedia[] = [];
   assertRunnable(d);
@@ -502,6 +517,8 @@ export async function runGraph(
           files.push({ name: item.filename, type: item.type });
         }
         result = { files, count: files.length, skipped };
+      } else if (isFileNode(n)) {
+        result = await writeFile(buildFile(n, v => interpolate(v, state), n.label));
       } else if (n.type === 'receive') {
         const incoming = scope.incomingMedia;
         const accepted = incoming && (n.accept ?? ['image', 'document']).includes(incoming.type);
