@@ -394,7 +394,45 @@ async function loadAdminProfiles() {
     toggle.append(input, element('span'), state);
     const editor = element('a', 'button secondary', 'Buka di Editor profil');
     editor.href = '/dashboard/admin/ai-builder?profile=' + encodeURIComponent(p.id);
-    return [name, flow, usage, toggle, editor];
+    const actions = element('div', 'row-actions admin-profile-actions');
+    actions.append(editor);
+    // Hapus biasa ditolak server bila profil masih dipakai data profil klien.
+    const remove = button('Hapus', async () => {
+      if (!confirm('Hapus profil ' + p.name + '? Profil dan seluruh versi alurnya dihapus permanen.')) return;
+      await api('/api/admin/ai/builder/' + encodeURIComponent(p.id), 'DELETE', { revision: p.revision });
+      $('message').textContent = p.name + ' dihapus.';
+      await loadAdminProfiles();
+    });
+    remove.className = 'secondary danger';
+    actions.append(remove);
+    // Hapus paksa: juga mencabut dan menghapus semua data profil klien yang memakainya; wajib mengetik nama profil.
+    if (p.data_profiles) {
+      const force = button('Hapus paksa', async () => {
+        const typed = prompt(
+          'Hapus paksa ' +
+            p.name +
+            ': ' +
+            p.data_profiles +
+            ' data profil klien (beserta record dan file-nya) ikut dihapus dan dicabut dari ' +
+            p.sessions +
+            ' sesi, lalu AI berhenti membalas di sesi itu. Tidak bisa dibatalkan.\n\nKetik nama profil untuk melanjutkan:',
+        );
+        if (typed === null) return;
+        if (typed.trim() !== p.name) {
+          $('message').textContent = 'Nama profil tidak cocok; tidak ada yang dihapus.';
+          return;
+        }
+        const r = await api('/api/admin/ai/builder/' + encodeURIComponent(p.id) + '/force', 'DELETE', {
+          revision: p.revision,
+        });
+        $('message').textContent =
+          p.name + ' dihapus beserta ' + r.data_profiles + ' data profil klien (' + r.sessions + ' sesi dicabut).';
+        await loadAdminProfiles();
+      });
+      force.className = 'danger';
+      actions.append(force);
+    }
+    return [name, flow, usage, toggle, actions];
   });
 }
 async function loadFailures(page = failuresPage) {

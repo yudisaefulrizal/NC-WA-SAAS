@@ -42,10 +42,13 @@ export async function validatedAI<T>(
     try {
       return validate(raw);
     } catch (error) {
+      const detail = (error as { detail?: unknown })?.detail;
       config.onTrace?.({
         node: config.call_role ?? 'model',
         state: attempt === 1 ? 'invalid' : 'retry',
-        error: error instanceof Error ? error.message : 'invalid_output',
+        error:
+          (error instanceof Error ? error.message : 'invalid_output') +
+          (typeof detail === 'string' ? ' — ' + detail : ''),
         output: raw,
       });
       if (attempt === 1) throw error;

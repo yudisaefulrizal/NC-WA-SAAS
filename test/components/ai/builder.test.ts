@@ -16,6 +16,7 @@ import {
   type GraphNode,
 } from '../../../src/components/ai/domain/builder/definition.js';
 import * as store from '../../../src/components/ai/domain/builder/store.js';
+import { forceDeleteProfile } from '../../../src/components/ai/domain/data-profiles.js';
 import { runGraph, interpolate } from '../../../src/components/ai/domain/builder/engine.js';
 import { simulate } from '../../../src/components/ai/domain/builder/simulation.js';
 import { catalogGraph } from './graph-fixture.js';
@@ -445,6 +446,28 @@ test('Deleting an unused graph removes versions; graphs with client data are pro
   const used = await graph();
   await service.createDataProfile(client, { profile_type: used.id, name: 'Retained profile' });
   await assert.rejects(store.deleteGraph(owner, used.id, { revision: 1 }), { code: 'profile_in_use' });
+});
+
+test('Force delete detaches and removes every client data profile, then deletes the graph', async () => {
+  const used = await graph();
+  const data = await service.createDataProfile(client, { profile_type: used.id, name: 'Paksa hapus' });
+  await service.attachProfile(client, 'shop', { data_profile_id: data.id, enabled: true });
+  await assert.rejects(forceDeleteProfile(service, owner, used.id, { revision: 0 }), { code: 'workflow_conflict' });
+  const result = await forceDeleteProfile(service, owner, used.id, { revision: 1 });
+  assert.deepEqual(result, { deleted: true, data_profiles: 1, sessions: 1 });
+  assert.equal(await store.findGraph(used.id), null);
+  const [left] = await db.execute<any[]>('SELECT id FROM ai_data_profiles WHERE id=?', [data.id]);
+  assert.equal(left.length, 0);
+  const [attached] = await db.execute<any[]>(
+    'SELECT data_profile_id FROM ai_assistants WHERE account_id=? AND session_id=?',
+    [client, 'shop'],
+  );
+  assert.equal(attached[0]?.data_profile_id ?? null, null);
+  const [audit] = await db.execute<any[]>('SELECT action FROM audit_events WHERE account_id=? AND action LIKE ?', [
+    owner,
+    'graph_force_deleted:' + used.id + '%',
+  ]);
+  assert.equal(audit.length, 1);
 });
 
 test('Shared Memory exposes the same bounded conversation to downstream agents without model calls of its own', async () => {

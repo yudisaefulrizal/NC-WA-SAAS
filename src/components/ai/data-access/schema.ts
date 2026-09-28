@@ -82,6 +82,14 @@ export async function migrateAI() {
     );
     if (!columns.length) await db.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+  // Ringkasan node Context kini tanpa batas 200 karakter; kolom lama VARCHAR(200) dijadikan TEXT.
+  for (const table of ['ai_conversations', 'ai_fallbacks', 'ai_agent_failures']) {
+    const [columns] = await db.execute<any[]>(
+      "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME='router_context'",
+      [table],
+    );
+    if (columns[0]?.DATA_TYPE === 'varchar') await db.query(`ALTER TABLE ${table} MODIFY router_context TEXT NULL`);
+  }
   await db.query(
     'UPDATE ai_settings SET profile_routing_enabled=TRUE WHERE id=1 AND EXISTS(SELECT 1 FROM ai_provider_routes)',
   );

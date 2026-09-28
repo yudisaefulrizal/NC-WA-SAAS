@@ -4,6 +4,10 @@ import { rateLimit } from 'express-rate-limit';
 import * as builder from '../domain/builder/store.js';
 import { profileSkillZip, skillName } from '../domain/builder/skill.js';
 import { simulate } from '../domain/builder/simulation.js';
+import { runAssistant } from '../domain/builder/assistant.js';
+import { forceDeleteProfile } from '../domain/data-profiles.js';
+import { ai } from '../domain/service.js';
+import { generateSamples } from '../domain/builder/samples.js';
 import { uploadRecordFile, recordFilePath } from '../domain/builder/record-files.js';
 import {
   listCollectionSources,
@@ -26,6 +30,10 @@ export function builderAdminRoutes(app: express.Express) {
   app.delete(base + '/:id', async (req, res) =>
     res.json(await builder.deleteGraph(res.locals.account.id, String(req.params.id), req.body)),
   );
+  // Hapus paksa: cabut dan hapus semua data profil klien yang memakai profil ini, lalu hapus profilnya.
+  app.delete(base + '/:id/force', async (req, res) =>
+    res.json(await forceDeleteProfile(ai, res.locals.account.id, String(req.params.id), req.body)),
+  );
   app.get(base + '/:id', async (req, res) => res.json(await builder.graphState(String(req.params.id))));
   app.put(base + '/:id', async (req, res) =>
     res.json(await builder.saveGraph(res.locals.account.id, String(req.params.id), req.body)),
@@ -40,6 +48,45 @@ export function builderAdminRoutes(app: express.Express) {
   app.get(base + '/:id/export', async (req, res) => {
     const state = await builder.graphState(String(req.params.id));
     res.set('Content-Disposition', 'attachment; filename="profile.json"').json(state.draft);
+  });
+  // Buat data contoh otomatis untuk semua koleksi sekaligus (tidak menyimpan; editor memasukkannya ke draft).
+  app.post(base + '/:id/samples', rateLimit({ windowMs: 60000, limit: 20 }), async (req, res) => {
+    await builder.graphState(String(req.params.id));
+    try {
+      res.json(await generateSamples(req.body));
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      const code = e instanceof Error && /^ai_[a-z_0-9]+$/.test(e.message) ? e.message : 'ai_samples_failed';
+      res.status(502).json({ error: code, message: 'Data contoh gagal dibuat (' + code + ').' });
+    }
+  });
+  // Asisten AI: langkah dan hasil dikirim sebagai NDJSON; tidak menyimpan apa pun (owner memilih Terapkan di editor).
+  app.post(base + '/:id/assistant', rateLimit({ windowMs: 60000, limit: 10 }), async (req, res) => {
+    await builder.graphState(String(req.params.id));
+    const controller = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+    const emit = (event: unknown) => {
+      if (res.destroyed) return;
+      if (!res.headersSent)
+        res.set({ 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      res.write(JSON.stringify(event) + '\n');
+    };
+    try {
+      await runAssistant(res.locals.account.id, String(req.params.id), req.body, emit, controller.signal);
+    } catch (e) {
+      emit({
+        step: 'error',
+        error:
+          e instanceof ApiError
+            ? e.message
+            : e instanceof Error && /^ai_[a-z_0-9]+$/.test(e.message)
+              ? e.message
+              : 'Asisten gagal dijalankan.',
+      });
+    }
+    res.end();
   });
   app.post(base + '/:id/run', rateLimit({ windowMs: 60000, limit: 10 }), async (req, res) => {
     await builder.graphState(String(req.params.id));

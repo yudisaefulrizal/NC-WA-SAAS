@@ -64,6 +64,7 @@ const until = async <T>(
 };
 let browser,
   graphId = '';
+const extraGraphs: string[] = [];
 try {
   await db.execute('INSERT INTO accounts(id,email,password_hash) VALUES (?,?,?)', [
     client,
@@ -244,6 +245,33 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
   }
+  // Pemilik: Hapus untuk profil tanpa data klien, Hapus paksa (ketik nama) untuk profil yang dipakai data klien.
+  {
+    const plain = await createGraph(owner, blankDefinition('Profil Buang A'));
+    const forced = await createGraph(owner, blankDefinition('Profil Buang B'));
+    extraGraphs.push(plain.id, forced.id);
+    await saveGraph(owner, forced.id, { revision: forced.revision }, true);
+    await setProfileEnabled(owner, forced.id, true);
+    const data = await ai.createDataProfile(client, { profile_type: forced.id, name: 'Data paksa' });
+    const { page, errors, context } = await open(ownerToken, '/dashboard/admin/profiles');
+    page.removeAllListeners('dialog');
+    page.on('dialog', d => void (d.type() === 'prompt' ? d.accept('Profil Buang B') : d.accept()));
+    const plainRow = page.locator('#admin-profiles-list tr', { hasText: 'Profil Buang A' });
+    await plainRow.waitFor();
+    assert.equal(await plainRow.getByRole('button', { name: 'Hapus paksa' }).count(), 0);
+    await plainRow.getByRole('button', { name: 'Hapus', exact: true }).click();
+    await plainRow.waitFor({ state: 'detached' });
+    const forcedRow = page.locator('#admin-profiles-list tr', { hasText: 'Profil Buang B' });
+    await forcedRow.getByRole('button', { name: 'Hapus', exact: true }).click();
+    await page.locator('#message').filter({ hasText: 'masih dipakai data akun' }).waitFor();
+    await forcedRow.getByRole('button', { name: 'Hapus paksa' }).click();
+    await page.locator('#message').filter({ hasText: 'dihapus beserta 1 data profil klien' }).waitFor();
+    await forcedRow.waitFor({ state: 'detached' });
+    const [left] = await db.execute<any[]>('SELECT id FROM ai_data_profiles WHERE id=?', [data.id]);
+    assert.equal(left.length, 0);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
   {
     const { page, errors, context } = await open(ownerToken, '/dashboard/admin/profiles', 390, 844);
     await page.locator('#admin-menu-toggle').click();
@@ -254,7 +282,7 @@ try {
     await context.close();
   }
   console.log(
-    'Multi-profile UI: session strip, attach dialog, Data Profil, manage, detach, and owner Profil AI checks passed on desktop and phone',
+    'Multi-profile UI: session strip, attach dialog, Data Profil, manage, detach, and owner Profil AI checks (including delete and force delete) passed on desktop and phone',
   );
 } finally {
   await browser?.close();
@@ -264,8 +292,10 @@ try {
     await db.execute('DELETE FROM audit_events WHERE account_id=?', [id]);
     await db.execute('DELETE FROM accounts WHERE id=?', [id]);
   }
-  await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [graphId]);
-  await db.execute('DELETE FROM ai_profile_types WHERE id=?', [graphId]);
+  for (const id of [graphId, ...extraGraphs]) {
+    await db.execute('DELETE FROM ai_graph_profiles WHERE id=?', [id]);
+    await db.execute('DELETE FROM ai_profile_types WHERE id=?', [id]);
+  }
   await db.end();
   await rm(temporary, { recursive: true, force: true });
 }

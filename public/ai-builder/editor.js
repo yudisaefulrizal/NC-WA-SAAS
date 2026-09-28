@@ -85,6 +85,8 @@ const icons = {
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/>',
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/>',
   play: '<path d="M7 5l12 7-12 7z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',
   upload: '<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>',
@@ -193,6 +195,26 @@ function iconButton(name, label, fn, className = 'icon-btn ghost') {
   return b;
 }
 for (const node of document.querySelectorAll('[data-icon]')) node.prepend(svgIcon(node.dataset.icon));
+// Tombol tema: terang ↔ gelap, disimpan per browser (theme.js memasangnya sebelum halaman digambar).
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const currentTheme = () => document.documentElement.dataset.theme ?? (darkQuery.matches ? 'dark' : 'light');
+function renderThemeToggle() {
+  const dark = currentTheme() === 'dark',
+    toggle = $('theme-toggle');
+  toggle.replaceChildren(svgIcon(dark ? 'sun' : 'moon'));
+  toggle.setAttribute('aria-label', dark ? 'Mode terang' : 'Mode gelap');
+  toggle.title = dark ? 'Mode terang' : 'Mode gelap';
+}
+$('theme-toggle').onclick = () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem('ncwa-builder-theme', next);
+  } catch {}
+  renderThemeToggle();
+};
+darkQuery.addEventListener('change', renderThemeToggle);
+renderThemeToggle();
 
 const state = {
   id: null,
@@ -243,13 +265,23 @@ function checkpoint() {
   if (state.undo.length > 80) state.undo.shift();
   state.redo = [];
 }
+// Selama pratinjau usulan Asisten AI draft tidak boleh berubah; owner memilih Terapkan atau Tolak dulu.
+function previewLocked() {
+  if (!state.preview) return false;
+  notice('Terapkan atau Tolak usulan Asisten AI dulu.');
+  return true;
+}
 function changed() {
+  // Menggeser node saat pratinjau hanya mengubah pratinjau; tidak ada yang disimpan sampai Terapkan.
+  if (state.preview) return renderCanvas();
   state.dirty = true;
   state.saveState = 'dirty';
   renderStatus();
   scheduleSave();
 }
 function mutate(fn) {
+  if (previewLocked()) return;
+  state.highlight = null;
   checkpoint();
   fn();
   changed();
@@ -383,13 +415,9 @@ function newNode(type, x = 120, y = 140, nodes = state.document?.nodes ?? []) {
     label,
     x,
     y,
-    prompt:
-      type === 'agent'
-        ? 'Jawab ramah dan ringkas berdasarkan data yang tersedia.'
-        : type === 'context'
-          ? 'Ringkas konteks percakapan menjadi Subjek-Predikat-Objek.'
-          : '',
-    tier: type === 'router' ? 'decision' : type === 'extract' ? 'structured' : 'medium',
+    // Gaya bahasa diatur Perilaku AI klien; instruksi Context ditanam di sistem.
+    prompt: type === 'agent' ? 'Jawab pertanyaan pelanggan berdasarkan data yang tersedia.' : '',
+    tier: type === 'router' ? 'decision' : type === 'extract' ? 'structured' : type === 'context' ? 'cheap' : 'medium',
     model: '',
     tools: [],
     branches:
@@ -446,7 +474,6 @@ function applyProfile(p) {
   state.collection = 0;
   state.openField = -1;
   resetTest();
-  $('samples').value = '{}';
   $('profile-name').value = p.draft.name;
   $('profile-description').value = p.draft.description;
   renderStatus();
@@ -459,6 +486,10 @@ async function openProfile(id, skipConfirm = false) {
   if (!skipConfirm && state.dirty && !confirm('Draft belum tersimpan. Tinggalkan perubahan?')) return;
   const p = await api(base + '/' + encodeURIComponent(id));
   applyProfile(p);
+  if (arrangeUnplaced()) {
+    changed();
+    notice('Posisi node disusun otomatis dengan Rapikan. Draft disimpan otomatis.');
+  }
   const renamed = readableNodeIds();
   if (renamed) {
     checkpoint();
@@ -578,7 +609,7 @@ async function flushSave() {
   clearTimeout(saveTimer);
   if (typeof drag !== 'undefined' && drag) return scheduleSave();
   if (saving) await saving.catch(() => {});
-  if (!state.id || !state.dirty) return;
+  if (!state.id || !state.dirty || state.preview) return;
   await save();
 }
 function renderAll() {
@@ -622,11 +653,17 @@ function showSide(mode) {
   state.side = mode;
   $('inspector').hidden = mode !== 'inspector';
   $('tester').hidden = mode !== 'tester';
-  $('flow').classList.toggle('testing', mode === 'tester');
+  $('assistant').hidden = mode !== 'assistant';
+  $('flow').classList.toggle('testing', mode === 'tester' || mode === 'assistant');
   $('test-toggle').setAttribute('aria-pressed', String(mode === 'tester'));
+  $('assistant-toggle').setAttribute('aria-pressed', String(mode === 'assistant'));
   if (mode === 'tester') {
     showTab('flow');
     $('test-message').focus();
+  }
+  if (mode === 'assistant') {
+    showTab('flow');
+    $('assistant-message').focus();
   }
 }
 $('test-toggle').onclick = () => showSide(state.side === 'tester' ? 'inspector' : 'tester');
@@ -950,6 +987,7 @@ function renderCollections() {
   if (!use.tools.length && !use.relations.length) used.append(el('span', '— belum dipakai node mana pun'));
   card.append(used);
   if (kindOf(c) !== 'text') card.append(fieldsTable(c));
+  card.append(samplesSection(c));
   host.append(card);
 }
 function fieldsTable(c) {
@@ -1160,6 +1198,11 @@ function renameField(c, f, label) {
     );
   // Variabel isian: {{data.<koleksi>.<field>}}.
   rewriteVariables(new RegExp('((?<![.\\w])data\\.' + c.id + '\\.)' + f.id + '(?![\\w])', 'g'), '$1' + next);
+  for (const row of c.samples ?? [])
+    if (Object.hasOwn(row, f.id)) {
+      row[next] = row[f.id];
+      delete row[f.id];
+    }
   f.id = next;
 }
 // Nilai bawaan diisi saat record baru dibuat tanpa nilai; bentuk isiannya mengikuti tipe field.
@@ -1317,18 +1360,29 @@ const traceErrors = {
   ai_invalid_context: 'Ringkasan konteks tidak valid.',
   ai_graph_failed: 'Langkah gagal dijalankan.',
   ai_file_invalid_json: 'Template JSON tidak valid.',
+  ai_invalid_tool: 'Agent kehabisan putaran (5) tanpa memberi jawaban.',
+  ai_invalid_structure: 'Jawaban AI bukan format yang diminta.',
+  ai_provider_empty_content: 'Penyedia mengirim jawaban kosong.',
+  ai_provider_invalid_json: 'Jawaban penyedia tidak bisa dibaca.',
   ai_file_empty: 'Isi file kosong.',
   ai_file_too_large: 'Isi file melebihi 1 MB.',
 };
-const errorText = code => traceErrors[code] ?? code;
+// Kode error boleh diikuti rincian ("ai_invalid_structure — kunci …"); kode diterjemahkan, rinciannya dipertahankan.
+const errorText = code => {
+  const [head, ...rest] = String(code).split(' — ');
+  return (traceErrors[head] ?? head) + (rest.length ? ' (' + rest.join(' — ') + ')' : '');
+};
 function resetTest() {
   state.controller?.abort();
   state.history = [];
   state.context = null;
   state.trace = {};
   state.traceSteps = {};
+  state.traceTokens = {};
   $('chat').replaceChildren($('chat').firstElementChild);
   renderTraceBanner();
+  // Data awal Uji selalu kembali ke data contoh koleksi.
+  syncTestSamples(true);
 }
 $('reset-test').onclick = () => {
   resetTest();
@@ -1346,6 +1400,7 @@ $('attachment-toggle').onclick = () => {
 $('clear-trace').onclick = () => {
   state.trace = {};
   state.traceSteps = {};
+  state.traceTokens = {};
   renderTraceBanner();
   renderCanvas();
 };
@@ -1415,6 +1470,84 @@ function stepWhat(s) {
   if (s.output?.fallback) return 'diteruskan ke tim';
   return n?.tier && memoryConsumers.includes(n.type) ? tierLabels[n.tier] : (kinds[s.type]?.[0] ?? '');
 }
+// Token per node dari jawaban penyedia (Uji). Panggilan tanpa angka dari penyedia diperkirakan dan ditandai ±.
+const formatTokens = n => Math.round(n).toLocaleString('id-ID');
+function addUsage(turn, event) {
+  if (!event.usage) return;
+  const u = event.usage,
+    t = (turn.tokens[event.node] ??= { input: 0, output: 0, reasoning: 0, calls: 0, estimated: false });
+  t.input += u.input;
+  t.output += u.output;
+  t.reasoning += u.reasoning ?? 0;
+  t.calls++;
+  t.estimated ||= Boolean(u.estimated);
+  turn.cost.known += u.cost ?? 0;
+  if (u.cost === null || u.cost === undefined) turn.cost.missing++;
+}
+function tokenText(t) {
+  return (t.estimated ? '±' : '') + '↑' + formatTokens(t.input) + ' ↓' + formatTokens(t.output);
+}
+function tokenTitle(t) {
+  return (
+    'Token masuk ' +
+    formatTokens(t.input) +
+    ', keluar ' +
+    formatTokens(t.output) +
+    (t.reasoning ? ' (termasuk ' + formatTokens(t.reasoning) + ' token berpikir)' : '') +
+    ' · ' +
+    t.calls +
+    ' panggilan' +
+    (t.estimated ? ' · perkiraan, penyedia tidak menyebut jumlah token' : '')
+  );
+}
+// Total di akhir pesan: token semua node dan biaya dari penyedia (mata uang penyedia, umumnya dolar AS).
+function usageTotal(turn) {
+  const all = Object.values(turn.tokens);
+  if (!all.length) return '';
+  const input = all.reduce((s, t) => s + t.input, 0),
+    output = all.reduce((s, t) => s + t.output, 0),
+    estimated = all.some(t => t.estimated);
+  const cost = turn.cost.known.toLocaleString('en-US', { maximumSignificantDigits: 3 });
+  return (
+    (estimated ? '±' : '') +
+    formatTokens(input + output) +
+    ' token (↑' +
+    formatTokens(input) +
+    ' ↓' +
+    formatTokens(output) +
+    ')' +
+    (turn.cost.missing === all.reduce((s, t) => s + t.calls, 0)
+      ? ' · biaya tidak disebut penyedia'
+      : ' · biaya $' + cost + (turn.cost.missing ? ' (sebagian panggilan tanpa biaya)' : ''))
+  );
+}
+// Seluruh jejak satu pesan Uji dalam satu JSON: pesan, jawaban atau error, total, dan setiap langkah beserta semua
+// panggilan modelnya (prompt, jawaban mentah, hasil pemeriksaan). Sama lengkapnya saat berhasil maupun gagal.
+function fullTrace(turn) {
+  const numbers = stepNumbers(turn);
+  return {
+    message: turn.message,
+    answer: turn.answer,
+    error: turn.error || null,
+    context: turn.context,
+    duration_ms: turn.finished - turn.started,
+    model_calls: turn.calls,
+    total: usageTotal(turn) || null,
+    steps: turn.steps.map(s => ({
+      step: numbers[s.node],
+      node: s.node,
+      label: nodeLabel(s.node),
+      type: s.type,
+      state: s.state,
+      ...(s.input !== undefined ? { input: s.input } : {}),
+      ...(s.output !== undefined ? { output: s.output } : {}),
+      ...(s.error ? { error: s.error } : {}),
+      ...(s.duration !== undefined ? { duration_ms: s.duration } : {}),
+      ...(turn.tokens[s.node] ? { tokens: turn.tokens[s.node] } : {}),
+      calls: modelCalls(s.events),
+    })),
+  };
+}
 function renderTrace(turn) {
   const numbers = stepNumbers(turn),
     box = turn.trace,
@@ -1434,11 +1567,28 @@ function renderTrace(turn) {
     ),
   );
   box.replaceChildren(summary);
+  if (turn.finished && usageTotal(turn)) box.append(el('div', 'Total: ' + usageTotal(turn), 'trace-total'));
+  if (turn.finished) {
+    const copy = btn(
+      'Salin jejak lengkap',
+      async () => {
+        await navigator.clipboard.writeText(JSON.stringify(fullTrace(turn), null, 2));
+        notice('Jejak lengkap disalin.');
+      },
+      'btn ghost small trace-copy',
+    );
+    box.append(copy);
+  }
   for (const s of turn.steps) {
     const row = el('button', undefined, 'trace-step ' + s.state + (s.parent ? ' child' : ''));
     row.type = 'button';
     row.setAttribute('aria-expanded', String(turn.open === s.node));
     row.append(el('span', numbers[s.node], 'num'), el('span', nodeLabel(s.node)), el('span', stepWhat(s), 'what'));
+    if (turn.tokens[s.node]) {
+      const tokens = el('span', tokenText(turn.tokens[s.node]), 'tokens');
+      tokens.title = tokenTitle(turn.tokens[s.node]);
+      row.append(tokens);
+    }
     if (s.duration !== undefined) row.append(el('span', seconds(s.duration), 'dur'));
     row.onclick = () => {
       turn.open = turn.open === s.node ? null : s.node;
@@ -1455,11 +1605,65 @@ function renderTrace(turn) {
     box.append(detail);
   }
 }
+// Panggilan model satu langkah dari peristiwa jejak: prompt yang dikirim, jawaban mentah, dan hasil pemeriksaannya.
+// Pemeriksaan ditandai dari peristiwa retry/invalid sesudah jawaban; tanpa itu jawaban dianggap lolos.
+function modelCalls(events) {
+  const calls = [];
+  for (const e of events) {
+    if (e.state === 'responded')
+      calls.push({ prompt: e.prompt, response: e.output, model: e.model, usage: e.usage, status: 'lolos' });
+    else if (e.state === 'call_failed')
+      calls.push({ prompt: e.prompt, model: e.model, status: 'gagal', reason: e.error });
+    else if (e.state === 'retry' || e.state === 'invalid') {
+      const last = calls.at(-1);
+      if (last?.status === 'lolos')
+        Object.assign(last, { status: 'ditolak', reason: e.error, final: e.state === 'invalid' });
+      else calls.push({ status: 'ditolak', reason: e.error, response: e.output, final: e.state === 'invalid' });
+    }
+  }
+  return calls;
+}
+const roleLabels = { system: 'System', user: 'User', assistant: 'Assistant', decision: 'Permintaan Decisions' };
+function callDetail(c, index) {
+  const box = el('details', undefined, 'model-call ' + c.status),
+    summary = el('summary');
+  summary.append(
+    el('strong', 'Panggilan ' + (index + 1)),
+    el(
+      'span',
+      [c.model, c.usage ? tokenText({ ...c.usage, estimated: c.usage.estimated }) : ''].filter(Boolean).join(' · '),
+    ),
+    el(
+      'span',
+      c.status === 'lolos'
+        ? 'lolos pemeriksaan'
+        : (c.status === 'gagal' ? 'gagal di penyedia' : c.final ? 'ditolak (akhir)' : 'ditolak, diulang') +
+            (c.reason ? ': ' + errorText(c.reason) : ''),
+      'call-status',
+    ),
+  );
+  box.append(summary);
+  if (c.prompt?.length) {
+    box.append(el('h5', 'Prompt yang dikirim'));
+    for (const m of c.prompt) {
+      const part = el('div', undefined, 'prompt-part');
+      part.append(el('span', roleLabels[m.role] ?? m.role, 'prompt-role'), el('pre', m.content));
+      box.append(part);
+    }
+  }
+  if (c.response !== undefined) box.append(el('h5', 'Jawaban model'), el('pre', String(c.response)));
+  return box;
+}
 function traceDetail(s) {
   const detail = el('div', undefined, 'trace-detail' + (s.error ? ' error' : ''));
   if (s.error) detail.append(el('div', errorText(s.error), 'error-text'));
   const models = [...new Set(s.events.filter(e => e.model).map(e => e.model))];
   if (models.length) detail.append(el('div', 'Model: ' + models.join(', '), 'hint'));
+  const calls = modelCalls(s.events);
+  if (calls.length) {
+    detail.append(el('h4', 'Panggilan model (' + calls.length + ')'));
+    calls.forEach((c, i) => detail.append(callDetail(c, i)));
+  }
   const json = {};
   if (s.input !== undefined) json.input = s.input;
   if (s.output !== undefined) json.output = s.output;
@@ -1478,7 +1682,9 @@ function traceDetail(s) {
     btn(
       'Salin JSON',
       async () => {
-        await navigator.clipboard.writeText(JSON.stringify({ node: s.node, ...json, error: s.error }, null, 2));
+        await navigator.clipboard.writeText(
+          JSON.stringify({ node: s.node, ...json, error: s.error, calls: modelCalls(s.events) }, null, 2),
+        );
         notice('JSON langkah disalin.');
       },
       'btn ghost small',
@@ -1491,6 +1697,7 @@ function applyTraceToCanvas(turn) {
   state.trace = {};
   for (const s of turn.steps) state.trace[s.node] = s.state;
   state.traceSteps = stepNumbers(turn);
+  state.traceTokens = turn.tokens;
   renderTraceBanner();
   renderCanvas();
 }
@@ -1509,6 +1716,11 @@ async function runTest() {
   const turn = {
     steps: [],
     calls: 0,
+    message,
+    answer: null,
+    context: null,
+    tokens: {},
+    cost: { known: 0, missing: 0 },
     started: Date.now(),
     finished: null,
     error: '',
@@ -1550,9 +1762,23 @@ async function runTest() {
     const consume = line => {
       if (!line.trim()) return;
       const event = JSON.parse(line);
+      // Baris data contoh yang tidak valid dilewati server; tampilkan alasannya tanpa menghentikan Uji.
+      if (event.node === 'samples' && event.state === 'skipped') {
+        $('chat').insertBefore(
+          el(
+            'p',
+            'Data contoh dilewati: ' + event.output.map(s => s.collection + ' ' + s.message).join('; '),
+            'chat-note warn',
+          ),
+          pending,
+        );
+        return;
+      }
       if (event.state === 'completed' && event.output?.records) {
         const result = event.output;
         turn.finished = Date.now();
+        turn.answer = result.answer || '[Diteruskan ke manusia]';
+        turn.context = result.context ?? null;
         state.context = result.context;
         state.history.push(
           { role: 'user', content: message },
@@ -1573,7 +1799,10 @@ async function runTest() {
         pending.className = 'bubble assistant failed';
         pending.textContent = errorText(event.error);
       } else {
-        if (event.state === 'responded') turn.calls++;
+        if (event.state === 'responded') {
+          turn.calls++;
+          addUsage(turn, event);
+        }
         if (event.state === 'error') {
           turn.error ||= event.error;
           turn.open ??= event.node;

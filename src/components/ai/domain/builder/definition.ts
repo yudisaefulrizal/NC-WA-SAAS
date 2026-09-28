@@ -105,6 +105,8 @@ export const collectionOwners = ['shared', 'customer'] as const;
 export const collectionKinds = ['list', 'text', 'form'] as const;
 export type CollectionKind = (typeof collectionKinds)[number];
 export const maxCollectionText = 20000;
+// Data contoh per koleksi di editor: sedikit saja, cukup untuk menguji alur.
+export const maxCollectionSamples = 10;
 export interface Collection {
   id: string;
   name: string;
@@ -112,6 +114,9 @@ export interface Collection {
   // Tidak ada berarti list, supaya definisi lama tetap sama.
   kind?: CollectionKind;
   fields: Field[];
+  // Data contoh khusus owner untuk Uji di editor; tidak pernah dipakai runtime WhatsApp. Isinya diperiksa saat Uji,
+  // bukan saat simpan, supaya contoh yang belum lengkap tidak menghalangi penyuntingan.
+  samples?: Record<string, unknown>[];
 }
 export const collectionKind = (c: Collection): CollectionKind => c.kind ?? 'list';
 // Node yang membaca/menulis koleksi dan pasangan jenis koleksinya. Nama lama `tool` dibaca sebagai data_table.
@@ -180,8 +185,9 @@ export interface GraphNode {
   id: string;
   type: NodeType;
   label: string;
-  x: number;
-  y: number;
+  // Posisi di kanvas, hanya untuk tampilan. Boleh tidak ada (misalnya profil buatan AI): editor menyusunnya dengan Rapikan.
+  x?: number;
+  y?: number;
   prompt: string;
   tier: ModelTier;
   model: string;
@@ -296,7 +302,22 @@ export function parseDefinition(value: unknown): GraphDefinition {
     const owner = choice(c.owner ?? 'shared', collectionOwners);
     if (kind === 'text' && fields.length) throw bad('Koleksi teks tidak memakai field.');
     if (kind !== 'list' && owner !== 'shared') throw bad('Koleksi teks dan isian selalu umum.');
-    return { id: id(c.id), name: text(c.name, 100), owner, ...(kind !== 'list' ? { kind } : {}), fields };
+    const samples =
+      c.samples === undefined
+        ? undefined
+        : list(c.samples, maxCollectionSamples).map(v => {
+            const row = record(v);
+            if (JSON.stringify(row).length > maxCollectionText + 1000) throw bad('Data contoh terlalu besar.');
+            return row;
+          });
+    return {
+      id: id(c.id),
+      name: text(c.name, 100),
+      owner,
+      ...(kind !== 'list' ? { kind } : {}),
+      fields,
+      ...(samples?.length ? { samples } : {}),
+    };
   });
   unique(collections.map(c => c.id));
   for (const c of collections)
@@ -329,8 +350,7 @@ export function parseDefinition(value: unknown): GraphDefinition {
       id: id(n.id),
       type: choice(n.type === 'tool' ? 'data_table' : n.type, nodeTypes),
       label: text(n.label, 100),
-      x: coord(n.x),
-      y: coord(n.y),
+      ...(n.x !== undefined || n.y !== undefined ? { x: coord(n.x), y: coord(n.y) } : {}),
       prompt: text(n.prompt ?? ''),
       tier: choice(n.tier ?? 'medium', modelTiers),
       model: text(n.model ?? '', 100),
@@ -527,7 +547,8 @@ export function validateGraph(d: GraphDefinition): GraphIssue[] {
       add('Sambungan konteks harus berasal dari Memori konteks menuju Router, Agent, Context, atau Ekstrak.', n.id);
     if (n.type === 'context' && contextMemories.length && !n.context_memory)
       add('Hubungkan Context ke Memori konteks agar ringkasannya tersimpan.', n.id);
-    if (['agent', 'context'].includes(n.type) && !n.prompt.trim()) add('Prompt wajib diisi.', n.id);
+    // Instruksi Context ditanam di sistem, jadi hanya Agent yang wajib punya prompt.
+    if (n.type === 'agent' && !n.prompt.trim()) add('Prompt wajib diisi.', n.id);
     if (n.type === 'extract') {
       const fields = n.fields ?? [];
       if (!fields.length) add('Tambahkan minimal satu field untuk Ekstrak.', n.id);

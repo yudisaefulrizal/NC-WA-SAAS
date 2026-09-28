@@ -14,6 +14,30 @@ export interface DecisionRequest {
   state: Record<string, unknown>;
   questions: Record<string, { type: 'choice' | 'noul'; instructions: string; criteria: Record<string, string> }>;
 }
+// Pemakaian satu panggilan menurut penyedia: token masuk/keluar (token berpikir termasuk di keluar) dan biaya dalam
+// mata uang penyedia (OpenRouter: usage.cost; Sumopod/LiteLLM: header x-litellm-response-cost). Tidak ada = null.
+export interface AIUsage {
+  input: number;
+  output: number;
+  reasoning: number;
+  cost: number | null;
+}
+export function readUsage(data: Record<string, unknown>, headers: Record<string, unknown>): AIUsage | null {
+  const u = data.usage as Record<string, unknown> | undefined;
+  if (!u || typeof u !== 'object') return null;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v));
+  const input = num(u.prompt_tokens ?? u.input_tokens),
+    output = num(u.completion_tokens ?? u.output_tokens);
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return null;
+  const details = u.completion_tokens_details as Record<string, unknown> | undefined;
+  const cost = num(u.cost ?? headers['x-litellm-response-cost']);
+  return {
+    input,
+    output,
+    reasoning: Number.isFinite(num(details?.reasoning_tokens)) ? num(details?.reasoning_tokens) : 0,
+    cost: Number.isFinite(cost) ? cost : null,
+  };
+}
 export interface AIConfig {
   graph_context?: string | null;
   trace_node?: string;
@@ -44,6 +68,12 @@ export interface AIConfig {
   trace_enabled: boolean;
   credit_price: number;
   tidy_prompt?: string;
+  // Asisten Editor profil menulis ulang satu profil utuh: butuh jawaban lebih panjang dan waktu lebih lama dari
+  // balasan pelanggan. Tanpa nilai ini dipakai batas bawaan (2048 token, 45 detik).
+  max_tokens?: number;
+  timeout_ms?: number;
+  // Dipanggil sekali per jawaban penyedia yang menyebut pemakaiannya (dipakai Uji di editor untuk token per node).
+  onUsage?: (usage: AIUsage) => void;
 }
 export const defaults: AIConfig = {
   provider: 'compatible',
@@ -97,7 +127,7 @@ export function aiRequestPayload(config: AIConfig, messages: AIMessage[]) {
     model: config.model,
     messages: [...messages],
     stream: false,
-    max_tokens: 2048,
+    max_tokens: config.max_tokens ?? 2048,
     ...(config.response_format ? { response_format: config.response_format } : {}),
   };
 }
@@ -129,8 +159,8 @@ export const callAI: AITransport = async (config, messages, maxWords) => {
         method: 'POST',
         agent: false,
         signal: config.signal
-          ? AbortSignal.any([config.signal, AbortSignal.timeout(45000)])
-          : AbortSignal.timeout(45000),
+          ? AbortSignal.any([config.signal, AbortSignal.timeout(config.timeout_ms ?? 45000)])
+          : AbortSignal.timeout(config.timeout_ms ?? 45000),
         headers: {
           Authorization: 'Bearer ' + decrypt(config.secret),
           'Content-Type': 'application/json',
@@ -163,6 +193,8 @@ export const callAI: AITransport = async (config, messages, maxWords) => {
           }
           try {
             const data = JSON.parse(Buffer.concat(chunks).toString());
+            const usage = config.onUsage && readUsage(data, res.headers);
+            if (usage) config.onUsage!(usage);
             if (decision) {
               if (!data.answers || typeof data.answers !== 'object' || Array.isArray(data.answers)) {
                 reject(new Error('ai_provider_empty_content'));

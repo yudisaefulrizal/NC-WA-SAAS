@@ -5,11 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Editor Profil · NC-WA</title>
+    <script src="/ai-builder/theme.js"></script>
     <link rel="stylesheet" href="/ai-builder/editor.css" />
     <script defer src="/ai-builder/common.js"></script>
     <script defer src="/ai-builder/editor.js"></script>
     <script defer src="/ai-builder/canvas.js"></script>
     <script defer src="/ai-builder/inspector.js"></script>
+    <script defer src="/ai-builder/samples.js"></script>
+    <script defer src="/ai-builder/assistant.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -26,12 +29,14 @@
         <button data-tab="flow">Alur</button><button data-tab="schema">Struktur data</button
         ><button data-tab="settings">Pengaturan</button>
       </nav>
+      <button id="theme-toggle" class="icon-btn ghost theme-toggle" type="button"></button>
       <div id="editor-actions" class="topbar-end" hidden>
         <span id="dirty" class="save-state" role="status"></span>
         <button id="issues-button" class="btn warn" popovertarget="issues-menu" hidden></button>
         <span class="sep" aria-hidden="true"></span>
         <button id="undo" class="icon-btn ghost" aria-label="Urungkan (Ctrl+Z)" data-icon="undo"></button
         ><button id="redo" class="icon-btn ghost" aria-label="Ulangi (Ctrl+Shift+Z)" data-icon="redo"></button>
+        <button id="assistant-toggle" class="btn" aria-pressed="false" data-icon="agent">Asisten AI</button>
         <button id="test-toggle" class="btn" aria-pressed="false" data-icon="play">Uji</button>
         <button id="publish" class="btn primary">Terbitkan</button>
       </div>
@@ -120,6 +125,10 @@
             ><span class="sep" aria-hidden="true"></span
             ><button id="layout" class="btn ghost small" data-icon="layout">Rapikan</button>
           </div>
+          <div id="proposal-bar" class="proposal-bar" role="status" hidden>
+            <span id="proposal-summary"></span><button id="proposal-reject" class="btn small">Tolak</button
+            ><button id="proposal-apply" class="btn small primary">Terapkan</button>
+          </div>
           <div id="minimap" aria-hidden="true"></div>
           <div id="connection-hint" class="canvas-hint" role="status"></div>
         </div>
@@ -143,7 +152,7 @@
             </div>
             <div id="samples-box" class="samples" hidden>
               <label
-                >Data contoh per koleksi (JSON)<textarea
+                >Data selama pengujian (JSON)<textarea
                   id="samples"
                   rows="7"
                   spellcheck="false"
@@ -152,8 +161,8 @@
 {}</textarea>
               </label>
               <p class="hint">
-                Hanya berlaku di pengujian ini. Record koleksi milik pelanggan tanpa "customer" dianggap milik pelanggan
-                simulasi.
+                Diawali dari Data contoh di Struktur data dan ikut berubah selama pengujian ini; Mulai ulang
+                mengembalikannya. Record koleksi milik pelanggan tanpa "customer" dianggap milik pelanggan simulasi.
               </p>
             </div>
             <div id="chat" class="chat" aria-live="polite">
@@ -187,6 +196,62 @@
               </div>
             </form>
           </div>
+          <div id="assistant" class="tester assistant" hidden>
+            <div class="tester-head">
+              <div>
+                <strong>Asisten AI</strong>
+                <small>Penyedia AI NC-WA · tier Cerdas · membaca draft yang sedang dibuka</small>
+              </div>
+              <button id="assistant-new" class="btn ghost small" data-icon="restart">Percakapan baru</button
+              ><button
+                id="close-assistant"
+                class="icon-btn ghost"
+                aria-label="Tutup Asisten AI"
+                data-icon="close"
+              ></button>
+            </div>
+            <div id="assistant-chat" class="chat" aria-live="polite">
+              <p class="chat-note">
+                Minta perubahan atau tanyakan alurnya. Usulan tampil di kanvas dulu; menerbitkan tetap manual.
+              </p>
+            </div>
+            <form id="assistant-form" class="composer">
+              <div class="assistant-prompts">
+                <button
+                  type="button"
+                  class="chip-btn"
+                  data-assistant-prompt="Periksa profil ini dan jelaskan masalah atau kelemahannya."
+                >
+                  Periksa profil ini</button
+                ><button
+                  type="button"
+                  class="chip-btn"
+                  data-assistant-prompt="Jelaskan alur profil ini secara singkat."
+                >
+                  Jelaskan alurnya</button
+                ><button
+                  type="button"
+                  class="chip-btn"
+                  data-assistant-prompt="Tambahkan Agent Sapaan dan Penutup bila belum ada."
+                >
+                  Sapaan &amp; Penutup
+                </button>
+              </div>
+              <textarea
+                id="assistant-message"
+                required
+                rows="3"
+                maxlength="4000"
+                placeholder="Minta perubahan, misalnya: tambahkan node Buat file Markdown untuk ringkasan pesanan…"
+                aria-label="Perintah untuk Asisten AI"
+              ></textarea>
+              <div class="composer-actions">
+                <span class="kbd-hint"><kbd>Enter</kbd> kirim · <kbd>Shift</kbd> <kbd>Enter</kbd> baris baru</span
+                ><button type="button" id="assistant-stop" class="btn small" hidden>Hentikan</button
+                ><button class="btn primary small" id="assistant-send">Kirim</button>
+              </div>
+            </form>
+          </div>
         </aside>
       </section>
 
@@ -197,8 +262,10 @@
             ><button id="add-collection" class="btn ghost small accent-text" data-icon="plus">Koleksi</button>
           </div>
           <div id="collection-list"></div>
+          <button id="samples-all" class="btn small samples-all" data-icon="agent">Buat data contoh</button>
           <p class="list-note">
-            Di sini hanya struktur. Isi data dikelola tiap akun di dashboard, pada data profilnya.
+            Isi data sungguhan dikelola tiap akun di dashboard. Data contoh (semua koleksi sekaligus, relasi saling
+            cocok) hanya untuk Uji di editor.
           </p>
         </aside>
         <div id="collections" class="collection-detail"></div>

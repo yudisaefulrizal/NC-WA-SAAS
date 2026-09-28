@@ -27,6 +27,79 @@ export interface RecordAdapter {
 }
 export const defaultToolLimit = 10;
 const bad = (message: string) => new ApiError(400, 'invalid_request', message);
+// Nilai dari AI atau template yang maksudnya jelas dirapikan sebelum diperiksa: label field menjadi id, angka yang
+// ditulis sebagai teks ("18.000", "Rp 25.000", "2,5"), ya/tidak, pilihan tanpa peduli huruf besar/kecil, teks tunggal
+// untuk multi pilihan, jam "10.30", tanggal "03/10/2026", dan tanggal-jam dengan spasi. Nilai yang meragukan dibiarkan
+// supaya pemeriksaan menolaknya dan AI memperbaikinya. Isian dashboard tidak lewat sini dan tetap ketat.
+const fieldKey = (v: string) => v.toLowerCase().replace(/[\s_-]+/g, '');
+export function fieldIdOf(collection: Collection, key: string) {
+  if (collection.fields.some(f => f.id === key)) return key;
+  return (
+    collection.fields.find(f => fieldKey(f.label) === fieldKey(key) || fieldKey(f.id) === fieldKey(key))?.id ?? key
+  );
+}
+function coerceNumber(v: string) {
+  const s = v.replace(/^rp\.?\s*/i, '').replace(/\s/g, '');
+  const normal = /^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)
+    ? s.replace(/\./g, '').replace(',', '.')
+    : /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)
+      ? s.replace(/,/g, '')
+      : /^-?\d+,\d+$/.test(s)
+        ? s.replace(',', '.')
+        : s;
+  const n = /^-?\d+(\.\d+)?$/.test(normal) ? Number(normal) : NaN;
+  return Number.isFinite(n) ? n : v;
+}
+function coerceValue(f: Collection['fields'][number], v: unknown): unknown {
+  const option = (x: unknown) =>
+    typeof x === 'string' ? (f.options.find(o => o.toLowerCase() === x.trim().toLowerCase()) ?? x) : x;
+  if (typeof v !== 'string') {
+    if (f.type === 'multichoice' && Array.isArray(v)) return v.map(option);
+    return v;
+  }
+  const t = v.trim();
+  switch (f.type) {
+    case 'number':
+      return coerceNumber(t);
+    case 'boolean':
+      return /^(true|ya|iya|yes|1)$/i.test(t) ? true : /^(false|tidak|no|0)$/i.test(t) ? false : v;
+    case 'choice':
+      return option(t);
+    case 'multichoice':
+      return t ? t.split(',').map(option) : [];
+    case 'time': {
+      const m = /^(\d{1,2})[.:](\d{2})$/.exec(t);
+      return m ? m[1].padStart(2, '0') + ':' + m[2] : v;
+    }
+    case 'date': {
+      const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(t);
+      return m ? m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0') : t;
+    }
+    case 'datetime':
+      return t.replace(
+        /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2})[.:](\d{2})$/,
+        (_, d, h, mi) => d + 'T' + h.padStart(2, '0') + ':' + mi,
+      );
+    default:
+      return v;
+  }
+}
+export function coerceRecordData(collection: Collection, data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  return Object.fromEntries(
+    Object.entries(data).map(([k, v]) => {
+      const id = fieldIdOf(collection, k),
+        f = collection.fields.find(f => f.id === id);
+      return [id, f && v !== null ? coerceValue(f, v) : v];
+    }),
+  );
+}
+// Nilai tulis { data } / { id, data } dengan data yang sudah dirapikan.
+function coerceWrite(collection: Collection, value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const v = value as Record<string, unknown>;
+  return 'data' in v ? { ...v, data: coerceRecordData(collection, v.data) } : value;
+}
 function recordId(value: unknown) {
   const id = typeof value === 'string' ? value : value && typeof value === 'object' ? record(value).id : undefined;
   if (typeof id !== 'string' || !id.trim()) throw bad('ID record wajib diisi.');
@@ -37,7 +110,15 @@ function search(collection: Collection, n: GraphNode, value: unknown): RecordSea
   const input = value && typeof value === 'object' && !Array.isArray(value) ? record(value) : undefined;
   const keyword = input ? (input.kata_kunci ?? input.keyword ?? '') : (value ?? '');
   if (typeof keyword !== 'string') throw bad('Kata kunci harus teks.');
-  const extra = input?.filter ?? input?.filters;
+  const given = input?.filter ?? input?.filters;
+  // Filter dari AI boleh memakai label field; diubah ke id sebelum diperiksa.
+  const extra = Array.isArray(given)
+    ? given.map(f =>
+        f && typeof f === 'object' && typeof (f as { field?: unknown }).field === 'string'
+          ? { ...f, field: fieldIdOf(collection, (f as { field: string }).field) }
+          : f,
+      )
+    : given;
   return {
     keyword,
     groups: [
@@ -94,7 +175,7 @@ export async function runRecordTool(
   if (n.type === 'data_form') {
     const row = await singleRecord(adapter, collection);
     if (n.operation !== 'update') return { data: row?.data ?? {}, found: Boolean(row) };
-    const data = record(value).data;
+    const data = coerceRecordData(collection, record(value).data);
     const saved = row
       ? await adapter.write(collection, 'update', { id: row.id, data }, key)
       : await adapter.write(collection, 'create', { data }, key);
@@ -121,10 +202,42 @@ export async function runRecordTool(
     case 'delete':
       return adapter.write(collection, 'delete', { id: recordId(value) }, key);
     default:
-      return adapter.write(collection, n.operation, value, key);
+      return adapter.write(collection, n.operation, coerceWrite(collection, value), key);
   }
 }
 // Petunjuk untuk Agent tentang cara mengisi `query` per operasi, termasuk struktur koleksinya.
+// Contoh nilai per tipe field untuk petunjuk tool, supaya AI menulis tipe yang benar (angka tanpa tanda kutip, format
+// tanggal/jam, pilihan persis, relasi dari hasil pencarian).
+function exampleValue(d: GraphDefinition, f: Collection['fields'][number]): unknown {
+  switch (f.type) {
+    case 'number':
+      return 150000;
+    case 'boolean':
+      return true;
+    case 'date':
+      return '2026-10-03';
+    case 'time':
+      return '09:30';
+    case 'datetime':
+      return '2026-10-03T09:30';
+    case 'choice':
+      return f.options[0] ?? '';
+    case 'multichoice':
+      return f.options.slice(0, 1);
+    case 'phone':
+      return '6281234567890';
+    case 'relation':
+      return (
+        '<id record dari hasil tool ' + (d.collections.find(c => c.id === f.collection)?.name ?? f.collection) + '>'
+      );
+    case 'file':
+      return '<id file>';
+    default:
+      return '…';
+  }
+}
+const writeRules =
+  'Pakai id field (bukan label). Angka tanpa tanda kutip, tanggal YYYY-MM-DD, jam JJ:MM, pilihan persis salah satu nilai pilihan. Relasi dan ID record harus diambil dari hasil tool pencarian, jangan dikarang. Bila hasil tool berisi error, perbaiki query lalu panggil lagi.';
 export function recordToolGuide(d: GraphDefinition, n: GraphNode) {
   const c = d.collections.find(c => c.id === n.collection);
   if (n.type === 'data_text')
@@ -155,8 +268,27 @@ export function recordToolGuide(d: GraphDefinition, n: GraphNode) {
     update: 'query {"id":"ID record","data":{field yang diubah}}; nilai null mengosongkan field',
     delete: 'query berisi ID record',
   };
+  const writes = ['create', 'update'].includes(n.operation) && c;
+  const sample = writes
+    ? Object.fromEntries(
+        c.fields
+          .filter(f => n.operation === 'update' || f.required || c.fields.length <= 4)
+          .slice(0, 6)
+          .map(f => [f.id, exampleValue(d, f)]),
+      )
+    : undefined;
   return {
     cara: how[n.operation],
+    ...(writes
+      ? {
+          contoh:
+            n.operation === 'update' ? { id: '<id record dari hasil pencarian>', data: sample } : { data: sample },
+          aturan: writeRules,
+        }
+      : {
+          aturan:
+            'Pakai id field (bukan label) pada filter. Bila hasil tool berisi error, perbaiki query lalu panggil lagi.',
+        }),
     koleksi: c && {
       id: c.id,
       nama: c.name,

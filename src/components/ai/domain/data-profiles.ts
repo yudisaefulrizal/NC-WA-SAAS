@@ -1,9 +1,9 @@
 // Data profil (isi milik klien untuk satu profil) dan data profil mana yang dijalankan setiap sesi: membuat,
 // menggandakan, mengganti nama, menghapus, memasang ke sesi, dan menyimpan bidang-bidangnya.
-import { copyGraphRecords, requireAvailableGraph } from './builder/store.js';
+import { copyGraphRecords, deleteGraph, findGraph, requireAvailableGraph } from './builder/store.js';
 import { profileFiles, removeRecordFiles } from './builder/record-files.js';
 import { copyCollectionSources } from './builder/collection-sources.js';
-import { profileDefinition, enabledProfiles } from './profiles/registry.js';
+import { profileDefinition, enabledProfiles, setProfileEnabled } from './profiles/registry.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { db } from '../../../libraries/db.js';
@@ -16,6 +16,7 @@ import type { AIService } from './service.js';
 import * as assistantsSql from '../data-access/assistants-queries.js';
 import * as conversationsSql from '../data-access/conversations-queries.js';
 import * as dataProfilesSql from '../data-access/data-profiles-queries.js';
+import * as auditEventsSql from '../data-access/audit-events-queries.js';
 export async function sessionProfiles(svc: AIService, account: string) {
   const [rows] = await assistantsSql.listByAccount(db, [account]);
   return Object.fromEntries(
@@ -291,4 +292,31 @@ export async function assistant(svc: AIService, account: string, session: string
     profile_enabled: attached ? (await enabledProfiles()).has(String(row.profile_type)) : false,
     ...view,
   };
+}
+
+// Hapus paksa profil AI oleh pemilik: profil dinonaktifkan dulu (tidak bisa dipasang lagi), lalu setiap data profil
+// klien yang memakainya dicabut dari sesinya dan dihapus beserta record dan filenya lewat jalur yang sama dengan
+// tombol Cabut dan Hapus klien, baru profilnya dihapus. Revisi draft tetap dicek agar tidak menghapus versi lain.
+export async function forceDeleteProfile(svc: AIService, actor: string, id: string, value: unknown) {
+  const input = object(value);
+  const graph = await findGraph(id);
+  if (!graph) throw new ApiError(404, 'profile_not_found', 'Profil tidak ditemukan.');
+  if (input.revision !== graph.revision)
+    throw new ApiError(409, 'workflow_conflict', 'Draft berubah. Muat ulang sebelum menghapus.');
+  await setProfileEnabled(actor, id, false);
+  const [profiles] = await dataProfilesSql.listByType(db, [id]);
+  let sessions = 0;
+  for (const p of profiles) {
+    const account = String(p.account_id),
+      dataProfile = String(p.id);
+    const [attached] = await assistantsSql.listSessionsOfProfile(db, [account, dataProfile]);
+    for (const a of attached) {
+      await attachProfile(svc, account, String(a.session_id), { data_profile_id: null });
+      sessions++;
+    }
+    await deleteDataProfile(svc, account, dataProfile);
+  }
+  await deleteGraph(actor, id, { revision: graph.revision });
+  await auditEventsSql.insert(db, [actor, 'graph_force_deleted:' + id + ':' + profiles.length]);
+  return { deleted: true, data_profiles: profiles.length, sessions };
 }

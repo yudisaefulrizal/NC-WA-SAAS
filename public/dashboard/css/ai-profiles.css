@@ -699,3 +699,22 @@ p.ai-warning {
     text-align: left;
   }
 }
+/* Halaman admin Profil AI: tombol hapus dan hapus paksa di samping Buka di Editor profil. */
+.admin-profile-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.admin-profile-actions button.danger {
+  background: #fff5f3;
+  border: 1px solid #f1cbc6;
+  color: #b42318;
+  box-shadow: none;
+}
+.admin-profile-actions button.danger:hover {
+  background: #fdeceb;
+}
+.admin-profile-actions button:not(.secondary).danger {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
+}

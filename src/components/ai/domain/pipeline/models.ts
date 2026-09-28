@@ -14,6 +14,10 @@ export interface AITraceEvent {
   model?: string;
   attempt?: number;
   error?: string;
+  // Prompt lengkap yang dikirim ke model pada satu panggilan (Uji di editor), per peran.
+  prompt?: { role: string; content: string }[];
+  // Pemakaian satu panggilan model (Uji di editor); estimated = dihitung dari panjang teks karena penyedia tidak menyebut.
+  usage?: { input: number; output: number; reasoning: number; cost: number | null; estimated?: boolean };
 }
 // Model JEV hanya menjawab lewat Decisions API OpenRouter, jadi hanya bisa dipakai node Router.
 export const isJevModel = (model: string) => /^~?typesafe\/jev-/.test(model);

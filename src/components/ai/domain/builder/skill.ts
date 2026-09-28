@@ -9,6 +9,7 @@ import {
   collectionOwners,
   defaultTextChars,
   maxCollectionText,
+  maxCollectionSamples,
   computeArity,
   conditionOperators,
   contextVariables,
@@ -31,6 +32,10 @@ import {
   type ToolOperation,
 } from './definition.js';
 import { filterOperators, maxToolLimit, type FilterOperator } from './record-query.js';
+import { runtimeLimits } from './engine.js';
+import { defaultToolLimit } from './record-tools.js';
+import { maxMediaPerReply } from './media.js';
+import { maxGeneratedBytes } from './generated-files.js';
 
 export const skillName = 'ncwa-profil-ai';
 
@@ -124,8 +129,8 @@ const nodeDocs: Record<NodeType, NodeDoc> = {
   context: {
     name: 'Context',
     purpose:
-      'Meringkas posisi percakapan setelah Agent menjawab. Dengan `context_format: "spo"` hasilnya satu baris Subjek-Predikat-Objek (misalnya `pelanggan-menunggu-konfirmasi`) yang dibaca Router pada pesan berikutnya sebagai `input.context`.',
-    keys: '`prompt` wajib, `context_format`: `spo` (dianjurkan) atau `text`, `tier` (umumnya `cheap`), `memory` (riwayat yang diringkas) dan `context_memory` (tempat ringkasan ditulis, wajib bila profil punya Memori konteks).',
+      "Meringkas posisi percakapan setelah Agent menjawab menjadi ringkasan Subjek-Predikat-Objek dua kalimat (misalnya `Pelanggan menanyakan biaya Ma'had Aly. AI menjelaskan biaya pendaftaran dan SPP.`) dari pesan terakhir pelanggan dan jawaban AI; dibaca Router pada pesan berikutnya sebagai `input.context`. Instruksinya ditanam di sistem dan sudah diuji, jadi node ini tidak punya prompt.",
+    keys: '`tier` (umumnya `cheap`) dan `context_memory` (tempat ringkasan ditulis, wajib bila profil punya Memori konteks). Jangan menulis `prompt`, `context_format`, atau `memory`: diabaikan.',
     ports: '`next`',
     outputs: '`context`',
   },
@@ -286,21 +291,13 @@ export function spoExample(): GraphDefinition {
   const d = blankDefinition('CS dengan konteks S-P-O');
   d.description =
     'Menjawab info produk, mencatat pesanan, dan meneruskan ke tim; Router memahami balasan pendek lewat S-P-O.';
-  const base = d.nodes[1];
-  const node = (
-    id: string,
-    label: string,
-    type: GraphNode['type'],
-    x: number,
-    y: number,
-    extra: Partial<GraphNode> = {},
-  ): GraphNode => ({
+  // Contoh tanpa posisi: editor menyusun tampilan dengan Rapikan.
+  const { x: _x, y: _y, ...base } = d.nodes[1];
+  const node = (id: string, label: string, type: GraphNode['type'], extra: Partial<GraphNode> = {}): GraphNode => ({
     ...base,
     id,
     label,
     type,
-    x,
-    y,
     prompt: '',
     tools: [],
     branches: [],
@@ -340,14 +337,14 @@ export function spoExample(): GraphDefinition {
     },
   ];
   d.collections.push({ id: 'sop', name: 'SOP', owner: 'shared', kind: 'text', fields: [] });
-  // Router dan Agent membaca memori konteks; Layanan dan Context juga membaca riwayat; hanya Context menulis konteks.
+  // Router dan Agent membaca memori konteks; Layanan juga membaca riwayat; hanya Context menulis konteks (dari pesan terakhir).
   const memory = { memory: 'memori_percakapan' },
     contextMemory = { context_memory: 'memori_konteks' };
   d.nodes = [
-    node('pesan_masuk', 'Pesan_masuk', 'input', 40, 260),
-    node('memori_percakapan', 'Memori_percakapan', 'memory', 580, 620, { memory_limit: 20 }),
-    node('memori_konteks', 'Memori_konteks', 'context_memory', 310, 620),
-    node('maksud', 'Maksud', 'router', 310, 240, {
+    node('pesan_masuk', 'Pesan_masuk', 'input'),
+    node('memori_percakapan', 'Memori_percakapan', 'memory', { memory_limit: 20 }),
+    node('memori_konteks', 'Memori_konteks', 'context_memory'),
+    node('maksud', 'Maksud', 'router', {
       ...contextMemory,
       tier: 'cheap',
       prompt:
@@ -376,13 +373,13 @@ export function spoExample(): GraphDefinition {
         },
       ],
     }),
-    node('informasi', 'Informasi', 'agent', 580, 80, {
+    node('informasi', 'Informasi', 'agent', {
       ...contextMemory,
       tools: ['cari_produk'],
       prompt:
         'Jawab pertanyaan tentang produk. Cari data dengan Cari_produk; jangan mengarang harga atau stok. Bila pelanggan tertarik, tawarkan untuk memesan.',
     }),
-    node('layanan', 'Layanan', 'agent', 580, 260, {
+    node('layanan', 'Layanan', 'agent', {
       ...memory,
       ...contextMemory,
       fallback: true,
@@ -390,34 +387,30 @@ export function spoExample(): GraphDefinition {
       prompt:
         'Urus pesanan pelanggan. Ikuti aturan di Baca_SOP (pembayaran, jam, keluhan). Pastikan produk dan jumlah jelas, konfirmasi ke pelanggan, lalu simpan dengan Catat_pesanan. Keluhan atau permintaan di luar kemampuanmu diteruskan ke tim lewat fallback.',
     }),
-    node('sapaan', 'Sapaan', 'agent', 580, 460, {
+    node('sapaan', 'Sapaan', 'agent', {
       ...contextMemory,
       tier: 'cheap',
       prompt: 'Balas salam pelanggan, lalu tawarkan bantuan.',
     }),
-    node('penutup', 'Penutup', 'agent', 580, 620, {
+    node('penutup', 'Penutup', 'agent', {
       ...contextMemory,
       tier: 'cheap',
       prompt:
         'Tutup percakapan dengan satu kalimat singkat. Jangan bertanya, jangan menawarkan bantuan atau produk lain, agar percakapan selesai di sini.',
     }),
-    node('cari_produk', 'Cari_produk', 'data_table', 850, 20, { collection: 'produk', operation: 'search', limit: 5 }),
-    node('catat_pesanan', 'Catat_pesanan', 'data_table', 850, 180, {
+    node('cari_produk', 'Cari_produk', 'data_table', { collection: 'produk', operation: 'search', limit: 5 }),
+    node('catat_pesanan', 'Catat_pesanan', 'data_table', {
       collection: 'pesanan',
       operation: 'create',
       value: '{"data":{}}',
     }),
-    node('baca_sop', 'Baca_SOP', 'data_text', 1120, 180, { collection: 'sop', operation: 'get', max_chars: 3000 }),
-    node('ringkas_konteks', 'Ringkas_konteks', 'context', 850, 360, {
-      ...memory,
+    node('baca_sop', 'Baca_SOP', 'data_text', { collection: 'sop', operation: 'get', max_chars: 3000 }),
+    node('ringkas_konteks', 'Ringkas_konteks', 'context', {
       ...contextMemory,
       tier: 'cheap',
-      context_format: 'spo',
-      prompt:
-        'Ringkas posisi percakapan terakhir sebagai Subjek-Predikat-Objek yang dipisah tanda hubung, misalnya pelanggan-menunggu-konfirmasi_pesanan atau pelanggan-bertanya-harga_paket. Tulis keadaan yang perlu diketahui untuk memahami pesan berikutnya.',
     }),
-    node('jawaban', 'Jawaban', 'output', 1120, 360),
-    node('tim', 'Tim', 'fallback', 850, 540),
+    node('jawaban', 'Jawaban', 'output'),
+    node('tim', 'Tim', 'fallback'),
   ];
   const edge = (source: string, port: string, target: string) => ({ id: source + '_' + port, source, port, target });
   d.edges = [
@@ -471,7 +464,7 @@ Ukur setiap keputusan rancangan dengan lima hal ini. Setiap node harus punya ala
 - **Multi-agent (Router → beberapa Agent)**: setiap Agent punya prompt pendek dan fokus serta hanya tool yang relevan, sehingga lebih akurat, lebih murah, dan tidak salah memakai tool. Bila usaha sederhana (1–2 jenis pertanyaan), satu Agent tanpa Router sudah cukup; jangan memecah tanpa alasan.
 - **Agent Sapaan dan Penutup wajib ada bila ada Router**: salam ("assalamualaikum", "halo") dan penutup ("makasih", "oke kak") tidak butuh data apa pun, cukup Perilaku AI klien. Beri cabang sendiri dengan Agent \`cheap\` tanpa tool dan tanpa riwayat, sehingga pesan seperti ini tidak memicu pencarian data atau Agent mahal dan tokennya hemat. Prompt-nya cukup satu kalimat tugas; gaya salamnya diatur klien. **Penutup tidak boleh bertanya atau menawarkan apa pun** ("ada yang lain lagi?", "mau lihat produk lain?"): pertanyaan membuat pelanggan membalas "tidak ada kak", lalu dibalas lagi, dan percakapan berputar tanpa ujung.
 - **Konteks S-P-O**: Router tetap paham balasan pendek tanpa membaca seluruh riwayat, sehingga murah, cepat, dan tidak terganggu obrolan lama.
-- **Dua memori**: memori konteks untuk arah percakapan, riwayat untuk detail. Pasang riwayat hanya pada node yang butuh detail (misalnya Agent yang mencatat pesanan dan Context), karena setiap riwayat menambah biaya.
+- **Dua memori**: memori konteks untuk arah percakapan, riwayat untuk detail. Pasang riwayat hanya pada node yang butuh detail (misalnya Agent yang mencatat pesanan), karena setiap riwayat menambah biaya.
 - **Tier model**: \`cheap\` untuk memilah dan meringkas (Router, Context, Sapaan, Penutup); tier lebih tinggi hanya untuk Agent yang menangani hal rumit.
 - **Node data**: jawaban diambil dari koleksi, sehingga tidak ada data karangan dan klien cukup memperbarui datanya tanpa mengubah profil.
 - **Fallback**: meneruskan ke tim lebih baik daripada menjawab salah; pasang pada Agent yang menangani hal di luar data (keluhan, pengecualian, pembayaran bermasalah).
@@ -502,20 +495,20 @@ Setiap akun klien mengisi **Perilaku AI** di dashboard: gaya bahasa, nama asiste
 Pelanggan WhatsApp sering membalas pendek ("ya", "1 aja", "yang itu", "lanjut"). Tanpa konteks, Router tidak tahu maksudnya. NC-WA menyelesaikannya dengan dua memori terpisah:
 
 - **Memori percakapan** (\`type: "memory"\`): riwayat pesan. Hanya dibaca node lewat kunci \`memory\`; ditulis sistem.
-- **Memori konteks** (\`type: "context_memory"\`, satu per profil): ringkasan S-P-O (Subjek-Predikat-Objek) posisi percakapan, misalnya \`pelanggan-menunggu-konfirmasi_pesanan\`. **Hanya ditulis node Context**; dibaca node lain lewat kunci \`context_memory\` sebagai \`input.context\`.
+- **Memori konteks** (\`type: "context_memory"\`, satu per profil): ringkasan S-P-O (Subjek-Predikat-Objek) posisi percakapan, misalnya \`Pelanggan menunggu konfirmasi pesanan.\`. **Hanya ditulis node Context**; dibaca node lain lewat kunci \`context_memory\` sebagai \`input.context\`.
 
 Pakai pola ini untuk setiap profil yang punya Router:
 
 \`\`\`
 Input → Router (memori konteks) → Agent per cabang (memori konteks) → Context spo → Output
                                         └─ fallback → Fallback
-Context: memory = memori percakapan (dibaca), context_memory = memori konteks (ditulis)
+Context: context_memory = memori konteks (ditulis); cukup pesan terakhir, tanpa riwayat
 \`\`\`
 
 - **Router: memori konteks + pesan terbaru.** Hubungkan Router hanya ke Memori konteks (\`context_memory\`), tidak ke Memori percakapan. Router cukup tahu posisi percakapan dan pesan terbaru untuk memilih cabang, sehingga hemat dan tidak terganggu riwayat panjang. Ringkasan sudah ada sejak pesan kedua; pesan pertama tidak membutuhkannya.
 - **Agent** dihubungkan ke Memori konteks agar nyambung. Tambahkan Memori percakapan (\`memory\`) hanya bila Agent perlu detail dari pesan-pesan sebelumnya, misalnya produk dan jumlah yang sedang dipesan.
-- **Context** membaca Memori percakapan dan menjadi satu-satunya penulis Memori konteks. **Semua jalur jawaban melewati Context** sebelum Output, supaya ringkasan selalu diperbarui. Jalur Fallback boleh langsung ke node Fallback.
-- **Prompt Context**: minta keadaan terakhir yang penting untuk pesan berikutnya dalam bentuk \`subjek-predikat-objek\` (minimal tiga bagian dipisah tanda hubung, maksimal 200 karakter, kata majemuk disambung \`_\`). Tier \`cheap\` sudah cukup.
+- **Context** menjadi satu-satunya penulis Memori konteks. **Semua jalur jawaban melewati Context** sebelum Output, supaya ringkasan selalu diperbarui. Jalur Fallback boleh langsung ke node Fallback.
+- **Context tidak punya prompt**: instruksi ringkasannya ditanam di sistem (\`ubah percakapan jadi 1 konteks hanya SPO (subjek objek predikat jelas dan ekplisit) dalam dua kalimat singkat tanpa keterangan tambahan (beserta satu contoh)\`, dari pesan terakhir pelanggan dan jawaban AI). Cukup atur tier (\`cheap\` sudah cukup) dan sambungkan ke Memori konteks; bila ringkasan gagal dibuat, ringkasan lama dipertahankan tanpa menggagalkan balasan.
 - **Rancang cabang berdasarkan tool, bukan nuansa.** Maksud yang memakai tool yang sama (misalnya memesan, konfirmasi, status pesanan, dan keluhan) digabung dalam satu cabang dan satu Agent. Router mudah tertukar di antara cabang yang hanya beda nuansa.
 - Profil tanpa Router (satu Agent saja) tidak memerlukan Context S-P-O.
 
@@ -529,7 +522,7 @@ Context: memory = memori percakapan (dibaca), context_memory = memori konteks (d
 - Variabel ditulis \`{{path}}\` dan hanya boleh merujuk node yang pasti sudah berjalan di **setiap** jalur menuju node pemakai.
 - Data bisnis (harga, jadwal, stok, alamat) disimpan di koleksi dan dicari dengan node Data; jangan ditulis permanen di prompt.
 - Data per pelanggan (booking, pesanan, pendaftaran) memakai koleksi \`"owner": "customer"\`: AI hanya bisa membaca dan mengubah record milik pelanggan yang sedang chat.
-- Koordinat \`x\`/\`y\` hanya untuk tampilan: susun dari kiri ke kanan (sekitar 280 px per kolom, 160 px per baris), Input di paling kiri, node data di kanan Agent pemakainya, memori di atas jalur. Tidak perlu presisi; tombol **Rapikan** di editor menyusun ulang semuanya.
+- Jangan menulis posisi node (\`x\`/\`y\`): itu urusan tampilan, dan editor menyusunnya dengan **Rapikan**. Fokus pada isi profil (node, prompt, sambungan, koleksi).
 
 ## Daftar periksa sebelum menyerahkan JSON
 
@@ -537,7 +530,7 @@ Context: memory = memori percakapan (dibaca), context_memory = memori konteks (d
 - [ ] Semua id sesuai pola dan unik; nama node unik tanpa spasi; id node baru sama dengan namanya dalam huruf kecil.
 - [ ] Tepat satu Input; setiap port punya tepat satu edge dengan \`port\` yang benar (lihat tabel node); tidak ada siklus; semua node terjangkau.
 - [ ] Router punya minimal dua cabang dan setiap id cabang dipakai sebagai port satu edge.
-- [ ] Bila ada Router: ada satu node \`context_memory\` dan node Context \`"context_format": "spo"\` yang \`context_memory\`-nya menunjuk ke sana; Router dan Agent merujuk \`context_memory\`; Router tidak merujuk \`memory\`; setiap jalur jawaban melewati Context sebelum Output.
+- [ ] Bila ada Router: ada satu node \`context_memory\` dan node Context yang \`context_memory\`-nya menunjuk ke sana; Router dan Agent merujuk \`context_memory\`; Router tidak merujuk \`memory\`; setiap jalur jawaban melewati Context sebelum Output.
 - [ ] Cabang yang memakai tool yang sama sudah digabung; \`description\` cabang jelas dan tidak tumpang tindih.
 - [ ] Agent dan Context punya \`prompt\`; tier \`decision\` hanya untuk Router.
 - [ ] Node Data yang dipanggil Agent ada di \`tools\` Agent dan tidak punya edge; node Data di alur punya edge masuk dan keluar.
@@ -586,6 +579,8 @@ ${table(
 )}
 
 Koleksi \`text\` tidak punya field; \`text\` dan \`form\` selalu \`shared\`, tidak bisa bersumber API, dan relasi hanya boleh ke koleksi \`list\`.
+
+\`samples\` (opsional): data contoh untuk Uji di editor, maksimal ${maxCollectionSamples} baris; tidak pernah dipakai di WhatsApp. Koleksi \`list\` berisi beberapa baris \`{ "_id": "<koleksi>_1", "<id field>": nilai }\`, \`form\` satu baris, \`text\` satu baris \`{ "text": "…" }\`. Field relasi diisi \`_id\` baris contoh koleksi tujuan (buat contoh koleksi tujuan lebih dulu; relasi wajib harus terisi), field file diisi nama file contoh seperti \`brosur.pdf\`. Cukup 2–3 baris yang wajar. Baris yang tidak valid dilewati saat Uji.
 
 Field: \`{ "id", "label", "type", "required", "options", "collection" }\`, opsional \`"unique": true\` (tipe ${code(uniqueFieldTypes)}) dan \`"default"\` (tipe ${code(defaultFieldTypes)}; harus sesuai tipe).
 
@@ -668,8 +663,33 @@ ${table(
       'Panjang id / label / teks',
       limits.idLength + ' / ' + limits.labelLength + ' / ' + limits.textLength + ' karakter',
     ],
+    ['Data contoh per koleksi (\`samples\`)', String(maxCollectionSamples) + ' baris'],
   ],
 )}
+
+### Batas saat alur berjalan (per pesan pelanggan)
+
+Dicek setiap pesan masuk. Bila batas panggilan AI, waktu, langkah, atau hasil node terlampaui, pelanggan menerima pesan cadangan dan kredit tidak dipotong; media di atas batas hanya dilewati.
+
+${table(
+  ['Hal', 'Batas'],
+  [
+    ['Panggilan AI (semua node, termasuk pengulangan)', String(runtimeLimits.modelCalls)],
+    ['Waktu proses', runtimeLimits.seconds + ' detik'],
+    ['Langkah node yang dijalankan', String(runtimeLimits.steps)],
+    ['Hasil satu node', runtimeLimits.resultChars.toLocaleString('id-ID') + ' karakter'],
+    ['Putaran tool per Agent', String(runtimeLimits.agentToolTurns) + ' (lalu Agent diminta menjawab tanpa tool)'],
+    ['Bawaan \`limit\` node Data tabel bila tidak diisi', String(defaultToolLimit)],
+    ['Kirim media per balasan', maxMediaPerReply + ' file'],
+    ['Isi file Buat file', maxGeneratedBytes / 1024 / 1024 + ' MB'],
+  ],
+)}
+
+Rancang agar jauh di bawah batas ini:
+- Setiap Agent dan Router memakan panggilan AI; Agent yang memakai tool bisa memakai beberapa panggilan per pesan. Hindari rantai banyak Agent berurutan dalam satu jalur.
+- Beri \`limit\` secukupnya pada node Data tabel dan hanya field yang perlu; hasil pencarian dengan banyak baris dan teks panjang cepat melewati batas hasil satu node.
+- Satu Agent cukup punya tool yang benar-benar dipakai; alur daftar/pesan biasanya cari → catat, bukan cari berulang.
+- Data teks (SOP/FAQ) panjang sebaiknya dibaca lewat node Data teks dengan kata kunci, bukan dimasukkan utuh ke prompt.
 `;
 }
 

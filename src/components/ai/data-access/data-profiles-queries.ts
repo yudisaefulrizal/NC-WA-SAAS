@@ -70,3 +70,10 @@ export function countPerType(c: Executor) {
     'SELECT p.profile_type,COUNT(DISTINCT p.id) AS data_profiles,COUNT(a.session_id) AS sessions FROM ai_data_profiles p LEFT JOIN ai_assistants a ON a.data_profile_id=p.id GROUP BY p.profile_type',
   );
 }
+// Semua data profil (semua akun) yang memakai satu profil AI; dipakai hapus paksa oleh pemilik.
+export function listByType(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    'SELECT id,account_id FROM ai_data_profiles WHERE profile_type=? ORDER BY account_id,id',
+    params,
+  );
+}

@@ -12,6 +12,7 @@ import {
   type GraphNode,
 } from '../../../src/components/ai/domain/builder/definition.js';
 import { runGraph } from '../../../src/components/ai/domain/builder/engine.js';
+import { contextInstruction } from '../../../src/components/ai/domain/pipeline/context.js';
 
 function node(id: string, type: GraphNode['type'], extra: Partial<GraphNode> = {}): GraphNode {
   return { ...blankDefinition().nodes[1], id, type, label: id, prompt: 'Tugas ' + id, ...extra };
@@ -71,7 +72,7 @@ test('Context memory: one per profile, only memory consumers read it, and Contex
   assert.ok(validateGraph(parseDefinition(edge)).length > 0);
 });
 
-test('Router and Agent read only the summary; Context reads history and writes the next summary', async () => {
+test('Router and Agent read only the summary; Context reads the last exchange and writes the next summary', async () => {
   const seen: Record<string, AIMessage[]> = {};
   const config = { ...defaults };
   const history: AIMessage[] = [
@@ -83,7 +84,7 @@ test('Router and Agent read only the summary; Context reads history and writes t
     async (c, messages) => {
       seen[c.call_role!] = messages;
       if (c.call_role === 'router') return '{"branch":"info","fallback_terkait":[]}';
-      return c.call_role === 'ringkas' ? 'pelanggan-memilih-paket_basic' : '{"answer":"Siap"}';
+      return c.call_role === 'ringkas' ? '"Pelanggan memilih\npaket basic."' : '{"answer":"Siap"}';
     },
     config,
     [...history, { role: 'user', content: '1 aja' }],
@@ -102,9 +103,14 @@ test('Router and Agent read only the summary; Context reads history and writes t
     seen.info.filter(m => m.role !== 'system').map(m => m.content),
     ['1 aja'],
   );
-  // Context membaca riwayat untuk meringkas, lalu menjadi satu-satunya penulis konteks.
-  assert.match(JSON.stringify(seen.ringkas), /Rp150\.000/);
-  assert.equal(config.graph_context, 'pelanggan-memilih-paket_basic');
+  // Context hanya menerima instruksi global dan transkrip pesan terakhir, bukan riwayat; hasilnya satu kalimat
+  // (baris digabung, kutip pembungkus dibuang, tanda baca boleh) dan hanya Context yang menulis konteks.
+  assert.deepEqual(seen.ringkas, [
+    // Instruksi global dari sistem, bukan prompt node Context di profil ("Tugas ringkas").
+    { role: 'system', content: contextInstruction },
+    { role: 'user', content: 'Pelanggan: 1 aja\n\nAI: Siap' },
+  ]);
+  assert.equal(config.graph_context, 'Pelanggan memilih paket basic.');
 });
 
 test('Profiles without a context memory keep the old behaviour through Shared Memory', async () => {
@@ -135,4 +141,33 @@ test('Profiles without a context memory keep the old behaviour through Shared Me
   );
   assert.match(router, /pelanggan-menyapa-admin/);
   assert.equal(config.graph_context, 'pelanggan-selesai-bertanya');
+});
+
+test('A failed summary keeps the previous context and still sends the answer', async () => {
+  const config = { ...defaults };
+  const result = await runGraph(
+    graph(),
+    async c => {
+      if (c.call_role === 'router') return '{"branch":"info","fallback_terkait":[]}';
+      if (c.call_role === 'ringkas') throw Error('ai_provider_http_500');
+      return '{"answer":"Siap"}';
+    },
+    config,
+    [{ role: 'user', content: '1 aja' }],
+    scope,
+    'Pelanggan bertanya harga paket.',
+    undefined,
+    100,
+  );
+  assert.equal(result.answer, 'Siap');
+  assert.equal(config.graph_context, 'Pelanggan bertanya harga paket.');
+});
+
+test('Context needs no prompt: an empty prompt is not an issue', () => {
+  const d = graph();
+  d.nodes.find(n => n.id === 'ringkas')!.prompt = '';
+  assert.equal(
+    validateGraph(parseDefinition(d)).some(i => i.node === 'ringkas' && i.message === 'Prompt wajib diisi.'),
+    false,
+  );
 });

@@ -639,8 +639,9 @@ test('Data nodes run with the authenticated tenant scope and never write after m
   const prompts: string[] = [];
   // Giliran pertama agent memanggil Cari; setelah ada hasil tool, agent menjawab.
   const transport: AITransport = async (_c, m) => {
-    prompts.push(m[0].content);
-    return m[0].content.includes('Hasil tool: []')
+    // Hasil tool kini berada di giliran terakhir percakapan, jadi yang diperiksa seluruh pesan.
+    prompts.push(JSON.stringify(m));
+    return !m.some(x => x.content.startsWith('Hasil '))
       ? JSON.stringify({ tool: 'cari', query: '' })
       : JSON.stringify({ answer: 'Informasi tersedia' });
   };
@@ -725,7 +726,7 @@ test('Router context persists, feeds next turn, stays isolated and clears with m
   assert.equal(cleared.message_count, 0);
 });
 
-test('Failed delivery, failed context updates and manual takeover cannot leave misleading context', async () => {
+test('Failed delivery and manual takeover clear the context; a failed summary keeps the last one and still answers', async () => {
   const failed = await fixture(undefined, true);
   await failed.service.incoming(failed.id, failed.manager, 'shop', failed.message('failed'));
   assert.equal(((await failed.service.conversations(failed.id, 'shop')) as any[])[0].router_context, null);
@@ -751,12 +752,18 @@ test('Failed delivery, failed context updates and manual takeover cannot leave m
     ((await f.service.conversations(f.id, 'shop')) as any[])[0].router_context,
     'pelanggan-menunggu-informasi',
   );
-  // Ringkasan yang gagal menggagalkan jawaban graf: pelanggan menerima jawaban aman dan konteks lama dikosongkan.
+  // Ringkasan yang gagal tidak menggagalkan jawaban: jawaban Agent tetap terkirim dan ringkasan terakhir dipertahankan.
   failContext = true;
   await f.service.incoming(f.id, f.manager, 'shop', f.message('second'));
   assert.equal(f.sent(), 2);
-  assert.equal((await rows(f.id)).find(r => r.status !== 'sent')?.status, 'fallback_sent');
-  assert.equal(((await f.service.conversations(f.id, 'shop')) as any[])[0].router_context, null);
+  assert.equal(
+    (await rows(f.id)).some(r => r.status === 'fallback_sent'),
+    false,
+  );
+  assert.equal(
+    ((await f.service.conversations(f.id, 'shop')) as any[])[0].router_context,
+    'pelanggan-menunggu-informasi',
+  );
   failContext = false;
   await f.service.incoming(f.id, f.manager, 'shop', f.message('third'));
   await f.service.manualOutgoing(f.id, 'shop', f.message('manual', 'Admin mengambil alih'));

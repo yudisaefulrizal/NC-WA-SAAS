@@ -4,12 +4,14 @@ import { record } from '../../../../libraries/validation.js';
 import { ApiError } from '../../../../libraries/errors.js';
 import { ai } from '../service.js';
 import type { AITraceEvent } from '../pipeline/models.js';
-import type { AIMessage, AITransport } from '../provider.js';
+import type { AIConfig, AIMessage, AITransport } from '../provider.js';
 import { collectionKind, parseDefinition, validateRecord, text, type Collection } from './definition.js';
 import { keywords, queryMemory, sumMemory, filterGroup, type StoredRecord } from './record-query.js';
 import { runRecordTool, type RecordAdapter } from './record-tools.js';
 import { previewMedia } from './media.js';
 import { previewFiles } from './generated-files.js';
+import { sampleIdKey } from './samples.js';
+import { maxContextChars } from '../pipeline/context.js';
 // Nomor pelanggan tiruan untuk koleksi milik pelanggan di simulasi.
 export const simulationCustomer = '628000000001';
 import { runGraph } from './engine.js';
@@ -50,10 +52,13 @@ export async function simulate(
       history.push({ role: m.role as 'user' | 'assistant', content: text(m.content, 8000) });
     }
   }
-  // Record contoh koleksi milik pelanggan tanpa nomor dianggap milik pelanggan simulasi.
+  // Record contoh koleksi milik pelanggan tanpa nomor dianggap milik pelanggan simulasi. Baris data contoh editor boleh
+  // punya `_id` yang dirujuk field relasi koleksi lain; keduanya diterjemahkan ke ID record simulasi. Baris yang tidak
+  // valid dilewati dan dilaporkan, supaya satu contoh yang salah tidak menghentikan seluruh Uji.
   const sample = record(body.records ?? {}),
-    records: Record<string, StoredRecord[]> = {};
-  for (const c of d.collections) {
+    records: Record<string, StoredRecord[]> = {},
+    skipped: { collection: string; message: string }[] = [];
+  const rowsOf = (c: (typeof d.collections)[number]) => {
     // Contoh koleksi teks boleh berupa string, dan isian berupa satu objek; keduanya disimpan sebagai satu record.
     const given = sample[c.id],
       rows =
@@ -64,37 +69,91 @@ export async function simulate(
             : (given ?? []);
     if (!Array.isArray(rows) || rows.length > 100)
       throw new ApiError(400, 'invalid_request', 'Maksimal 100 record simulasi per koleksi.');
-    records[c.id] = rows.map(v => {
-      const r = record(v);
-      // Pada format datar, kunci "customer" adalah pemilik record kecuali koleksinya punya field bernama customer.
-      const ownerKey = c.owner === 'customer' && !c.fields.some(f => f.id === 'customer');
-      const { customer, ...fields } = ownerKey ? r : { ...r, customer: undefined };
-      const owner =
-        c.owner === 'customer'
-          ? { customer: typeof customer === 'string' && customer ? customer : simulationCustomer }
-          : {};
-      return Object.hasOwn(r, 'data') && typeof r.id === 'string' && Number.isSafeInteger(r.revision)
-        ? { id: r.id, data: validateRecord(c, r.data), revision: Number(r.revision), ...owner }
-        : { id: randomUUID(), data: validateRecord(c, ownerKey ? fields : r), revision: 1, ...owner };
+    return rows as unknown[];
+  };
+  const sampleIds = new Map<string, string>();
+  for (const c of d.collections)
+    for (const v of rowsOf(c)) {
+      const key = v && typeof v === 'object' ? (v as Record<string, unknown>)[sampleIdKey] : undefined;
+      if (typeof key === 'string') sampleIds.set(c.id + ':' + key, randomUUID());
+    }
+  for (const c of d.collections) {
+    records[c.id] = [];
+    rowsOf(c).forEach((v, index) => {
+      try {
+        const { [sampleIdKey]: key, ...r } = record(v);
+        // Pada format datar, kunci "customer" adalah pemilik record kecuali koleksinya punya field bernama customer.
+        const ownerKey = c.owner === 'customer' && !c.fields.some(f => f.id === 'customer');
+        const { customer, ...fields } = ownerKey ? r : { ...r, customer: undefined };
+        const owner =
+          c.owner === 'customer'
+            ? { customer: typeof customer === 'string' && customer ? customer : simulationCustomer }
+            : {};
+        if (Object.hasOwn(r, 'data') && typeof r.id === 'string' && Number.isSafeInteger(r.revision)) {
+          records[c.id].push({ id: r.id, data: validateRecord(c, r.data), revision: Number(r.revision), ...owner });
+          return;
+        }
+        const data: Record<string, unknown> = ownerKey ? fields : r;
+        for (const f of c.fields.filter(f => f.type === 'relation')) {
+          const target = typeof data[f.id] === 'string' ? sampleIds.get(f.collection + ':' + data[f.id]) : undefined;
+          if (target) data[f.id] = target;
+        }
+        records[c.id].push({
+          id: (typeof key === 'string' && sampleIds.get(c.id + ':' + key)) || randomUUID(),
+          data: validateRecord(c, data),
+          revision: 1,
+          ...owner,
+        });
+      } catch (e) {
+        if (!(e instanceof ApiError)) throw e;
+        skipped.push({ collection: c.name, message: 'baris ' + (index + 1) + ': ' + e.message });
+      }
     });
   }
+  if (skipped.length) emit({ node: 'samples', state: 'skipped', output: skipped });
   const config = { ...(await ai.config()), signal, onTrace: emit };
+  // Yang benar-benar dikirim: model JEV (Decisions) menerima permintaan keputusan, bukan pesan chat.
+  const sentPrompt = (c: AIConfig, m: AIMessage[]) =>
+    c.decision_request
+      ? [{ role: 'decision', content: JSON.stringify(c.decision_request, null, 2) }]
+      : m.map(x => ({ role: x.role, content: x.content }));
   const wrapped: AITransport = async (c, m, max) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       c.signal?.throwIfAborted();
       const start = Date.now();
       emit({ node: c.trace_node ?? c.call_role ?? 'model', state: 'running', model: c.model, attempt });
       try {
-        const out = await transport(c, m, max);
+        let usage: AITraceEvent['usage'];
+        const out = await transport({ ...c, onUsage: u => (usage = u) }, m, max);
         emit({
           node: c.trace_node ?? c.call_role ?? 'model',
           state: 'responded',
           output: out,
+          // Prompt yang dikirim, supaya jejak Uji bisa menunjukkan apa yang dibaca model dan apa jawabannya.
+          prompt: sentPrompt(c, m),
           model: c.model,
           duration_ms: Date.now() - start,
+          // Penyedia yang tidak menyebut pemakaian: perkiraan ±4 karakter per token, ditandai estimated.
+          usage: usage ?? {
+            input: Math.ceil(sentPrompt(c, m).reduce((sum, x) => sum + x.content.length, 0) / 4),
+            output: Math.ceil(out.length / 4),
+            reasoning: 0,
+            cost: null,
+            estimated: true,
+          },
         });
         return out;
       } catch (e) {
+        // Panggilan yang gagal di penyedia (bukan jawaban tidak valid) juga dicatat beserta prompt-nya.
+        emit({
+          node: c.trace_node ?? c.call_role ?? 'model',
+          state: 'call_failed',
+          error: e instanceof Error ? e.message : 'ai_provider_failed',
+          prompt: sentPrompt(c, m),
+          model: c.model,
+          attempt,
+          duration_ms: Date.now() - start,
+        });
         if (attempt === 3 || !transientAIError(e)) throw e;
         await new Promise(r => setTimeout(r, attempt * 300));
       }
@@ -117,7 +176,7 @@ export async function simulate(
       requestId: randomUUID(),
       fallbackEnabled: true,
     },
-    typeof body.context === 'string' ? text(body.context, 200) : null,
+    typeof body.context === 'string' ? text(body.context, maxContextChars) : null,
     (n, v, key) => runRecordTool(memoryRecords(records), d, n, v, key),
     300,
     previewMedia,

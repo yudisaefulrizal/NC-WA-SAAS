@@ -77,6 +77,23 @@ try {
     ids.push(id);
     const inspector = page.locator('#inspector');
     const saved = () => page.locator('#dirty').filter({ hasText: 'Tersimpan' }).waitFor();
+    // Tema: tombol mengganti terang ↔ gelap, pilihan bertahan setelah dimuat ulang.
+    await page.locator('#theme-toggle').click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+    await page.reload();
+    await page.locator('[data-node="layanan"]').waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+    assert.equal(await page.locator('#theme-toggle').getAttribute('aria-label'), 'Mode terang');
+    await page.locator('[data-node="router"] .node-heading').click();
+    await page.screenshot({ path: join(screenshots, 'ai-builder-dark-' + width + '.png'), fullPage: true });
+    await page.locator('[data-tab="schema"]').click();
+    await page.screenshot({ path: join(screenshots, 'ai-builder-dark-schema-' + width + '.png'), fullPage: true });
+    await page.locator('[data-tab="flow"]').click();
+    await page.locator('#test-toggle').click();
+    await page.screenshot({ path: join(screenshots, 'ai-builder-dark-test-' + width + '.png'), fullPage: true });
+    await page.locator('#close-test').click();
+    await page.locator('#theme-toggle').click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
     const exported = async () => (await context.request.get(origin + '/api/admin/ai/builder/' + id + '/export')).json();
     const select = async (node: string) => {
       if (width === 390) await page.locator('#node-picker select').selectOption(node);
@@ -152,13 +169,38 @@ try {
     await page.locator('#chat .trace summary', { hasText: 'panggilan model' }).waitFor();
     assert.ok((await page.locator('#chat .trace-step').count()) >= 3);
     assert.ok((await page.locator('#nodes .step-badge').count()) >= 3);
+    // Token per node (transport tiruan tidak menyebut pemakaian, jadi ditandai perkiraan) dan total di akhir jejak.
+    await page.locator('#chat .trace-total', { hasText: 'token' }).waitFor();
+    assert.match(await page.locator('[data-node="router"] .token-badge').innerText(), /^±↑[\d.]+ ↓[\d.]+$/);
+    assert.ok((await page.locator('#nodes .token-badge').count()) >= 2);
+    assert.match(await page.locator('#chat .trace-total').innerText(), /biaya tidak disebut penyedia/);
     await page.locator('#trace-banner').waitFor();
     await page.locator('#chat .trace-step', { hasText: 'Router' }).click();
     await page.locator('#chat .trace-detail').getByText('Hasil').waitFor();
+    // Panggilan model di jejak: prompt per peran, jawaban mentah, dan hasil pemeriksaan.
+    const call = page.locator('#chat .trace-detail .model-call').first();
+    await call.locator('summary').click();
+    await call.getByText('Prompt yang dikirim').waitFor();
+    // Router memakai JEV (permintaan Decisions) atau model chat (pesan System/User).
+    await call
+      .locator('.prompt-role', { hasText: /System|Permintaan Decisions/ })
+      .first()
+      .waitFor();
+    await call.getByText('Jawaban model').waitFor();
+    assert.match(await call.locator('.call-status').innerText(), /lolos pemeriksaan/);
+    // Jejak lengkap satu pesan (semua langkah dan panggilan model) bisa disalin sebagai satu JSON.
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+    await page.locator('#chat .trace-copy').last().click();
+    const full = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+    assert.equal(full.message, 'Ada produk apa?');
+    assert.equal(full.answer, 'Selesai');
+    assert.ok(full.steps.length >= 3);
+    assert.ok(full.steps.some((s: { calls: { prompt?: unknown[] }[] }) => s.calls.some(c => c.prompt?.length)));
     assert.equal(await page.locator('[data-node="router"].selected').count(), 1);
     await page.screenshot({ path: join(screenshots, 'ai-builder-test-' + width + '.png'), fullPage: true });
     await page.locator('#clear-trace').click();
     assert.equal(await page.locator('#nodes .step-badge').count(), 0);
+    assert.equal(await page.locator('#nodes .token-badge').count(), 0);
     await page.locator('#reset-test').click();
     assert.equal(await page.locator('#chat .bubble').count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

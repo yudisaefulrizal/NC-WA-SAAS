@@ -111,15 +111,25 @@ function renderInspector() {
     field(label, n[key], v => mutate(() => (n[key] = v)), type, options);
   if (memoryConsumers.includes(n.type)) {
     const prompt = section();
-    prompt.append(
-      varEditor(
-        n.type === 'extract' ? 'Instruksi tambahan (opsional)' : 'Instruksi',
-        n.prompt,
-        v => mutate(() => (n.prompt = v)),
-        n,
-        7,
-      ),
-    );
+    // Instruksi Context ditanam di sistem (sudah diuji); isinya terlihat di jejak Uji, bukan diatur per profil.
+    if (n.type === 'context')
+      prompt.append(
+        el(
+          'p',
+          'Instruksi ringkasan ditanam di sistem: "ubah percakapan jadi 1 konteks hanya SPO (subjek objek predikat jelas dan ekplisit) dalam dua kalimat singkat tanpa keterangan tambahan (beserta satu contoh)", dari pesan terakhir pelanggan dan jawaban AI. Isinya bisa dilihat di jejak Uji. Bila ringkasan gagal dibuat, ringkasan lama dipakai dan balasan tetap terkirim.',
+          'hint',
+        ),
+      );
+    else
+      prompt.append(
+        varEditor(
+          n.type === 'extract' ? 'Instruksi tambahan (opsional)' : 'Instruksi',
+          n.prompt,
+          v => mutate(() => (n.prompt = v)),
+          n,
+          7,
+        ),
+      );
     const tiers = [
       ['cheap', 'Murah'],
       ['medium', 'Sedang'],
@@ -177,28 +187,14 @@ function renderInspector() {
       ),
       el('p', 'Riwayat pesan sebelumnya yang dikirim ke model. Kosongkan bila node cukup memakai konteks.', 'hint'),
     );
-    host.append(prompt, model, contextMemory, memory);
+    // Context cukup pesan terakhir; riwayat hanya relevan di profil lama tanpa Memori konteks (ringkasan ikut memori).
+    host.append(prompt, model, contextMemory, ...(n.type === 'context' && contextNodes.length ? [] : [memory]));
   }
   if (n.type === 'extract') renderExtract(host.appendChild(section()), n);
   if (n.type === 'compute') renderCompute(host.appendChild(section()), n);
   if (n.type === 'media') renderMedia(host.appendChild(section()), n);
   if (n.type === 'receive') renderReceive(host.appendChild(section()), n);
   if (n.type === 'file_json' || n.type === 'file_md') renderFile(host.appendChild(section()), n);
-  if (n.type === 'context') {
-    const box = section();
-    box.append(
-      field('Format konteks', n.context_format || 'text', v => mutate(() => (n.context_format = v)), 'select', [
-        { value: 'text', label: 'Ringkasan bebas' },
-        { value: 'spo', label: 'S-P-O (Subjek-Predikat-Objek)' },
-      ]),
-      el(
-        'p',
-        'S-P-O meringkas riwayat dari memori yang terhubung, pesan terbaru, dan jawaban Agent terakhir. Format diperiksa dan diperbaiki satu kali jika tidak valid.',
-        'hint',
-      ),
-    );
-    host.append(box);
-  }
   if (n.type === 'context_memory') {
     const box = section();
     box.append(
