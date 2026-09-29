@@ -15,7 +15,7 @@ import { basicWallet, sendBilled } from '../../billing/index.js';
 import { recordOutgoing } from './chat.js';
 import { AIMessage, defaults, provider, AITransport } from './provider.js';
 import { text } from './input-validation.js';
-import { countWords, aiFallback, creditCost } from './metering.js';
+import { countWords, aiFallback, creditCost, planPart, refundSplit } from './metering.js';
 import { transaction, lockAccount } from './transaction.js';
 import type { QueuedMedia } from './builder/media.js';
 import { recordFilePath, uploadRecordFile, recordFileLimits } from './builder/record-files.js';
@@ -76,7 +76,8 @@ export async function recover(svc: AIService, account?: string) {
   await transaction(async c => {
     const [rows] = await usageSql.lockGenerating(c, account ? [account] : [], account);
     for (const row of rows) {
-      await walletsSql.credit(c, [row.reserved, row.account_id]);
+      const back = refundSplit(row.reserved, row.reserved_plan, row.reserved);
+      await walletsSql.refund(c, [back.toBalance, back.toPlan, row.account_id]);
       await usageSql.markInterrupted(c, [row.account_id, row.request_id]);
     }
     await usageSql.resolveGenerated(c, account ? [account] : [], account);
@@ -137,6 +138,8 @@ export async function handleMessage(
     );
     if (inputWords > 12000 || maxWords < 1) return;
     const reserved = creditCost(inputWords, maxWords, config.input_rate, config.output_rate);
+    // Kredit paket dipakai lebih dulu; bagiannya dicatat untuk refund yang tepat.
+    const fromPlan = planPart(reserved, wallet[0].plan_balance);
     await walletsSql.debit(c, [reserved, account]);
     await usageSql.insertMessage(c, [
       account,
@@ -150,12 +153,14 @@ export async function handleMessage(
       config.model,
       type,
       current[0].data_profile_id,
+      fromPlan,
     ]);
     await conversationsSql.updateMessages(c, [JSON.stringify(memory), account, session, message.from]);
     return {
       messages,
       inputWords,
       reserved,
+      fromPlan,
       maxWords,
       routerContext: conversations[0].router_context as string | null,
       revision: conversations[0].revision,
@@ -338,7 +343,8 @@ export async function handleMessage(
     const fallbackId = fallback ? 'FB-' + randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase() : undefined;
     await transaction(async c => {
       await lockAccount(c, account, true);
-      await walletsSql.credit(c, [prepared.reserved - charged, account]);
+      const back = refundSplit(prepared.reserved, prepared.fromPlan, prepared.reserved - charged);
+      await walletsSql.refund(c, [back.toBalance, back.toPlan, account]);
       await usageSql.finishMessage(c, [
         generationFailed ? 'fallback_generated' : 'generated',
         outputWords,

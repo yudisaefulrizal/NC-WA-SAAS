@@ -65,7 +65,7 @@ test('Direct owner APIs reject users and keys; injection and oversize bodies do 
   assert.equal(me.role, 'user');
   const publicPlans = await request(app).get('/public/plans').expect(200);
   for (const p of publicPlans.body)
-    assert.deepEqual(Object.keys(p).sort(), ['credits', 'id', 'name', 'price', 'session_limit']);
+    assert.deepEqual(Object.keys(p).sort(), ['ai_credits', 'credits', 'id', 'name', 'price', 'session_limit']);
 });
 test('Login limiter stops repeated attempts', async () => {
   let limited = false;

@@ -355,6 +355,23 @@
               </button>
             </article></template
           >
+          <template id="wa-credit-card-template"
+            ><article class="package-card ai-credit-card">
+              <div class="package-card-head">
+                <span class="package-icon" aria-hidden="true">✉</span>
+                <div>
+                  <h3>Kredit WhatsApp</h3>
+                  <p>
+                    Tambahan kredit kirim pesan di luar paket. Tidak kedaluwarsa dan dipakai setelah kredit paket habis.
+                  </p>
+                </div>
+              </div>
+              <ul class="package-features" id="wa-credit-rate"></ul>
+              <button type="button" id="wa-buy" class="buy-package" aria-label="Beli kredit WhatsApp">
+                Beli kredit WhatsApp <span aria-hidden="true">→</span>
+              </button>
+            </article></template
+          >
           <div id="catalog" class="grid"></div>
           <section class="payment-history">
             <div class="history-heading">
@@ -405,6 +422,27 @@
             <p class="hint">Status diperbarui otomatis saat halaman Pembelian terbuka.</p>
           </section>
         </section>
+        <dialog id="wa-credit-modal" aria-labelledby="wa-credit-title">
+          <div class="modal-heading">
+            <h2 id="wa-credit-title">Beli kredit WhatsApp</h2>
+            <button type="button" class="secondary" data-close="wa-credit-modal">Tutup</button>
+          </div>
+          <label
+            >Jumlah unit (1 unit = 100 kredit)<input
+              id="wa-credit-units"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value="1"
+          /></label>
+          <p id="wa-credit-summary"></p>
+          <p>
+            Kredit WhatsApp hasil beli tidak kedaluwarsa dan tidak ikut reset bulanan. Pembayaran melalui QRIS. Biaya
+            tambahan Rp0.
+          </p>
+          <button id="wa-credit-confirm">Lanjut ke pembayaran</button>
+        </dialog>
         <dialog id="ai-credit-modal" aria-labelledby="ai-credit-title">
           <div class="modal-heading">
             <h2 id="ai-credit-title">Beli kredit AI</h2>
@@ -517,7 +555,9 @@
                     <path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6" />
                     <path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" /></svg
                 ></span>
-                <div class="ai-balance-info"><small>Kredit AI</small><strong id="ai-balance">—</strong></div>
+                <div class="ai-balance-info">
+                  <small id="ai-balance-label">Kredit AI</small><strong id="ai-balance">—</strong>
+                </div>
                 <span class="ai-balance-sep" aria-hidden="true"></span
                 ><button type="button" id="ai-hero-buy" class="ai-hero-buy" aria-label="Beli kredit">
                   <svg
@@ -2105,6 +2145,15 @@ X-API-Key: KUNCI_ANDA   # header bebas, opsional
             <h2>Paket & Harga</h2>
             <ul id="plans"></ul>
             <button type="button" data-open="planform-modal">Tambah paket</button>
+            <form id="wa-credit-price-form" class="grid">
+              <label
+                >Harga beli 100 kredit WhatsApp (Rp)<input name="wa_credit_price" type="number" min="0" required />
+                <small class="hint"
+                  >Klien membeli kelipatan 100 kredit. 0 berarti belum bisa dibeli. Buat paket langganan lebih murah per
+                  kredit dibanding harga ini.</small
+                ></label
+              ><button>Simpan harga</button>
+            </form>
             <dialog id="planform-modal" aria-labelledby="planform-title">
               <div class="modal-heading">
                 <h2 id="planform-title">Paket</h2>
@@ -2116,7 +2165,14 @@ X-API-Key: KUNCI_ANDA   # header bebas, opsional
                 <label>ID paket<input name="id" required pattern="[a-zA-Z0-9_-]{1,36}" /></label
                 ><label>Nama<input name="name" required maxlength="100" /></label
                 ><label>Harga rupiah<input name="price" type="number" min="0" required /></label
-                ><label>Kredit<input name="credits" type="number" min="0" required /></label
+                ><label>Kredit WhatsApp<input name="credits" type="number" min="0" required /></label
+                ><label
+                  >Kredit AI<input name="ai_credits" type="number" min="0" required />
+                  <small class="hint"
+                    >Dipakai lebih dulu dari kredit AI hasil beli, dan hangus bersama paket. Paket Dasar: diberikan tiap
+                    tanggal 1.</small
+                  ></label
+                >
                 ><label>Batas nomor<input name="session_limit" type="number" min="1" max="1000" required /></label
                 ><label
                   >Batas jumlah asset Auto Share<input

@@ -1,5 +1,6 @@
 // Wallet kredit AI sebuah akun: saldo, riwayat pemakaian, dan penyesuaian oleh pemilik.
 import { db } from '../../../libraries/db.js';
+import { basicWallet } from '../../billing/index.js';
 import { ApiError } from '../../../libraries/errors.js';
 import { object } from '../../../libraries/validation.js';
 import { fail, integer, text } from './input-validation.js';
@@ -10,10 +11,16 @@ import * as auditEventsSql from '../data-access/audit-events-queries.js';
 import * as usageSql from '../data-access/usage-queries.js';
 import * as walletsSql from '../data-access/wallets-queries.js';
 export async function walletSummary(svc: AIService, account: string) {
+  await basicWallet(account);
   const [rows] = await walletsSql.findBalance(db, [account]);
   const config = await svc.config();
   return {
     balance: rows[0]?.balance ?? 0,
+    // Rincian saldo: kredit paket dipakai lebih dulu dan hangus di plan_expires_at; kredit hasil beli tidak hangus.
+    purchased: rows[0]?.purchased ?? 0,
+    plan_balance: rows[0]?.plan_balance ?? 0,
+    plan_quota: rows[0]?.plan_quota ?? 0,
+    plan_expires_at: rows[0]?.plan_expires_at ?? null,
     input_rate: config.input_rate,
     output_rate: config.output_rate,
     credit_price: config.credit_price,
@@ -50,7 +57,8 @@ export async function adjust(svc: AIService, actor: string, account: string, bod
     }
     await walletsSql.ensure(c, [account]);
     const [rows] = await walletsSql.findBalance(c, [account]);
-    if (rows[0].balance + amount < 0 || rows[0].balance + amount > 1000000000) throw fail('Saldo di luar batas');
+    // Penyesuaian pemilik hanya menyentuh saldo hasil beli, jadi batasnya juga dihitung dari saldo itu.
+    if (rows[0].purchased + amount < 0 || rows[0].purchased + amount > 1000000000) throw fail('Saldo di luar batas');
     await walletsSql.credit(c, [amount, account]);
     await adjustmentsSql.insert(c, [account, id, actor, amount, reason]);
     await auditEventsSql.insert(c, [actor, 'ai_credit_adjusted:' + account]);

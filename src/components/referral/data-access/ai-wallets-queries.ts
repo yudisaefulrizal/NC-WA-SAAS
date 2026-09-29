@@ -3,7 +3,7 @@
 import type { Executor, SqlValue } from '../../../libraries/db.js';
 export function addBalance(c: Executor, params: SqlValue[]) {
   return c.execute(
-    'INSERT INTO ai_wallets VALUES (?,?) ON DUPLICATE KEY UPDATE balance=balance+VALUES(balance)',
+    'INSERT INTO ai_wallets(account_id,balance) VALUES (?,?) ON DUPLICATE KEY UPDATE balance=balance+VALUES(balance)',
     params,
   );
 }

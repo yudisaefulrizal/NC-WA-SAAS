@@ -54,10 +54,10 @@ try {
       await hashPassword(password),
       index ? 'owner' : 'user',
     ]);
-  await db.execute('INSERT INTO plans VALUES (?,?,10000,200,2,TRUE,20,104857600)', [
-    plan,
-    '<img src=x onerror=alert(1)>',
-  ]);
+  await db.execute(
+    'INSERT INTO plans(id,name,price,credits,session_limit,active,max_share_assets,max_share_storage_bytes) VALUES (?,?,10000,200,2,TRUE,20,104857600)',
+    [plan, '<img src=x onerror=alert(1)>'],
+  );
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }),
     page = await context.newPage();

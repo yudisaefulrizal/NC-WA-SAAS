@@ -10,12 +10,15 @@ import { db } from '../../../libraries/db.js';
 import {
   countWords,
   creditCost,
+  planPart,
+  refundSplit,
   callAI,
   type AIConfig,
   type AIMessage,
   type AITransport,
   tierConfig,
 } from '../../ai/index.js';
+import { basicWallet } from '../../billing/index.js';
 import * as aiUsageSql from '../data-access/ai-usage-queries.js';
 import * as aiWalletsSql from '../data-access/ai-wallets-queries.js';
 
@@ -98,7 +101,9 @@ export async function tidyMessage(
   const maxWords = Math.min(2000, Math.max(60, Math.ceil(countWords(original) * 1.5)));
   const reserved = creditCost(inputWords, maxWords, config.input_rate, config.output_rate);
   const requestId = `tidy_${account}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  await basicWallet(account).catch(() => {});
   const c: PoolConnection = await db.getConnection();
+  let fromPlan = 0;
   try {
     await c.beginTransaction();
     await aiWalletsSql.ensure(c, [account]);
@@ -107,6 +112,7 @@ export async function tidyMessage(
       await c.rollback();
       return keep('kredit_tidak_cukup');
     }
+    fromPlan = planPart(reserved, wallet[0]?.plan_balance ?? 0);
     await aiWalletsSql.debit(c, [reserved, account]);
     await aiUsageSql.insert(c, [
       account,
@@ -134,7 +140,8 @@ export async function tidyMessage(
   }
   const outputWords = answer ? countWords(answer) : 0;
   const charged = answer ? creditCost(inputWords, outputWords, config.input_rate, config.output_rate) : 0;
-  await aiWalletsSql.credit(db, [reserved - charged, account]).catch(() => {});
+  const back = refundSplit(reserved, fromPlan, reserved - charged);
+  await aiWalletsSql.refund(db, [back.toBalance, back.toPlan, account]).catch(() => {});
   await aiUsageSql
     .updateStatus(db, [answer ? 'done' : 'failed', outputWords, charged, account, requestId])
     .catch(() => {});

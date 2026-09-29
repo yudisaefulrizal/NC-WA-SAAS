@@ -27,7 +27,7 @@ export function listLatest(c: Executor) {
 }
 export function lockGenerating(c: Executor, params: SqlValue[], account: string | undefined) {
   return c.execute<RowDataPacket[]>(
-    "SELECT account_id,request_id,reserved FROM ai_usage WHERE status='generating'" +
+    "SELECT account_id,request_id,reserved,reserved_plan FROM ai_usage WHERE status='generating'" +
       (account ? ' AND account_id=?' : '') +
       ' FOR UPDATE',
     params,
@@ -48,7 +48,7 @@ export function findRequest(c: Executor, params: SqlValue[]) {
 }
 export function insertMessage(c: Executor, params: SqlValue[]) {
   return c.execute(
-    "INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model,profile_type,data_profile_id) VALUES (?,?,?,?,'generating',?,?,?,?,?,?,?)",
+    "INSERT INTO ai_usage(account_id,request_id,session_id,customer,status,input_words,input_rate,output_rate,reserved,model,profile_type,data_profile_id,reserved_plan) VALUES (?,?,?,?,'generating',?,?,?,?,?,?,?,?)",
     params,
   );
 }

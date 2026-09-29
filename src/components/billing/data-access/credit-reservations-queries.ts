@@ -10,13 +10,13 @@ export function listRecentByAccount(c: Executor, params: SqlValue[]) {
 }
 export function countUsed(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    "SELECT COUNT(*) AS used FROM credit_reservations WHERE account_id=? AND period=? AND status<>'failed'",
+    "SELECT COUNT(*) AS used FROM credit_reservations WHERE account_id=? AND period=? AND status<>'failed' AND from_purchased=FALSE",
     params,
   );
 }
 export function countOpen(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    "SELECT COUNT(*) AS total FROM credit_reservations WHERE account_id=? AND period=? AND status IN ('reserved','unknown')",
+    "SELECT COUNT(*) AS total FROM credit_reservations WHERE account_id=? AND period=? AND status IN ('reserved','unknown') AND from_purchased=FALSE",
     params,
   );
 }
@@ -34,13 +34,13 @@ export function findRequest(c: Executor, params: SqlValue[]) {
 }
 export function insert(c: Executor, params: SqlValue[]) {
   return c.execute(
-    'INSERT INTO credit_reservations (account_id,request_id,payload_hash,period) VALUES (?,?,?,?)',
+    'INSERT INTO credit_reservations (account_id,request_id,payload_hash,period,from_purchased) VALUES (?,?,?,?,?)',
     params,
   );
 }
 export function lockRequest(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    'SELECT status,period FROM credit_reservations WHERE account_id=? AND request_id=? FOR UPDATE',
+    'SELECT status,period,from_purchased FROM credit_reservations WHERE account_id=? AND request_id=? FOR UPDATE',
     params,
   );
 }
@@ -49,7 +49,7 @@ export function updateStatus(c: Executor, params: SqlValue[]) {
 }
 export function findPeriodStatus(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    'SELECT period,status FROM credit_reservations WHERE account_id=? AND request_id=?',
+    'SELECT period,status,from_purchased FROM credit_reservations WHERE account_id=? AND request_id=?',
     params,
   );
 }

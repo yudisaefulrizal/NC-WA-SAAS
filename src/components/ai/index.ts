@@ -2,7 +2,7 @@
 // profilnya, dan rute HTTP-nya. Komponen lain dan src/http hanya memakai nama yang diekspor di sini.
 export { migrateAI } from './data-access/schema.js';
 export { customerOf, onChatChange, recordIncoming, recordOutgoing, updateStatus } from './domain/chat.js';
-export { countWords, creditCost } from './domain/metering.js';
+export { countWords, creditCost, planPart, refundSplit } from './domain/metering.js';
 export { tierConfig } from './domain/pipeline/models.js';
 export { callAI } from './domain/provider.js';
 export type { AIConfig, AIMessage, AITransport } from './domain/provider.js';

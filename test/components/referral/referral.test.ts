@@ -192,7 +192,10 @@ test('Purchase settlement through Payments.apply() records commission end-to-end
     configId,
     encrypt('fixture-key'),
   ]);
-  await db.execute('INSERT INTO plans VALUES (?,?,10000,500,3,TRUE,20,104857600)', [planId, 'Fixture plan']);
+  await db.execute(
+    'INSERT INTO plans(id,name,price,credits,session_limit,active,max_share_assets,max_share_storage_bytes) VALUES (?,?,10000,500,3,TRUE,20,104857600)',
+    [planId, 'Fixture plan'],
+  );
   let order = '';
   const call = async (_env: string, _key: string, path: string, body?: unknown) => {
     if (body) order = (body as any).transaction_details.order_id;

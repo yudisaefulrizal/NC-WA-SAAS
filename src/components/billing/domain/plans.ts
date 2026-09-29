@@ -3,6 +3,7 @@
 import { db } from '../../../libraries/db.js';
 import type { PoolConnection } from 'mysql2/promise';
 import * as accountsSql from '../data-access/accounts-queries.js';
+import * as aiWalletsSql from '../data-access/ai-wallets-queries.js';
 import * as creditEventsSql from '../data-access/credit-events-queries.js';
 import * as creditReservationsSql from '../data-access/credit-reservations-queries.js';
 import * as packageActivationsSql from '../data-access/package-activations-queries.js';
@@ -35,7 +36,31 @@ export async function ensureBasic(connection: PoolConnection, accountId: string,
     await walletsSql.resetToBasic(connection, [accountId, period, balance, plan.credits, plan.session_limit]);
   }
   const [result] = await walletsSql.find(connection, [accountId]);
-  return result[0];
+  // `balance` adalah total yang bisa dipakai; kredit paket ada di `plan_balance`, kredit hasil beli di `purchased`.
+  const row = result[0];
+  const wallet = Object.assign(row, { plan_balance: row.balance, balance: row.balance + row.purchased });
+  // Kredit AI paket dasar: sebulan sekali bersama reset kredit WhatsApp; akun lama mendapatkannya saat pertama kali
+  // lewat sini. Mengubah jumlahnya di tengah bulan berlaku mulai bulan berikutnya.
+  if (wallet.plan_id === 'basic') {
+    const [granted] = await aiWalletsSql.findPlanPeriod(connection, [accountId]);
+    if (granted[0]?.plan_period !== wallet.period) {
+      const [plans] = await plansSql.findBasicQuota(connection);
+      const credits = Number(plans[0]?.ai_credits ?? 0);
+      await aiWalletsSql.grantPlan(connection, [
+        accountId,
+        credits,
+        credits,
+        basicPeriodEnd(wallet.period),
+        wallet.period,
+      ]);
+    }
+  }
+  return wallet;
+}
+// Awal bulan berikutnya, 00.00 WIB, dalam UTC: kredit AI paket dasar hangus di sana.
+export function basicPeriodEnd(period: string) {
+  const [year, month] = period.split('-').map(Number);
+  return new Date(Date.UTC(year, month, 1) - 7 * 3600000);
 }
 export async function basicWallet(accountId: string, now = new Date()) {
   const connection = await db.getConnection();
@@ -57,9 +82,11 @@ export function planInput(body: unknown) {
     string,
     unknown
   >;
+  // Klien lama tanpa kolom ini menganggapnya 0.
+  const ai_credits = (body as Record<string, unknown>).ai_credits ?? 0;
   if (typeof name !== 'string' || !name.trim() || name.length > 100 || typeof active !== 'boolean') return null;
   if (
-    ![price, credits, session_limit].every(
+    ![price, credits, ai_credits, session_limit].every(
       v => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 100000000,
     )
   )
@@ -83,6 +110,7 @@ export function planInput(body: unknown) {
     name: name.trim(),
     price: price as number,
     credits: credits as number,
+    aiCredits: ai_credits as number,
     session_limit: session_limit as number,
     active,
     maxShareAssets: max_share_assets,
@@ -104,7 +132,7 @@ export async function activatePackage(
   connection: PoolConnection,
   accountId: string,
   id: string,
-  plan: { id: string; credits: number; session_limit: number },
+  plan: { id: string; credits: number; ai_credits?: number; session_limit: number },
   now = new Date(),
 ) {
   const wallet = await ensureBasic(connection, accountId, now);
@@ -117,7 +145,7 @@ export async function activatePackage(
     await creditEventsSql.upsertBasicTransfer(connection, [
       accountId,
       wallet.period,
-      -(wallet.balance + reserved[0].total),
+      -(wallet.plan_balance + reserved[0].total),
     ]);
   }
   // Reservasi yang masih tertunda ikut pindah bersama kredit yang belum kedaluwarsa saat membeli paket,
@@ -132,6 +160,8 @@ export async function activatePackage(
     now,
     expires,
   ]);
+  // Kredit AI paket menggantikan sisa kredit AI paket sebelumnya dan berlaku selama paket ini aktif.
+  await aiWalletsSql.grantPlan(connection, [accountId, plan.ai_credits ?? 0, plan.ai_credits ?? 0, expires, epoch]);
   await walletsSql.renew(connection, [
     epoch,
     plan.credits,

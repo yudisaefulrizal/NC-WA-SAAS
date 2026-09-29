@@ -175,6 +175,7 @@ async function wallet() {
   activePlanId = w.plan_id;
   updateActivePlan();
   $('stat-credit').textContent = w.balance;
+  waCreditPrice = w.wa_credit_price;
   $('stat-limit').textContent = w.session_limit;
   $('stat-plan').textContent = w.plan_id === 'basic' ? 'Gratis' : w.plan_id;
   $('stat-period').textContent = w.expires_at
@@ -192,14 +193,20 @@ function updateActivePlan() {
     if (free) free.textContent = active ? 'Paket aktif' : 'Paket dasar';
   });
 }
+let waCreditPrice = 0;
 async function catalog(id, authenticated = false) {
   const data = await api('/public/plans');
   const creditCard =
     authenticated && id === 'catalog' && $('ai-credit-card-template')
       ? $('ai-credit-card-template').content.cloneNode(true)
       : null;
+  const waCreditCard =
+    authenticated && id === 'catalog' && $('wa-credit-card-template')
+      ? $('wa-credit-card-template').content.cloneNode(true)
+      : null;
   $(id).replaceChildren(
     ...[
+      ...(waCreditCard ? [waCreditCard] : []),
       ...(creditCard ? [creditCard] : []),
       ...data.map(p => {
         const article = document.createElement('article'),
@@ -207,7 +214,7 @@ async function catalog(id, authenticated = false) {
           description = document.createElement('p');
         h.textContent = p.name;
         if (!authenticated) {
-          description.textContent = `${money(p.price)} / bulan · ${p.credits} kredit · ${p.session_limit} nomor`;
+          description.textContent = `${money(p.price)} / bulan · ${p.credits} kredit WhatsApp${p.ai_credits ? ` · ${p.ai_credits} kredit AI` : ''} · ${p.session_limit} nomor`;
           article.append(h, description);
           return article;
         }
@@ -238,7 +245,8 @@ async function catalog(id, authenticated = false) {
         const features = document.createElement('ul');
         features.className = 'package-features';
         for (const text of [
-          `${new Intl.NumberFormat('id-ID').format(p.credits)} kredit per bulan`,
+          `${new Intl.NumberFormat('id-ID').format(p.credits)} kredit WhatsApp per bulan`,
+          ...(p.ai_credits ? [`${new Intl.NumberFormat('id-ID').format(p.ai_credits)} kredit AI per bulan`] : []),
           `${p.session_limit} nomor WhatsApp`,
           'Integrasi API dan webhook',
           'Terhubung dengan workflow n8n',
@@ -255,7 +263,7 @@ async function catalog(id, authenticated = false) {
           const buy = button('Beli paket', async () => {
             selectedPlan = p;
             $('purchase-summary').textContent =
-              `${p.name} · ${money(p.price)} · ${p.credits} kredit · ${p.session_limit} nomor`;
+              `${p.name} · ${money(p.price)} · ${p.credits} kredit WhatsApp${p.ai_credits ? ` · ${p.ai_credits} kredit AI` : ''} · ${p.session_limit} nomor`;
             $('purchase-modal').showModal();
           });
           buy.className = 'buy-package';
@@ -272,6 +280,31 @@ async function catalog(id, authenticated = false) {
     ],
   );
   if (authenticated) updateActivePlan();
+  if (waCreditCard) {
+    // Katalog dirender sebelum wallet() selesai, jadi harganya dibaca sendiri di sini.
+    waCreditPrice = (await api('/api/wallet')).wa_credit_price;
+    const rows = [
+      waCreditPrice ? `${money(waCreditPrice)} per 100 kredit` : 'Harga belum ditetapkan pemilik',
+      'Tidak kedaluwarsa dan tidak ikut reset bulanan',
+      'Dipakai setelah kredit paket habis',
+    ];
+    $('wa-credit-rate').replaceChildren(
+      ...rows.map(text => {
+        const li = document.createElement('li'),
+          check = document.createElement('span');
+        check.textContent = '✓';
+        check.setAttribute('aria-hidden', 'true');
+        li.append(check, document.createTextNode(text));
+        return li;
+      }),
+    );
+    $('wa-buy').disabled = !waCreditPrice;
+    $('wa-buy').onclick = () => {
+      $('wa-credit-units').value = '1';
+      waCreditSummary();
+      $('wa-credit-modal').showModal();
+    };
+  }
   if (creditCard)
     $('ai-buy').onclick = () => {
       $('ai-credit-units').value = '1';

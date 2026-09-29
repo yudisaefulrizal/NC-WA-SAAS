@@ -77,7 +77,15 @@ async function loadAI() {
   aiSessionLimit = waWallet.session_limit;
   await refreshSessionCards();
   $('ai-balance').textContent = `${w.balance} kredit`;
+  // Kredit paket dipakai lebih dulu dan hangus bersama paket; kredit hasil beli tidak hangus.
+  $('ai-balance-label').textContent = w.plan_balance ? `Kredit AI · paket ${w.plan_balance}` : 'Kredit AI';
+  $('ai-balance').parentElement.title = w.plan_balance
+    ? `Kredit paket ${w.plan_balance} (hangus ${new Date(w.plan_expires_at).toLocaleDateString('id-ID')}), dipakai lebih dulu · hasil beli ${w.purchased}`
+    : `Kredit hasil beli ${w.purchased}`;
   $('wa-balance').textContent = `${new Intl.NumberFormat('id-ID').format(waWallet.balance)} pesan`;
+  // Kredit paket dipakai lebih dulu dan reset tiap periode; kredit hasil beli tidak hangus.
+  $('wa-balance').parentElement.title =
+    `Kredit paket ${waWallet.plan_balance} (dipakai lebih dulu) · hasil beli ${waWallet.purchased}`;
   $('ai-active-plan').textContent = waWallet.plan_id === 'basic' ? 'Gratis' : waWallet.plan_id;
   aiCreditPrice = w.credit_price;
   $('ai-hero-buy').disabled = !w.credit_price;

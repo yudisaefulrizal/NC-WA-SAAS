@@ -28,7 +28,10 @@ async function fixture() {
     config,
     encrypt('fixture-key'),
   ]);
-  await db.execute('INSERT INTO plans VALUES (?,?,10000,500,3,TRUE,20,104857600)', [plan, 'Fixture plan']);
+  await db.execute(
+    'INSERT INTO plans(id,name,price,credits,session_limit,active,max_share_assets,max_share_storage_bytes) VALUES (?,?,10000,500,3,TRUE,20,104857600)',
+    [plan, 'Fixture plan'],
+  );
   return { account, config, plan };
 }
 after(async () => {
@@ -373,4 +376,48 @@ test('AI QRIS snapshots selected units, credits and price; repeated settlement o
   price = 5000;
   await assert.rejects(service.create(f.account, 'ai-10000', 'ai', 0), { code: 'invalid_request' });
   await assert.rejects(service.create(f.account, 'ai-10000', 'ai', 101), { code: 'invalid_request' });
+});
+test('WhatsApp credit QRIS snapshots units and price; repeated settlement adds purchased credit once and never resets', async () => {
+  const f = await fixture();
+  let price = 4000;
+  class WaPayments extends Payments {
+    protected override async waCreditPrice() {
+      return price;
+    }
+  }
+  let id = '';
+  const service = new WaPayments(async (_env, _key, _path, body) => {
+    if (body) id = (body as any).transaction_details.order_id;
+    return {
+      order_id: id,
+      transaction_id: 'tx-' + id,
+      payment_type: 'qris',
+      currency: 'IDR',
+      gross_amount: '12000.00',
+      transaction_status: body ? 'pending' : 'settlement',
+      status_code: body ? '201' : '200',
+    };
+  }, f.config);
+  const before = await basicWallet(f.account);
+  const order = await service.create(f.account, 'wa-100', 'wa_credit', 3);
+  assert.equal(order.kind, 'wa_credit');
+  assert.equal(order.total, 12000);
+  assert.equal(order.credits, 300);
+  assert.equal(order.plan_id, 'wa-100x3');
+  price = 9900;
+  await Promise.all([service.reconcile(order.id), service.reconcile(order.id)]);
+  const [rows] = await db.execute<any[]>('SELECT balance,purchased,plan_id FROM wallets WHERE account_id=?', [
+    f.account,
+  ]);
+  assert.equal(rows[0].purchased, 300);
+  assert.equal(rows[0].balance, before.plan_balance, 'kredit paket tidak berubah');
+  assert.equal(rows[0].plan_id, 'basic');
+  assert.equal((await basicWallet(f.account)).balance, before.plan_balance + 300);
+  assert.equal((await service.order(f.account, order.id)).total, 12000);
+  price = 0;
+  await assert.rejects(service.create(f.account, 'wa-100', 'wa_credit'), { code: 'wa_credit_unavailable' });
+  price = 4000;
+  await assert.rejects(service.create(f.account, 'wa-100', 'wa_credit', 0), { code: 'invalid_request' });
+  await assert.rejects(service.create(f.account, 'wa-100', 'wa_credit', 101), { code: 'invalid_request' });
+  await assert.rejects(service.create(f.account, 'wa-500', 'wa_credit'), { code: 'wa_credit_unavailable' });
 });

@@ -7,6 +7,7 @@ import { db } from '../../../libraries/db.js';
 import { basicWallet, ensureBasic, planInput } from '../domain/plans.js';
 import { ApiError } from '../../../libraries/errors.js';
 import * as auditEventsSql from '../data-access/audit-events-queries.js';
+import * as billingSettingsSql from '../data-access/billing-settings-queries.js';
 import * as creditAdjustmentsSql from '../data-access/credit-adjustments-queries.js';
 import * as creditReservationsSql from '../data-access/credit-reservations-queries.js';
 import * as paymentOrdersSql from '../data-access/payment-orders-queries.js';
@@ -63,7 +64,18 @@ export function billingRoutes(
   app.post('/api/ai/payments', async (req, res) =>
     res.json(await payments.create(res.locals.account.id, 'ai-10000', 'ai', req.body?.units)),
   );
-  app.get('/api/wallet', async (_req, res) => res.json(await basicWallet(res.locals.account.id)));
+  app.post('/api/wa-credit/payments', async (req, res) =>
+    res.json(await payments.create(res.locals.account.id, 'wa-100', 'wa_credit', req.body?.units)),
+  );
+  // wa_credit_price adalah harga per 100 kredit WhatsApp hasil beli; 0 berarti pemilik belum menetapkannya.
+  app.get('/api/wallet', async (_req, res) => {
+    const [settings] = await billingSettingsSql.find(db);
+    res.json({
+      ...(await basicWallet(res.locals.account.id)),
+      wa_credit_price: Number(settings[0]?.wa_credit_price ?? 0),
+      wa_credit_unit: 100,
+    });
+  });
   app.get('/api/plans', async (_req, res) => {
     const [plans] = await plansSql.listActive(db);
     res.json(plans);
@@ -93,7 +105,7 @@ export function billingAdminRoutes(app: express.Express, { payments }: { payment
         if (old[0].amount !== amount || old[0].reason !== reason)
           throw new ApiError(409, 'idempotency_conflict', 'ID penyesuaian sudah digunakan');
       } else {
-        if (wallet.balance + amount < 0 || wallet.balance + amount > 1000000000)
+        if (wallet.plan_balance + amount < 0 || wallet.plan_balance + amount > 1000000000)
           throw new ApiError(409, 'invalid_balance', 'Saldo di luar batas');
         await walletsSql.addBalance(c, [amount, req.params.id]);
         await creditAdjustmentsSql.insert(c, [req.params.id, requestId, res.locals.account.id, amount, reason]);
@@ -111,6 +123,18 @@ export function billingAdminRoutes(app: express.Express, { payments }: { payment
   app.get('/api/admin/payments', async (req, res) =>
     res.json(await paginate(req.query.page ?? '1', paymentOrdersSql.page.count, paymentOrdersSql.page.items)),
   );
+  app.get('/api/admin/billing-settings', async (_req, res) => {
+    const [rows] = await billingSettingsSql.find(db);
+    res.json({ wa_credit_price: Number(rows[0]?.wa_credit_price ?? 0) });
+  });
+  app.put('/api/admin/billing-settings', async (req, res) => {
+    const price = req.body?.wa_credit_price;
+    if (!Number.isSafeInteger(price) || price < 0 || price > 100000000)
+      throw new ApiError(400, 'invalid_request', 'Harga per 100 kredit WhatsApp harus bilangan bulat 0 atau lebih');
+    await billingSettingsSql.updateWaCreditPrice(db, [price]);
+    await auditEventsSql.insert(db, [res.locals.account.id, 'wa_credit_price_updated']);
+    res.json({ ok: true });
+  });
   app.get('/api/admin/midtrans', async (_req, res) => res.json(await payments.configuration()));
   app.put('/api/admin/midtrans', async (req, res) =>
     res.json(await payments.configure(res.locals.account.id, req.body)),
@@ -158,6 +182,7 @@ export function billingAdminRoutes(app: express.Express, { payments }: { payment
         input.active,
         input.maxShareAssets,
         input.maxShareStorageBytes,
+        input.aiCredits,
       ]);
       await auditEventsSql.insert(connection, [res.locals.account.id, 'plan_updated:' + id]);
       await connection.commit();

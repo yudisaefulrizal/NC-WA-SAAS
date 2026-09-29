@@ -50,9 +50,11 @@ function renderPayment(order) {
     not_found: 'Transaksi tidak ditemukan setelah pemeriksaan. Anda dapat memilih paket lagi.',
   };
   $('paymentstatus').textContent =
-    (order.kind === 'ai' && order.status === 'settlement'
+    (order.status === 'settlement' && order.kind === 'ai'
       ? 'Pembayaran berhasil. Saldo kredit AI telah ditambahkan.'
-      : messages[order.status]) || 'Status sedang diperiksa.';
+      : order.status === 'settlement' && order.kind === 'wa_credit'
+        ? 'Pembayaran berhasil. Kredit WhatsApp telah ditambahkan.'
+        : messages[order.status]) || 'Status sedang diperiksa.';
   const showQr =
     order.status === 'pending' &&
     Boolean(order.qr_url) &&
@@ -196,6 +198,33 @@ $('paymentqr').onerror = () => {
 setInterval(() => {
   if (!document.hidden && !$('paket').hidden) paymentCountdown();
 }, 1000);
+function waCreditSummary() {
+  const units = Number($('wa-credit-units').value),
+    valid = Number.isSafeInteger(units) && units >= 1 && units <= 100;
+  $('wa-credit-summary').textContent =
+    valid && waCreditPrice
+      ? `${new Intl.NumberFormat('id-ID').format(units * 100)} kredit WhatsApp · ${money(waCreditPrice * units)}`
+      : 'Jumlah unit harus bilangan 1–100.';
+  $('wa-credit-confirm').disabled = !valid || !waCreditPrice;
+  return valid ? units : null;
+}
+$('wa-credit-units').oninput = waCreditSummary;
+$('wa-credit-confirm').onclick = () =>
+  run(async () => {
+    const units = waCreditSummary();
+    if (!units) return;
+    const control = $('wa-credit-confirm');
+    control.disabled = true;
+    try {
+      const order = await api('/api/wa-credit/payments', 'POST', { units });
+      $('wa-credit-modal').close();
+      await checkout(order.id);
+      await paymentList();
+    } finally {
+      control.disabled = false;
+      await wallet();
+    }
+  });
 function aiCreditSummary() {
   const units = Number($('ai-credit-units').value),
     valid = Number.isSafeInteger(units) && units >= 1 && units <= 100;

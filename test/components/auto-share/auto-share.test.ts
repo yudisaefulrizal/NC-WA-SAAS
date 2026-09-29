@@ -969,7 +969,10 @@ integration('a failing tidy never blocks the broadcast', async () => {
   assert.equal(poor.tidied, false);
   assert.equal(poor.reason, 'kredit_tidak_cukup');
   assert.equal(poor.message, 'Peserta 7 orang berdasarkan data terbaru.');
-  await db.execute('INSERT INTO ai_wallets VALUES (?,100000) ON DUPLICATE KEY UPDATE balance=100000', [a]);
+  await db.execute(
+    'INSERT INTO ai_wallets(account_id,balance) VALUES (?,100000) ON DUPLICATE KEY UPDATE balance=100000',
+    [a],
+  );
   tidyError = Error('provider down');
   const broken = await tidyMessage(a, 'Peserta 7 orang berdasarkan data terbaru.', config, fakeTidyTransport);
   assert.equal(broken.tidied, false);

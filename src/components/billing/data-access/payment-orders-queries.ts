@@ -37,7 +37,7 @@ export function findOpen(c: Executor, params: SqlValue[]) {
 }
 export function insert(c: Executor, params: SqlValue[]) {
   return c.execute(
-    'INSERT INTO payment_orders(id,account_id,plan_id,plan_name,price,fee,total,credits,session_limit,config_id,environment,kind) VALUES (?,?,?,?,?,0,?,?,?,?,?,?)',
+    'INSERT INTO payment_orders(id,account_id,plan_id,plan_name,price,fee,total,credits,session_limit,config_id,environment,kind,ai_credits) VALUES (?,?,?,?,?,0,?,?,?,?,?,?,?)',
     params,
   );
 }

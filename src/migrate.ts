@@ -76,6 +76,16 @@ try {
   );
   await column('payment_orders', 'expires_at', 'DATETIME NULL');
   await column('payment_orders', 'kind', "VARCHAR(16) NOT NULL DEFAULT 'whatsapp'");
+  // Kredit AI yang diberikan paket: berlaku selama paket aktif (paket berbayar) atau sebulan (paket dasar).
+  // Kredit WhatsApp hasil beli: tidak hangus dan tidak ikut reset bulanan; kredit paket dipakai lebih dulu.
+  await column('wallets', 'purchased', 'INT UNSIGNED NOT NULL DEFAULT 0');
+  await column('credit_reservations', 'from_purchased', 'BOOLEAN NOT NULL DEFAULT FALSE');
+  await db.query(
+    'CREATE TABLE IF NOT EXISTS billing_settings (id INT PRIMARY KEY, wa_credit_price INT UNSIGNED NOT NULL DEFAULT 0) ENGINE=InnoDB',
+  );
+  await db.query('INSERT IGNORE INTO billing_settings (id) VALUES (1)');
+  await column('plans', 'ai_credits', 'INT UNSIGNED NOT NULL DEFAULT 0');
+  await column('payment_orders', 'ai_credits', 'INT UNSIGNED NOT NULL DEFAULT 0');
   await column('plans', 'max_share_assets', 'INT UNSIGNED NOT NULL DEFAULT 20');
   await column('plans', 'max_share_storage_bytes', 'BIGINT UNSIGNED NOT NULL DEFAULT 104857600');
   await db.query(

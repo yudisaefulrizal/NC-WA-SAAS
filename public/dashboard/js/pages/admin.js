@@ -2,14 +2,14 @@
 async function plans() {
   table(
     'plans',
-    ['Nama paket', 'Harga / bulan', 'Kredit', 'Batas nomor', 'Batas asset', 'Status', 'Tindakan'],
+    ['Nama paket', 'Harga / bulan', 'Kredit WhatsApp', 'Kredit AI', 'Batas nomor', 'Batas asset', 'Status', 'Tindakan'],
     await api('/api/admin/plans'),
     p => {
       const actions = document.createElement('div');
       actions.className = 'row-actions';
       actions.append(
         button('Edit', async () => {
-          for (const name of ['id', 'name', 'price', 'credits', 'session_limit', 'max_share_assets'])
+          for (const name of ['id', 'name', 'price', 'credits', 'ai_credits', 'session_limit', 'max_share_assets'])
             $('planform').elements.namedItem(name).value = p[name];
           $('planform').elements.namedItem('max_share_storage_mb').value = Math.round(
             p.max_share_storage_bytes / 1048576,
@@ -34,6 +34,7 @@ async function plans() {
         p.name,
         money(p.price),
         p.credits,
+        p.ai_credits,
         p.session_limit,
         `${p.max_share_assets} asset · ${Math.round(p.max_share_storage_bytes / 1048576)} MB`,
         p.active ? 'Aktif' : 'Nonaktif',
@@ -42,11 +43,22 @@ async function plans() {
     },
   );
 }
+// Harga beli kredit WhatsApp satuan (per 100 kredit), diatur pemilik; 0 berarti belum bisa dibeli.
+async function loadBillingSettings() {
+  $('wa-credit-price-form').elements.namedItem('wa_credit_price').value = (
+    await api('/api/admin/billing-settings')
+  ).wa_credit_price;
+}
+form('wa-credit-price-form', async p => {
+  await api('/api/admin/billing-settings', 'PUT', { wa_credit_price: Number(p.wa_credit_price) });
+  $('message').textContent = 'Harga kredit WhatsApp tersimpan.';
+});
 form('planform', async p => {
   await api('/api/admin/plans/' + encodeURIComponent(p.id), 'PUT', {
     name: p.name,
     price: Number(p.price),
     credits: Number(p.credits),
+    ai_credits: Number(p.ai_credits),
     session_limit: Number(p.session_limit),
     max_share_assets: Number(p.max_share_assets),
     max_share_storage_bytes: Number(p.max_share_storage_mb) * 1048576,
@@ -104,6 +116,7 @@ passwordForm.onsubmit = e => {
 };
 async function admin() {
   await plans();
+  await loadBillingSettings();
   await loadAIConfig();
   await loadAdminProfiles();
   await loadModelUsage();

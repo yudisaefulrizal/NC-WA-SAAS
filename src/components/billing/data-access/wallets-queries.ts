@@ -16,7 +16,7 @@ export function resetToBasic(c: Executor, params: SqlValue[]) {
 }
 export function find(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    'SELECT period,balance,quota,session_limit,plan_id,expires_at FROM wallets WHERE account_id=?',
+    'SELECT period,balance,purchased,quota,session_limit,plan_id,expires_at FROM wallets WHERE account_id=?',
     params,
   );
 }
@@ -26,9 +26,19 @@ export function renew(c: Executor, params: SqlValue[]) {
     params,
   );
 }
+// `balance` adalah kredit paket (hangus/direset per periode); `purchased` adalah kredit hasil beli yang tidak hangus.
 export function debitOne(c: Executor, params: SqlValue[]) {
   return c.execute('UPDATE wallets SET balance=balance-1 WHERE account_id=?', params);
 }
 export function refundOne(c: Executor, params: SqlValue[]) {
   return c.execute('UPDATE wallets SET balance=balance+1 WHERE account_id=?', params);
+}
+export function debitPurchased(c: Executor, params: SqlValue[]) {
+  return c.execute('UPDATE wallets SET purchased=purchased-1 WHERE account_id=?', params);
+}
+export function refundPurchased(c: Executor, params: SqlValue[]) {
+  return c.execute('UPDATE wallets SET purchased=purchased+1 WHERE account_id=?', params);
+}
+export function addPurchased(c: Executor, params: SqlValue[]) {
+  return c.execute('UPDATE wallets SET purchased=purchased+? WHERE account_id=?', params);
 }

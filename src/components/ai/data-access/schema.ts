@@ -56,6 +56,13 @@ export async function migrateAI() {
     `CREATE TABLE IF NOT EXISTS ai_fallbacks (id VARCHAR(48) PRIMARY KEY,account_id CHAR(36) NOT NULL,session_id VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,customer VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,fallback_number VARCHAR(20) NOT NULL,status ENUM('waiting','answered','resolved','failed','expired') NOT NULL DEFAULT 'waiting',agent VARCHAR(20) NOT NULL,reason VARCHAR(500) NOT NULL,question VARCHAR(1000) NOT NULL,router_context VARCHAR(200) NULL,messages JSON NOT NULL,source_message_id VARCHAR(255) NOT NULL,notification_message_id VARCHAR(255) NULL,confirmation_message_id VARCHAR(255) NULL,staff_answer TEXT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,answered_at DATETIME NULL,resolved_at DATETIME NULL,UNIQUE KEY fallback_source(account_id,session_id,source_message_id),UNIQUE KEY fallback_notification(account_id,session_id,notification_message_id),INDEX fallback_customer(account_id,session_id,customer,status),FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE) ENGINE=InnoDB`,
   );
   for (const [table, column, definition] of [
+    // Kredit AI dari paket: dipakai lebih dulu dari saldo hasil beli, dan hangus di plan_expires_at.
+    ['ai_wallets', 'plan_balance', 'INT UNSIGNED NOT NULL DEFAULT 0'],
+    ['ai_wallets', 'plan_quota', 'INT UNSIGNED NOT NULL DEFAULT 0'],
+    ['ai_wallets', 'plan_expires_at', 'DATETIME(3) NULL'],
+    ['ai_wallets', 'plan_period', 'VARCHAR(64) NULL'],
+    // Bagian reservasi yang diambil dari kredit paket, supaya refund kembali ke wadah asalnya.
+    ['ai_usage', 'reserved_plan', 'INT UNSIGNED NOT NULL DEFAULT 0'],
     ['ai_settings', 'profile_routing_enabled', 'BOOLEAN NOT NULL DEFAULT FALSE'],
     ['ai_settings', 'model_cheap', 'VARCHAR(100) NULL'],
     ['ai_settings', 'model_medium', 'VARCHAR(100) NULL'],

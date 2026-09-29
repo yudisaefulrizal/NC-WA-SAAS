@@ -20,8 +20,10 @@ export async function reserveCredit(accountId: string, requestId: string, payloa
       return { created: false, status: existing[0].status as string };
     }
     if (wallet.balance < 1) throw new Error('insufficient_credits');
-    await walletsSql.debitOne(connection, [accountId]);
-    await creditReservationsSql.insert(connection, [accountId, requestId, payloadHash, wallet.period]);
+    // Kredit paket dipakai lebih dulu; bagian yang berasal dari saldo hasil beli dicatat untuk refund yang tepat.
+    const fromPurchased = wallet.plan_balance < 1;
+    await (fromPurchased ? walletsSql.debitPurchased : walletsSql.debitOne)(connection, [accountId]);
+    await creditReservationsSql.insert(connection, [accountId, requestId, payloadHash, wallet.period, fromPurchased]);
     await connection.commit();
     return { created: true, status: 'reserved' };
   } catch (e) {
@@ -51,8 +53,12 @@ export async function settleCredit(
       await connection.commit();
       return;
     }
-    // Pengembalian hanya ke periode asalnya yang masih berlaku. Kuota yang sudah kedaluwarsa tetap hangus.
-    if (outcome === 'failed' && row.period === wallet.period) await walletsSql.refundOne(connection, [accountId]);
+    // Kredit hasil beli selalu kembali ke saldonya; kredit paket hanya ke periode asalnya yang masih berlaku
+    // (kuota yang sudah kedaluwarsa tetap hangus).
+    if (outcome === 'failed') {
+      if (row.from_purchased) await walletsSql.refundPurchased(connection, [accountId]);
+      else if (row.period === wallet.period) await walletsSql.refundOne(connection, [accountId]);
+    }
     await creditReservationsSql.updateStatus(connection, [outcome, accountId, requestId]);
     await connection.commit();
   } catch (e) {
@@ -69,7 +75,7 @@ export async function validateReservation(accountId: string, requestId: string, 
     await c.beginTransaction();
     const wallet = await ensureBasic(c, accountId, now);
     const [rows] = await creditReservationsSql.findPeriodStatus(c, [accountId, requestId]);
-    if (!rows[0] || rows[0].period !== wallet.period || rows[0].status !== 'reserved')
+    if (!rows[0] || (!rows[0].from_purchased && rows[0].period !== wallet.period) || rows[0].status !== 'reserved')
       throw new Error('reservation_expired');
     await c.commit();
   } catch (e) {

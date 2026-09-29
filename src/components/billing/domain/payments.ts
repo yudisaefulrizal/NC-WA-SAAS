@@ -3,18 +3,20 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { PoolConnection } from 'mysql2/promise';
 import { db } from '../../../libraries/db.js';
-import { activatePackage } from './plans.js';
+import { activatePackage, ensureBasic } from './plans.js';
 import { ApiError } from '../../../libraries/errors.js';
 import { object, requiredString } from '../../../libraries/validation.js';
 import { decrypt, encrypt } from '../../../libraries/crypto.js';
 import * as accountsSql from '../data-access/accounts-queries.js';
 import * as aiSettingsSql from '../data-access/ai-settings-queries.js';
 import * as aiWalletsSql from '../data-access/ai-wallets-queries.js';
+import * as billingSettingsSql from '../data-access/billing-settings-queries.js';
 import * as auditEventsSql from '../data-access/audit-events-queries.js';
 import * as paymentConfigSql from '../data-access/payment-config-queries.js';
 import * as paymentOrdersSql from '../data-access/payment-orders-queries.js';
 import * as paymentSettingsSql from '../data-access/payment-settings-queries.js';
 import * as plansSql from '../data-access/plans-queries.js';
+import * as walletsSql from '../data-access/wallets-queries.js';
 
 const base = (environment: string) =>
   environment === 'production' ? 'https://api.midtrans.com' : 'https://api.sandbox.midtrans.com';
@@ -109,12 +111,34 @@ export class Payments {
     const [rows] = await aiSettingsSql.shareCreditPrice(c);
     return Number(rows[0]?.credit_price ?? 0);
   }
-  async create(account: string, planId: unknown, kind: 'whatsapp' | 'ai' = 'whatsapp', units: unknown = 1) {
+  protected async waCreditPrice(c: PoolConnection) {
+    const [rows] = await billingSettingsSql.shareWaCreditPrice(c);
+    return Number(rows[0]?.wa_credit_price ?? 0);
+  }
+  // 'whatsapp' adalah paket bulanan; 'ai' dan 'wa_credit' adalah pembelian kredit satuan yang tidak hangus.
+  async create(
+    account: string,
+    planId: unknown,
+    kind: 'whatsapp' | 'ai' | 'wa_credit' = 'whatsapp',
+    units: unknown = 1,
+  ) {
     const selected = requiredString(planId, 'planId', 36);
-    const aiUnits = kind === 'ai' ? Number(units) : 1;
-    if (kind === 'ai' && (!Number.isSafeInteger(aiUnits) || aiUnits < 1 || aiUnits > 100))
-      throw new ApiError(400, 'invalid_request', 'Jumlah unit kredit AI harus bilangan 1–100');
-    const effectivePlanId = kind === 'ai' && aiUnits > 1 ? 'ai-10000x' + aiUnits : selected;
+    const unitKind = kind === 'ai' || kind === 'wa_credit';
+    const aiUnits = unitKind ? Number(units) : 1;
+    if (unitKind && (!Number.isSafeInteger(aiUnits) || aiUnits < 1 || aiUnits > 100))
+      throw new ApiError(
+        400,
+        'invalid_request',
+        kind === 'ai'
+          ? 'Jumlah unit kredit AI harus bilangan 1–100'
+          : 'Jumlah unit kredit WhatsApp harus bilangan 1–100',
+      );
+    const effectivePlanId =
+      kind === 'ai' && aiUnits > 1
+        ? 'ai-10000x' + aiUnits
+        : kind === 'wa_credit' && aiUnits > 1
+          ? 'wa-100x' + aiUnits
+          : selected;
     const [stale] = await paymentOrdersSql.findExpiredPending(db, [account]);
     if (stale[0]) {
       await this.reconcile(stale[0].id);
@@ -135,8 +159,9 @@ export class Payments {
         return this.order(account, pending[0].id);
       }
       const [plans] = await plansSql.sharePurchasable(c, [selected]);
-      let plan: { id: string; name: string; price: number; credits: number; session_limit: number } | undefined =
-        plans[0] as any;
+      let plan:
+        | { id: string; name: string; price: number; credits: number; ai_credits: number; session_limit: number }
+        | undefined = plans[0] as any;
       if (kind === 'ai') {
         const price = await this.aiPrice(c);
         if (selected !== 'ai-10000' || !price)
@@ -146,6 +171,20 @@ export class Payments {
           name: new Intl.NumberFormat('id-ID').format(10000 * aiUnits) + ' Kredit AI',
           price: price * aiUnits,
           credits: 10000 * aiUnits,
+          ai_credits: 0,
+          session_limit: 0,
+        };
+      }
+      if (kind === 'wa_credit') {
+        const price = await this.waCreditPrice(c);
+        if (selected !== 'wa-100' || !price)
+          throw new ApiError(409, 'wa_credit_unavailable', 'Harga kredit WhatsApp belum ditetapkan pemilik');
+        plan = {
+          id: effectivePlanId,
+          name: new Intl.NumberFormat('id-ID').format(100 * aiUnits) + ' Kredit WhatsApp',
+          price: price * aiUnits,
+          credits: 100 * aiUnits,
+          ai_credits: 0,
           session_limit: 0,
         };
       }
@@ -163,6 +202,7 @@ export class Payments {
         config.id,
         config.environment,
         kind,
+        plan.ai_credits,
       ]);
       await c.commit();
     } catch (e) {
@@ -280,10 +320,15 @@ export class Payments {
       ) {
         if (order.kind === 'ai') {
           await aiWalletsSql.addBalance(c, [order.account_id, order.credits]);
+        } else if (order.kind === 'wa_credit') {
+          // Baris wallet dipastikan ada; kredit hasil beli tidak ikut reset bulanan.
+          await ensureBasic(c, order.account_id);
+          await walletsSql.addPurchased(c, [order.credits, order.account_id]);
         } else
           await activatePackage(c, order.account_id, id, {
             id: order.plan_id,
             credits: order.credits,
+            ai_credits: order.ai_credits,
             session_limit: order.session_limit,
           });
         status = 'settlement';

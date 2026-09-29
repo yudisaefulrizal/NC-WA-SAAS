@@ -7,7 +7,8 @@ import { ApiError } from '../../../libraries/errors.js';
 import { object } from '../../../libraries/validation.js';
 import { AIMessage } from './provider.js';
 import { fail, text } from './input-validation.js';
-import { countWords, aiFallback, creditCost } from './metering.js';
+import { basicWallet } from '../../billing/index.js';
+import { countWords, aiFallback, creditCost, planPart, refundSplit } from './metering.js';
 import { transaction, lockAccount } from './transaction.js';
 import type { AIService } from './service.js';
 import * as usageSql from '../data-access/usage-queries.js';
@@ -36,6 +37,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
   const id = digest(JSON.stringify(['trial', account, session, randomUUID()]));
   const messages: AIMessage[] = [{ role: 'user', content: question }];
   const inputWords = countWords(question);
+  await basicWallet(account);
   const prepared = await transaction(async c => {
     await lockAccount(c, account);
     await walletsSql.ensure(c, [account]);
@@ -46,6 +48,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
     );
     if (maxWords < 1) throw new ApiError(402, 'insufficient_credit', 'Kredit AI tidak cukup untuk uji coba');
     const reserved = creditCost(inputWords, maxWords, config.input_rate, config.output_rate);
+    const fromPlan = planPart(reserved, wallet[0].plan_balance);
     await walletsSql.debit(c, [reserved, account]);
     await usageSql.insertTrial(c, [
       account,
@@ -59,7 +62,7 @@ export async function trial(svc: AIService, account: string, body: unknown) {
       profile.profile_type,
       profile.id,
     ]);
-    return { reserved, maxWords };
+    return { reserved, maxWords, fromPlan };
   });
   let answer: string,
     agent: string | null = null,
@@ -98,7 +101,8 @@ export async function trial(svc: AIService, account: string, body: unknown) {
     charged = generationFailed ? 0 : creditCost(inputWords, outputWords, config.input_rate, config.output_rate);
   const wallet = await transaction(async c => {
     await lockAccount(c, account, true);
-    await walletsSql.credit(c, [prepared.reserved - charged, account]);
+    const back = refundSplit(prepared.reserved, prepared.fromPlan, prepared.reserved - charged);
+    await walletsSql.refund(c, [back.toBalance, back.toPlan, account]);
     await usageSql.finishTrial(c, [
       generationFailed ? 'failed' : 'generated',
       outputWords,
