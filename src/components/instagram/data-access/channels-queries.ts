@@ -28,7 +28,7 @@ export function listByAccount(c: Executor, params: SqlValue[]) {
 }
 export function listByZernio(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    'SELECT session_id FROM instagram_channels WHERE zernio_account_id=? AND account_id=?',
+    'SELECT session_id,ig_account_id FROM instagram_channels WHERE zernio_account_id=? AND account_id=?',
     params,
   );
 }

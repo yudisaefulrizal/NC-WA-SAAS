@@ -87,6 +87,30 @@ function fillZernioSelect() {
   );
   select.value = current || (zernioAccounts.length === 1 ? zernioAccounts[0].id : '');
   $('session-zernio-empty').hidden = zernioAccounts.length > 0;
+  void run(loadInstagramAccounts);
+}
+// Akun Instagram yang sudah ada di akun Zernio terpilih; yang sudah dipakai sesi lain tidak bisa dipilih.
+let instagramLoad = 0;
+async function loadInstagramAccounts() {
+  const zernioId = $('session-zernio').value,
+    select = $('session-instagram-account'),
+    generation = ++instagramLoad;
+  $('session-instagram-account-field').hidden = !zernioId;
+  if (!zernioId) return;
+  select.replaceChildren(new Option('Memuat akun Instagram…', ''));
+  const accounts = await api('/api/instagram/zernio/' + encodeURIComponent(zernioId) + '/instagram');
+  if (generation !== instagramLoad) return;
+  select.replaceChildren(
+    ...accounts.map(a => {
+      const label =
+        '@' + a.username + (a.session ? ' (sesi ' + a.session + ')' : a.active ? '' : ' (perlu login ulang)');
+      const option = new Option(label, a.id);
+      option.disabled = Boolean(a.session);
+      return option;
+    }),
+    new Option('+ Login akun Instagram baru', ''),
+  );
+  select.value = accounts.find(a => !a.session)?.id ?? '';
 }
 // Menampilkan isian yang sesuai jenis sesi; pilihan akun Zernio hanya wajib untuk Instagram.
 function syncSessionKind() {
@@ -97,11 +121,22 @@ function syncSessionKind() {
   $('session-submit').textContent = instagram ? 'Hubungkan Instagram' : 'Hubungkan sesi';
   if (instagram) void run(loadZernio);
 }
-// Membuka halaman login Instagram dari Zernio di tab yang sama; Zernio mengalihkan balik ke /zernio/callback.
-async function connectInstagram(sessionId, zernioId, reconnect) {
+// Akun yang masih aktif di Zernio langsung terpasang; selain itu halaman login Instagram dari Zernio dibuka di tab
+// yang sama, dan Zernio mengalihkan balik ke /zernio/callback.
+async function connectInstagram(sessionId, zernioId, reconnect, instagramId) {
   if (!zernioId) throw Error('Pilih akun Zernio terlebih dahulu.');
-  const result = await api('/api/instagram/connect', 'POST', { sessionId, zernioId, reconnect });
-  location.assign(result.authUrl);
+  const result = await api('/api/instagram/connect', 'POST', {
+    sessionId,
+    zernioId,
+    reconnect,
+    ...(instagramId ? { instagramId } : {}),
+  });
+  if (result.authUrl) return location.assign(result.authUrl);
+  $('addconnection').close();
+  $('sessionform').reset();
+  await sessions();
+  if (typeof loadAI === 'function' && !$('ai').hidden) await loadAI();
+  $('message').textContent = result.message;
 }
 async function reconnectInstagram(session) {
   await loadZernio();
@@ -116,6 +151,7 @@ function sessionAccountLabel(s) {
 }
 $('sessionform').addEventListener('change', e => {
   if (e.target.name === 'kind') syncSessionKind();
+  if (e.target.name === 'zernioId') void run(loadInstagramAccounts);
 });
 $('sessionform').addEventListener('reset', () => queueMicrotask(syncSessionKind));
 document.querySelectorAll('[data-open-zernio]').forEach(

@@ -37,6 +37,9 @@ export class Instagram {
   replaceZernioKey(account: string, id: string, body: unknown) {
     return accounts.replaceZernioKey(account, id, body);
   }
+  instagramAccounts(account: string, id: string) {
+    return accounts.instagramAccounts(account, id);
+  }
   async deleteZernioAccount(account: string, id: string) {
     for (const session of await accounts.sessionsOfZernioAccount(account, id))
       await this.requireHost().removeSession(account, session);

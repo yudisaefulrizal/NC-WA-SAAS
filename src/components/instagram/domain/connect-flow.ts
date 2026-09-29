@@ -1,5 +1,6 @@
-// Alur "Hubungkan Instagram": meminta tautan login Instagram dari Zernio, lalu menerima pengalihan balik dan
-// memasang akunnya sebagai sesi. Cookie login bersifat SameSite=strict sehingga tidak ikut saat Zernio
+// Alur "Hubungkan Instagram": akun Instagram yang sudah ada di Zernio klien langsung dipasang sebagai sesi; akun
+// baru (atau yang izinnya kedaluwarsa) login dulu lewat tautan dari Zernio, lalu dipasang saat Zernio mengalihkan
+// balik. Cookie login bersifat SameSite=strict sehingga tidak ikut saat Zernio
 // mengalihkan balik; pemiliknya dikenali dari token state sekali pakai yang dibuat saat alur dimulai, dan akun
 // Instagram-nya dicocokkan ke API Zernio, bukan dipercaya dari parameter URL.
 import { randomBytes } from 'node:crypto';
@@ -9,7 +10,7 @@ import { ApiError } from '../../../libraries/errors.js';
 import { object } from '../../../libraries/validation.js';
 import { ensureBasic } from '../../billing/index.js';
 import { SessionManager } from '../../whatsapp/index.js';
-import { connectUrl, listInstagramAccounts } from './zernio-client.js';
+import { connectUrl, listInstagramAccounts, type ZernioAccount } from './zernio-client.js';
 import { owned } from './zernio-accounts.js';
 import * as channelsSql from '../data-access/channels-queries.js';
 
@@ -30,13 +31,31 @@ export async function startConnect(account: string, manager: SessionManager, bod
   const session = input.sessionId,
     reconnect = input.reconnect === true;
   const existing = manager.list().find(s => s.id === session);
+  let chosen: string | undefined;
   if (reconnect) {
     const [channels] = await channelsSql.findBySession(db, [account, session]);
     if (!existing || existing.channel !== 'instagram' || channels[0]?.zernio_account_id !== row.id)
       throw new ApiError(404, 'session_not_found', 'Sesi Instagram tidak ditemukan pada akun Zernio ini');
+    chosen = channels[0].ig_account_id;
   } else {
     if (existing) throw new ApiError(409, 'session_exists', 'ID session sudah dipakai');
     await assertSessionSlot(account, manager);
+    if (input.instagramId !== undefined) {
+      if (typeof input.instagramId !== 'string' || !input.instagramId)
+        throw new ApiError(400, 'invalid_request', 'Akun Instagram tidak valid');
+      chosen = input.instagramId;
+    }
+  }
+  // Akun yang masih aktif di Zernio tidak perlu login ulang.
+  if (chosen) {
+    const found = (await listInstagramAccounts(decrypt(row.api_key))).find(a => a._id === chosen);
+    if (!found && !reconnect)
+      throw new ApiError(404, 'instagram_not_found', 'Akun Instagram tidak ada di akun Zernio ini');
+    if (found && found.isActive !== false && !found.needsReconnection) {
+      const result = await attach({ account, zernio: row.id, session, reconnect }, found, manager);
+      if (!result.ok) throw new ApiError(409, 'instagram_not_connected', result.message);
+      return { connected: true, message: result.message };
+    }
   }
   const now = Date.now();
   for (const [token, item] of pending) if (item.expires < now) pending.delete(token);
@@ -65,39 +84,45 @@ export async function finishConnect(
   const accountId = typeof query.accountId === 'string' ? query.accountId : '';
   try {
     const row = await owned(item.account, item.zernio);
-    const accounts = await listInstagramAccounts(decrypt(row.api_key), row.profile_id);
-    const found = accounts.find(a => a._id === accountId && a.platform === 'instagram');
+    const found = (await listInstagramAccounts(decrypt(row.api_key))).find(a => a._id === accountId);
     if (!found) return { ok: false, message: 'Akun Instagram tidak ditemukan di akun Zernio yang dipilih.' };
-    const username = String(found.username ?? '')
-      .replace(/^@/, '')
-      .slice(0, 100);
-    const m = await manager(item.account);
-    const [linked] = await channelsSql.findByIgAccount(db, [row.id, found._id]);
-    if (item.reconnect) {
-      const [current] = await channelsSql.findBySession(db, [item.account, item.session]);
-      if (current[0]?.ig_account_id !== found._id)
-        return {
-          ok: false,
-          message: 'Yang login akun Instagram lain. Hubungkan ulang dengan @' + current[0]?.username + '.',
-        };
-      await channelsSql.updateConnection(db, [username, 'active', row.id, found._id]);
-      if (m.detail(item.session).status === 'logged_out') await m.reconnect(item.session);
-      return { ok: true, message: '@' + username + ' terhubung kembali.' };
-    }
-    if (linked[0])
-      return { ok: false, message: '@' + username + ' sudah terpasang sebagai sesi ' + linked[0].session_id + '.' };
-    await channelsSql.insert(db, [item.account, item.session, row.id, found._id, username]);
-    try {
-      await assertSessionSlot(item.account, m);
-      await m.create(item.session, 'instagram');
-    } catch (error) {
-      await channelsSql.deleteBySession(db, [item.account, item.session]);
-      throw error;
-    }
-    return { ok: true, message: '@' + username + ' terhubung sebagai sesi ' + item.session + '.' };
+    return await attach(item, found, await manager(item.account));
   } catch (error) {
     return { ok: false, message: error instanceof ApiError ? error.message : 'Instagram gagal dipasang; coba lagi.' };
   }
+}
+// Memasang akun Instagram (sudah dicocokkan ke API Zernio) sebagai sesi baru, atau menyambungkan ulang sesinya.
+async function attach(
+  item: Pick<PendingConnect, 'account' | 'zernio' | 'session' | 'reconnect'>,
+  found: ZernioAccount,
+  m: SessionManager,
+) {
+  const username = String(found.username ?? '')
+    .replace(/^@/, '')
+    .slice(0, 100);
+  if (item.reconnect) {
+    const [current] = await channelsSql.findBySession(db, [item.account, item.session]);
+    if (current[0]?.ig_account_id !== found._id)
+      return {
+        ok: false,
+        message: 'Yang login akun Instagram lain. Hubungkan ulang dengan @' + current[0]?.username + '.',
+      };
+    await channelsSql.updateConnection(db, [username, 'active', item.zernio, found._id]);
+    if (m.detail(item.session).status === 'logged_out') await m.reconnect(item.session);
+    return { ok: true, message: '@' + username + ' terhubung kembali.' };
+  }
+  const [linked] = await channelsSql.findByIgAccount(db, [item.zernio, found._id]);
+  if (linked[0])
+    return { ok: false, message: '@' + username + ' sudah terpasang sebagai sesi ' + linked[0].session_id + '.' };
+  await channelsSql.insert(db, [item.account, item.session, item.zernio, found._id, username]);
+  try {
+    await assertSessionSlot(item.account, m);
+    await m.create(item.session, 'instagram');
+  } catch (error) {
+    await channelsSql.deleteBySession(db, [item.account, item.session]);
+    throw error;
+  }
+  return { ok: true, message: '@' + username + ' terhubung sebagai sesi ' + item.session + '.' };
 }
 // Sesi Instagram memakai jatah sesi paket yang sama dengan WhatsApp.
 async function assertSessionSlot(account: string, manager: SessionManager) {

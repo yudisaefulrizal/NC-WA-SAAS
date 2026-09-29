@@ -44,3 +44,6 @@ export function touchEvent(c: Executor, params: SqlValue[]) {
 export function deleteOwned(c: Executor, params: SqlValue[]) {
   return c.execute<ResultSetHeader>('DELETE FROM instagram_zernio_accounts WHERE id=? AND account_id=?', params);
 }
+export function updateProfile(c: Executor, params: SqlValue[]) {
+  return c.execute('UPDATE instagram_zernio_accounts SET profile_id=? WHERE id=? AND account_id=?', params);
+}

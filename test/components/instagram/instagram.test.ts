@@ -24,7 +24,17 @@ import { publishGraph, simpleGraph } from '../ai/graph-fixture.js';
 // Server Zernio tiruan: hanya kunci yang dikenal yang diterima, dan setiap permintaan dicatat.
 const validKeys = new Set(['sk_test_pusat_12345', 'sk_test_cabang_1234']);
 const zernio = {
-  profiles: new Map<string, { _id: string; name: string }[]>(),
+  // Profil adalah milik klien; NC-WA hanya membaca, tidak pernah membuat profil.
+  profiles: new Map([
+    ['sk_test_pusat_12345', [{ _id: 'prof-pusat_', name: 'Default', isDefault: true }]],
+    ['sk_test_cabang_1234', [{ _id: 'prof-cabang', name: 'Default', isDefault: true }]],
+  ]),
+  instagram: new Map([
+    ['sk_test_pusat_12345', [{ _id: 'igacc1', username: 'kopisenja.id', needsReconnection: false }]],
+    ['sk_test_cabang_1234', [] as { _id: string; username: string; needsReconnection: boolean }[]],
+  ]),
+  createdProfiles: 0,
+  webhookBodies: [] as Record<string, unknown>[],
   webhooks: new Map<string, { _id: string; url: string; secret: string; isActive: boolean }[]>(),
   redirects: [] as string[],
   sent: [] as { key: string; recipient: string; body: Record<string, unknown> }[],
@@ -50,13 +60,13 @@ const server = createServer(async (req, res) => {
   const route = req.method + ' ' + url.pathname;
   if (route === 'GET /api/v1/profiles') return reply(200, { profiles });
   if (route === 'POST /api/v1/profiles') {
-    const profile = { _id: 'prof-' + key.slice(8, 14), name: String((await body(req)).name) };
-    zernio.profiles.set(key, [...profiles, profile]);
-    return reply(201, { profile });
+    zernio.createdProfiles++;
+    return reply(201, { profile: { _id: 'baru', name: 'baru' } });
   }
   if (route === 'GET /api/v1/webhooks/settings') return reply(200, { webhooks });
   if (route === 'POST /api/v1/webhooks/settings') {
     const input = await body(req);
+    zernio.webhookBodies.push(input);
     const webhook = {
       _id: 'wh' + ++zernio.sequence,
       url: String(input.url),
@@ -80,10 +90,7 @@ const server = createServer(async (req, res) => {
   }
   if (route === 'GET /api/v1/accounts')
     return reply(200, {
-      accounts:
-        url.searchParams.get('profileId') === 'prof-pusat_'
-          ? [{ _id: 'igacc1', platform: 'instagram', username: 'kopisenja.id', profileId: 'prof-pusat_' }]
-          : [],
+      accounts: (zernio.instagram.get(key) ?? []).map(a => ({ ...a, platform: 'instagram', isActive: true })),
     });
   const send = url.pathname.match(/^\/api\/v1\/inbox\/conversations\/([^/]+)\/messages$/);
   if (req.method === 'POST' && send) {
@@ -161,7 +168,7 @@ before(async () => {
     digest(apiKey),
   ]);
   await basicWallet(account);
-  await db.execute('UPDATE wallets SET session_limit=3 WHERE account_id=?', [account]);
+  await db.execute('UPDATE wallets SET session_limit=4 WHERE account_id=?', [account]);
   await ai.adjust(owner, account, { amount: 10000, reason: 'fixture', requestId: 'fixture-ig' });
 });
 after(async () => {
@@ -225,7 +232,7 @@ function dm(id: string, text: string, event = 'message.received', extra: Record<
 }
 let pusat = '';
 
-test('Zernio accounts: key checked, profile and webhook registered, several per client, duplicates refused', async () => {
+test('Zernio accounts: key checked, webhook registered without touching profiles, several per client, duplicates refused', async () => {
   const invalid = await api('post', '/api/instagram/zernio').send({ name: 'Salah', apiKey: 'sk_test_unknown_999' });
   assert.equal(invalid.status, 400);
   assert.equal(invalid.body.error, 'zernio_unauthorized');
@@ -235,10 +242,8 @@ test('Zernio accounts: key checked, profile and webhook registered, several per 
   await api('post', '/api/instagram/zernio').send({ name: 'Cabang', apiKey: 'sk_test_cabang_1234' }).expect(200);
   const again = await api('post', '/api/instagram/zernio').send({ name: 'Lagi', apiKey: 'sk_test_pusat_12345' });
   assert.equal(again.body.error, 'zernio_exists');
-  assert.deepEqual(
-    zernio.profiles.get('sk_test_pusat_12345')!.map(p => p.name),
-    ['NC-WA'],
-  );
+  assert.equal(zernio.createdProfiles, 0);
+  assert.ok(zernio.webhookBodies.every(b => b.profileIds === undefined));
   const hook = zernio.webhooks.get('sk_test_pusat_12345')![0];
   assert.equal(hook.url, origin + '/zernio/webhook/' + pusat);
   const list = (await api('get', '/api/instagram/zernio').expect(200)).body;
@@ -258,34 +263,48 @@ test('Zernio accounts: key checked, profile and webhook registered, several per 
   assert.equal(zernio.webhooks.get('sk_test_pusat_12345')!.length, 1);
 });
 
-test('Connect flow: one-time state, account verified with Zernio, session created as Instagram', async () => {
+test('Connect flow: existing Instagram accounts attach directly, new ones log in with a one-time state', async () => {
   await request(app).post('/sessions').set('X-API-Key', apiKey).send({ id: 'wa' }).expect(200);
-  const started = await api('post', '/api/instagram/connect')
-    .send({ zernioId: pusat, sessionId: 'ig-shop' })
+  const listed = (await api('get', '/api/instagram/zernio/' + pusat + '/instagram').expect(200)).body;
+  assert.deepEqual(listed, [{ id: 'igacc1', username: 'kopisenja.id', active: true, session: null }]);
+  // Akun yang sudah ada di Zernio dipasang tanpa login ulang.
+  const direct = await api('post', '/api/instagram/connect')
+    .send({ zernioId: pusat, sessionId: 'ig-shop', instagramId: 'igacc1' })
     .expect(200);
-  assert.equal(started.body.authUrl, 'https://zernio.test/oauth/instagram');
-  const redirect = new URL(zernio.redirects.at(-1)!);
-  assert.equal(redirect.origin + redirect.pathname, origin + '/zernio/callback');
-  const state = redirect.searchParams.get('state')!;
-  // Username dari URL diabaikan; yang dipakai data akun dari API Zernio.
-  const back = await request(app)
-    .get('/zernio/callback')
-    .query({ state, connected: 'instagram', accountId: 'igacc1', username: 'palsu' })
-    .expect(200);
-  assert.match(back.text, /http-equiv="refresh"/);
-  assert.match(decodeURIComponent(back.text.replaceAll('+', ' ')), /@kopisenja\.id terhubung/);
-  const replay = await request(app).get('/zernio/callback').query({ state, accountId: 'igacc1' }).expect(200);
-  assert.match(decodeURIComponent(replay.text.replaceAll('+', ' ')), /kedaluwarsa/);
+  assert.deepEqual(direct.body, { connected: true, message: '@kopisenja.id terhubung sebagai sesi ig-shop.' });
+  assert.equal(zernio.redirects.length, 0);
   const sessions = (await request(app).get('/sessions').set('X-API-Key', apiKey).expect(200)).body;
   const ig = sessions.find((s: { id: string }) => s.id === 'ig-shop');
   assert.equal(ig.channel, 'instagram');
   assert.equal(ig.status, 'connected');
   assert.equal(ig.phone, '@kopisenja.id');
-  // Akun Instagram yang sama tidak bisa dipasang dua kali.
-  await api('post', '/api/instagram/connect').send({ zernioId: pusat, sessionId: 'ig-dua' }).expect(200);
-  const second = new URL(zernio.redirects.at(-1)!).searchParams.get('state')!;
-  const duplicate = await request(app).get('/zernio/callback').query({ state: second, accountId: 'igacc1' });
-  assert.match(decodeURIComponent(duplicate.text.replaceAll('+', ' ')), /sudah terpasang sebagai sesi ig-shop/);
+  const duplicate = await api('post', '/api/instagram/connect').send({
+    zernioId: pusat,
+    sessionId: 'ig-dua',
+    instagramId: 'igacc1',
+  });
+  assert.equal(duplicate.status, 409);
+  assert.match(duplicate.body.message, /sudah terpasang sebagai sesi ig-shop/);
+  // Akun baru: login lewat Zernio, lalu dipasang saat dialihkan balik.
+  const started = await api('post', '/api/instagram/connect')
+    .send({ zernioId: pusat, sessionId: 'ig-baru' })
+    .expect(200);
+  assert.equal(started.body.authUrl, 'https://zernio.test/oauth/instagram');
+  const redirect = new URL(zernio.redirects.at(-1)!);
+  assert.equal(redirect.origin + redirect.pathname, origin + '/zernio/callback');
+  const state = redirect.searchParams.get('state')!;
+  zernio.instagram
+    .get('sk_test_pusat_12345')!
+    .push({ _id: 'igacc2', username: 'kopisenja.dago', needsReconnection: false });
+  // Username dari URL diabaikan; yang dipakai data akun dari API Zernio.
+  const back = await request(app)
+    .get('/zernio/callback')
+    .query({ state, connected: 'instagram', accountId: 'igacc2', username: 'palsu' })
+    .expect(200);
+  assert.match(back.text, /http-equiv="refresh"/);
+  assert.match(decodeURIComponent(back.text.replaceAll('+', ' ')), /@kopisenja\.dago terhubung sebagai sesi ig-baru/);
+  const replay = await request(app).get('/zernio/callback').query({ state, accountId: 'igacc2' }).expect(200);
+  assert.match(decodeURIComponent(replay.text.replaceAll('+', ' ')), /kedaluwarsa/);
 });
 
 test('Incoming DM is answered by AI through Zernio, recorded like a number, and signatures are enforced', async () => {
@@ -381,12 +400,27 @@ test('Manual reply from the Instagram app pauses AI; disconnect and Zernio accou
   }).expect(200);
   const manager = await gateway.manager(account);
   await until(() => manager.detail('ig-shop').status === 'logged_out', 'sesi terputus');
-  // Hubungkan ulang meminta login Instagram lagi dan memulihkan sesi yang sama.
-  await api('post', '/api/instagram/connect')
+  // Izin yang kedaluwarsa di Zernio butuh login Instagram lagi; sesi yang sama dipulihkan.
+  zernio.instagram.get('sk_test_pusat_12345')![0].needsReconnection = true;
+  const login = await api('post', '/api/instagram/connect')
     .send({ zernioId: pusat, sessionId: 'ig-shop', reconnect: true })
     .expect(200);
+  assert.ok(login.body.authUrl);
+  zernio.instagram.get('sk_test_pusat_12345')![0].needsReconnection = false;
   const state = new URL(zernio.redirects.at(-1)!).searchParams.get('state')!;
   await request(app).get('/zernio/callback').query({ state, accountId: 'igacc1' }).expect(200);
+  assert.equal(manager.detail('ig-shop').status, 'connected');
+  // Bila akunnya masih aktif di Zernio, hubungkan ulang langsung tanpa login.
+  await webhook(pusat, {
+    id: 'disc-2',
+    event: 'account.disconnected',
+    account: { accountId: 'igacc1', profileId: 'prof-pusat_', platform: 'instagram', username: 'kopisenja.id' },
+  }).expect(200);
+  await until(() => manager.detail('ig-shop').status === 'logged_out', 'sesi terputus lagi');
+  const direct = await api('post', '/api/instagram/connect')
+    .send({ zernioId: pusat, sessionId: 'ig-shop', reconnect: true })
+    .expect(200);
+  assert.equal(direct.body.connected, true);
   assert.equal(manager.detail('ig-shop').status, 'connected');
   const webhookId = zernio.webhooks.get('sk_test_pusat_12345')![0]._id;
   await api('delete', '/api/instagram/zernio/' + pusat).expect(200);

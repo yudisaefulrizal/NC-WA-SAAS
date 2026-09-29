@@ -47,6 +47,9 @@ export function instagramRoutes(app: express.Express, { instagram }: { instagram
   app.delete('/api/instagram/zernio/:id', async (req, res) =>
     res.json(await instagram.deleteZernioAccount(res.locals.account.id, req.params.id)),
   );
+  app.get('/api/instagram/zernio/:id/instagram', async (req, res) =>
+    res.json(await instagram.instagramAccounts(res.locals.account.id, req.params.id)),
+  );
   app.post('/api/instagram/connect', async (req, res) =>
     res.json(await instagram.startConnect(res.locals.account.id, req.body)),
   );

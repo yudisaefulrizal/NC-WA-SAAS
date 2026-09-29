@@ -8,6 +8,7 @@ import { ApiError } from '../../../libraries/errors.js';
 export interface ZernioProfile {
   _id: string;
   name: string;
+  isDefault?: boolean;
 }
 export interface ZernioAccount {
   _id: string;
@@ -63,14 +64,6 @@ export async function zernio<T>(
 export async function listProfiles(key: string) {
   return (await zernio<{ profiles?: ZernioProfile[] }>(key, 'GET', '/v1/profiles?limit=100')).profiles ?? [];
 }
-export async function createProfile(key: string, name: string) {
-  const data = await zernio<{ profile?: ZernioProfile }>(key, 'POST', '/v1/profiles', {
-    name,
-    description: 'Dipakai NC-WA untuk Instagram DM',
-  });
-  if (!data.profile?._id) throw new ApiError(502, 'zernio_failed', 'Zernio tidak mengembalikan profil');
-  return data.profile;
-}
 export async function listWebhooks(key: string) {
   const data = await zernio<{ webhooks?: { _id: string; url: string; isActive?: boolean }[] }>(
     key,
@@ -79,17 +72,15 @@ export async function listWebhooks(key: string) {
   );
   return data.webhooks ?? [];
 }
-export async function createWebhook(
-  key: string,
-  input: { name: string; url: string; secret: string; profileId: string },
-) {
+// Webhook untuk seluruh akun Zernio klien, tanpa dibatasi profil: susunan profil adalah urusan klien, dan yang
+// dibalas NC-WA hanya akun Instagram yang dipasang sebagai sesi.
+export async function createWebhook(key: string, input: { name: string; url: string; secret: string }) {
   const data = await zernio<{ webhook?: { _id: string } }>(key, 'POST', '/v1/webhooks/settings', {
     name: input.name,
     url: input.url,
     secret: input.secret,
     events: ['message.received', 'message.sent', 'account.connected', 'account.disconnected'],
     isActive: true,
-    profileIds: [input.profileId],
   });
   if (!data.webhook?._id) throw new ApiError(502, 'zernio_failed', 'Zernio tidak mengembalikan webhook');
   return data.webhook._id;
@@ -106,8 +97,9 @@ export async function connectUrl(key: string, profileId: string, redirectUrl: st
     throw new ApiError(502, 'zernio_failed', 'Zernio tidak mengembalikan tautan login Instagram');
   return data.authUrl;
 }
-export async function listInstagramAccounts(key: string, profileId: string) {
-  const query = new URLSearchParams({ profileId, platform: 'instagram' });
+// Semua akun Instagram di akun Zernio klien, dari profil mana pun.
+export async function listInstagramAccounts(key: string) {
+  const query = new URLSearchParams({ platform: 'instagram' });
   return (await zernio<{ accounts?: ZernioAccount[] }>(key, 'GET', '/v1/accounts?' + query)).accounts ?? [];
 }
 // Mengirim DM. Pada Instagram, ID pengguna (IGSID) diterima Zernio sebagai conversationId, jadi tidak perlu

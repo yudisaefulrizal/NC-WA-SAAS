@@ -32,6 +32,7 @@ process.env.ZERNIO_API_URL = zernioOrigin + '/api';
 process.env.PAYMENT_ENCRYPTION_KEY ??= 'b'.repeat(64);
 // Zernio tiruan. Halaman /oauth berperan sebagai login Instagram: langsung mengalihkan balik ke NC-WA.
 let redirect = '';
+const instagramAccounts = [{ _id: 'igacc1', platform: 'instagram', username: 'kopisenja.id', isActive: true }];
 const zernio = createServer(async (req, res) => {
   const url = new URL(req.url!, zernioOrigin);
   const json = (data: unknown) => {
@@ -42,7 +43,9 @@ const zernio = createServer(async (req, res) => {
   if (url.pathname === '/oauth') {
     const back = new URL(redirect);
     back.searchParams.set('connected', 'instagram');
-    back.searchParams.set('accountId', 'igacc1');
+    // Login berhasil: akun baru muncul di Zernio.
+    instagramAccounts.push({ _id: 'igacc2', platform: 'instagram', username: 'kopisenja.dago', isActive: true });
+    back.searchParams.set('accountId', 'igacc2');
     res.writeHead(302, { Location: back.toString() });
     return res.end();
   }
@@ -51,14 +54,13 @@ const zernio = createServer(async (req, res) => {
     return res.end('{"error":"Unauthorized"}');
   }
   const route = req.method + ' ' + url.pathname;
-  if (route === 'GET /api/v1/profiles') return json({ profiles: [{ _id: 'prof1', name: 'NC-WA' }] });
+  if (route === 'GET /api/v1/profiles') return json({ profiles: [{ _id: 'prof1', name: 'Default', isDefault: true }] });
   if (route === 'POST /api/v1/webhooks/settings') return json({ success: true, webhook: { _id: 'wh1' } });
   if (route === 'GET /api/v1/connect/instagram') {
     redirect = url.searchParams.get('redirect_url')!;
     return json({ authUrl: zernioOrigin + '/oauth' });
   }
-  if (route === 'GET /api/v1/accounts')
-    return json({ accounts: [{ _id: 'igacc1', platform: 'instagram', username: 'kopisenja.id', profileId: 'prof1' }] });
+  if (route === 'GET /api/v1/accounts') return json({ accounts: instagramAccounts });
   res.writeHead(404);
   res.end();
 });
@@ -130,16 +132,30 @@ try {
     await page.locator('#session-zernio').inputValue(),
     await page.locator('#session-zernio option').nth(1).getAttribute('value'),
   );
+  // Akun Instagram yang sudah ada di Zernio dipilih dan langsung terpasang, tanpa login.
+  const igSelect = page.locator('#session-instagram-account');
+  await igSelect.locator('option', { hasText: '@kopisenja.id' }).waitFor({ state: 'attached' });
+  assert.equal(await igSelect.inputValue(), 'igacc1');
   await dialog.locator('input[name="id"]').fill('ig-shop');
-  // Login Instagram tiruan mengalihkan balik; pesan hasil tampil di dashboard dan kartu sesi Instagram muncul.
+  await dialog.getByRole('button', { name: 'Hubungkan Instagram' }).click();
+  await page.locator('#message').filter({ hasText: '@kopisenja.id terhubung sebagai sesi ig-shop' }).waitFor();
+  assert.equal(await dialog.isVisible(), false);
+  // Akun baru: login Instagram tiruan mengalihkan balik; pesan hasil tampil di dashboard.
+  await openAddSession();
+  await dialog.getByText('Instagram DM', { exact: true }).click();
+  await igSelect.locator('option', { hasText: '(sesi ig-shop)' }).waitFor({ state: 'attached' });
+  await igSelect.selectOption('');
+  await dialog.locator('input[name="id"]').fill('ig-baru');
   await Promise.all([
     page.waitForURL(origin + '/dashboard/ai'),
     dialog.getByRole('button', { name: 'Hubungkan Instagram' }).click(),
   ]);
-  await page.locator('#message').filter({ hasText: '@kopisenja.id terhubung sebagai sesi ig-shop' }).waitFor();
-  const card = page.locator('.ai-session-card.selected').filter({ hasText: 'ig-shop' });
-  await card.waitFor();
-  assert.match(await card.innerText(), /@kopisenja\.id · Instagram/);
+  await page.locator('#message').filter({ hasText: '@kopisenja.dago terhubung sebagai sesi ig-baru' }).waitFor();
+  const card = page
+    .locator('.ai-session-card')
+    .filter({ hasText: 'ig-shop' })
+    .filter({ hasText: '@kopisenja.id · Instagram' });
+  assert.ok((await card.count()) > 0);
   await page.screenshot({ path: join(screenshots, 'instagram-connected-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   await openAddSession();
