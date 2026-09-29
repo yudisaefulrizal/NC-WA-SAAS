@@ -1,4 +1,4 @@
-// Metadata sesi WhatsApp per akun di storage/whatsapp/<akun>/<sesi>/: status, nomor, dan filter pesan.
+// Metadata sesi per akun di storage/whatsapp/<akun>/<sesi>/: kanal, status, nomor, dan filter pesan.
 // Penulisan per sesi diantrekan supaya tidak saling menimpa.
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -29,7 +29,8 @@ export class SessionStore {
       if (
         info.id !== entry.name ||
         !['connecting', 'connected', 'qr_required', 'logged_out'].includes(info.status) ||
-        !['all', 'private', 'group'].includes(info.filter)
+        !['all', 'private', 'group'].includes(info.filter) ||
+        (info.channel !== undefined && info.channel !== 'instagram')
       )
         throw new Error('Metadata session tidak valid');
       info.createdAt ??= (await stat(join(directory, 'session.json'))).birthtimeMs;

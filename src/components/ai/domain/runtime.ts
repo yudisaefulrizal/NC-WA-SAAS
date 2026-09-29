@@ -435,10 +435,13 @@ export async function handleMessage(
     }
     if (status === 'sent' && fallbackId && fallback && prepared.fallbackNotify && prepared.fallbackNumber)
       try {
+        // Nomor tim adalah nomor WhatsApp; tiket dari sesi Instagram diberitahukan lewat sesi WhatsApp akun ini.
+        const notifier = conversations.notifierSession(manager, session);
+        if (!notifier) throw new Error('Tidak ada sesi WhatsApp tersambung untuk notifikasi tim');
         const notification = await sendBilled(
           account,
           manager,
-          session,
+          notifier,
           'text',
           {
             to: prepared.fallbackNumber,
@@ -446,7 +449,7 @@ export async function handleMessage(
               'Konfirmasi diperlukan [' +
               fallbackId +
               ']\\nPelanggan: ' +
-              message.from +
+              (notifier === session ? message.from : customerLabel(manager, session, message)) +
               '\\nPertanyaan: ' +
               fallback.question +
               '\\nKonteks: ' +
@@ -457,13 +460,13 @@ export async function handleMessage(
           },
           'fallback_team_' + id,
         );
-        await recordOutgoing(account, session, {
+        await recordOutgoing(account, notifier, {
           customer: prepared.fallbackNumber,
           messageId: notification.messageId,
           origin: 'system',
           text: 'Konfirmasi diperlukan [' + fallbackId + ']',
         }).catch(() => {});
-        await fallbacksSql.setNotificationMessage(db, [notification.messageId, fallbackId]);
+        await fallbacksSql.setNotificationMessage(db, [notification.messageId, notifier, fallbackId]);
       } catch {
         await fallbacksSql.markFailed(db, [fallbackId]);
       }
@@ -528,4 +531,9 @@ async function storeIncoming(account: string, profile: string, message: Incoming
     console.error('Lampiran pelanggan tidak dapat disimpan.');
     return undefined;
   }
+}
+// Pelanggan Instagram disebut dengan nama dan sesinya, karena ID penggunanya tidak bisa dihubungi dari WhatsApp.
+function customerLabel(manager: SessionManager, session: string, message: IncomingMessage) {
+  const via = manager.detail(session).phone ?? session;
+  return (message.pushName ? message.pushName + ' ' : '') + '(DM Instagram ' + via + ')';
 }

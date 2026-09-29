@@ -75,6 +75,8 @@ export async function migrateAI() {
     ['ai_agent_failures', 'prompt', 'JSON NULL'],
     ['ai_agent_failures', 'raw_output', 'MEDIUMTEXT NULL'],
     ['ai_agent_failures', 'router_context', 'VARCHAR(200) NULL'],
+    // Sesi WhatsApp yang mengirim notifikasi tim, bila berbeda dari sesi pelanggan (tiket dari sesi Instagram).
+    ['ai_fallbacks', 'notify_session_id', 'VARCHAR(64) COLLATE utf8mb4_bin NULL'],
   ]) {
     const [columns] = await db.execute<any[]>(
       'SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?',

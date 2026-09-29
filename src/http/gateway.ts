@@ -1,5 +1,6 @@
-// Gateway untuk klien API dan dashboard: SessionManager per akun, autentikasi lewat API key atau cookie, rute sesi,
-// AI, dan Auto Share, serta penyambungan event WhatsApp ke riwayat chat, webhook, AI, dan Auto Share.
+// Gateway untuk klien API dan dashboard: SessionManager per akun (sesi WhatsApp dan Instagram), autentikasi lewat
+// API key atau cookie, rute sesi, AI, dan Auto Share, serta penyambungan event pesan ke riwayat chat, webhook, AI,
+// dan Auto Share.
 import {
   sessionRoutes,
   sessionDetailRoutes,
@@ -21,6 +22,7 @@ import {
   updateStatus,
 } from '../components/ai/index.js';
 import { autoShareRouter, createAutoShare, AssetStore } from '../components/auto-share/index.js';
+import { instagram as defaultInstagram } from '../components/instagram/index.js';
 import { record } from '../libraries/validation.js';
 import express from 'express';
 import { join } from 'node:path';
@@ -39,6 +41,7 @@ export function createGateway(
   root = storageRoot,
   ai = defaultAI,
   referral = defaultReferral,
+  instagram = defaultInstagram,
 ) {
   const paths = storagePaths(root);
   const hooks = new TenantWebhooks();
@@ -48,7 +51,7 @@ export function createGateway(
     const m = await pending;
     return m
       .list()
-      .filter(s => s.status === 'connected' && s.phone)
+      .filter(s => s.status === 'connected' && s.phone && s.channel !== 'instagram')
       .map(s => s.phone as string);
   };
   const media = new Map<string, MediaStore>();
@@ -67,10 +70,15 @@ export function createGateway(
         id,
         (async () => {
           const store = new SessionStore(join(paths.whatsapp, id));
+          const registerSystemMessage = (session: string, messageId: string) =>
+            ai.registerSystemMessage(id, session, messageId);
+          // Sesi yang terdaftar sebagai Instagram tersambung lewat Zernio; sisanya WhatsApp.
           const result = new SessionManager(
-            connector
-              ? connector(id, store)
-              : baileysConnector(store, (session, messageId) => ai.registerSystemMessage(id, session, messageId)),
+            instagram.connector(
+              id,
+              connector ? connector(id, store) : baileysConnector(store, registerSystemMessage),
+              registerSystemMessage,
+            ),
             store,
           );
           const files = new MediaStore(join(paths.media, id), process.env.APP_ORIGIN ?? 'http://127.0.0.1:8067');
@@ -84,7 +92,8 @@ export function createGateway(
               event.event === 'session.status' &&
               event.status === 'connected' &&
               typeof event.phone === 'string' &&
-              event.phone
+              event.phone &&
+              result.detail(event.sessionId).channel !== 'instagram'
             )
               await referral.qualify(id, event.phone).catch(() => {});
           };
@@ -213,7 +222,23 @@ export function createGateway(
   const shareAssets = new AssetStore(paths.shareAssets, db);
   const autoShare = createAutoShare(manager, shareAssets);
   router.use('/auto-share', autoShareRouter(autoShare));
-  const routeContext = { pending, hooks, media, streams, ai };
+  // Menghapus sesi juga melepas akun Instagram-nya (bila ada) dari NC-WA.
+  const sessionAI = {
+    sessionProfiles: (account: string) => ai.sessionProfiles(account),
+    removeSession: async (account: string, session: string) => {
+      await ai.removeSession(account, session);
+      await instagram.forgetSession(account, session);
+    },
+  };
+  instagram.host = {
+    manager,
+    async removeSession(account, session) {
+      const m = await manager(account);
+      if (m.list().some(s => s.id === session)) await m.remove(session);
+      await sessionAI.removeSession(account, session);
+    },
+  };
+  const routeContext = { pending, hooks, media, streams, ai: sessionAI };
   sessionRoutes(router, routeContext);
   aiRoutes(router, { ai });
   sessionDetailRoutes(router, routeContext);
@@ -257,6 +282,7 @@ export function createGateway(
       autoShare.start();
     },
     refresh,
+    manager,
     health: () => ({ loadedAccounts: managers.size, pendingSends: [...pending.values()].reduce((a, b) => a + b, 0) }),
     revoke: (account: string, tag?: string) => {
       const stream = streams.get(account);

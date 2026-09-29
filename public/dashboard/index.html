@@ -26,6 +26,7 @@
     <link rel="stylesheet" href="/dashboard/css/screen-reader.css" />
     <link rel="stylesheet" href="/dashboard/css/ai-chat.css" />
     <link rel="stylesheet" href="/dashboard/css/ai-profiles.css" />
+    <link rel="stylesheet" href="/dashboard/css/instagram.css" />
   </head>
   <body>
     <header id="siteheader">
@@ -274,6 +275,7 @@
             </button>
             <div id="settings-menu-list" class="settings-menu-list" hidden>
               <button type="button" id="open-password" class="link-button">Ganti password</button
+              ><button type="button" id="open-zernio" class="link-button" data-open-zernio>Akun Zernio</button
               ><button type="button" id="logout" class="link-button">Keluar</button>
             </div>
           </div>
@@ -1420,15 +1422,74 @@
             <h2 id="add-title">Tambah sesi</h2>
             <button type="button" class="secondary" data-close="addconnection">Tutup</button>
           </div>
-          <form id="sessionform" class="inline">
+          <form id="sessionform" class="session-form">
+            <fieldset class="session-kinds">
+              <legend>Jenis sesi</legend>
+              <label class="session-kind"
+                ><input type="radio" name="kind" value="whatsapp" checked /><span
+                  ><strong>WhatsApp</strong><small>Scan QR dari WhatsApp → Perangkat tertaut.</small></span
+                ></label
+              ><label class="session-kind"
+                ><input type="radio" name="kind" value="instagram" /><span
+                  ><strong>Instagram DM</strong
+                  ><small
+                    >Lewat akun Zernio Anda. Akun Instagram harus Business atau Creator. Balasan memakai kredit yang
+                    sama dengan WhatsApp.</small
+                  ></span
+                ></label
+              >
+            </fieldset>
             <label
               >Nama sesi<input
                 name="id"
                 required
                 pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
                 maxlength="64"
-                placeholder="contoh: toko-utama" /></label
-            ><button>Hubungkan sesi</button>
+                placeholder="contoh: toko-utama"
+            /></label>
+            <div id="session-instagram" class="session-instagram" hidden>
+              <label
+                >Akun Zernio<select name="zernioId" id="session-zernio">
+                  <option value="">Pilih akun Zernio</option>
+                </select></label
+              >
+              <p id="session-zernio-empty" class="hint" hidden>Belum ada akun Zernio. Tambahkan dulu kunci API-nya.</p>
+              <button type="button" class="secondary" data-open-zernio>Kelola akun Zernio</button>
+            </div>
+            <button id="session-submit">Hubungkan sesi</button>
+          </form>
+        </dialog>
+        <dialog id="zernio-dialog" aria-labelledby="zernio-title">
+          <div class="modal-heading">
+            <h2 id="zernio-title">Akun Zernio</h2>
+            <button type="button" class="secondary" data-close="zernio-dialog">Tutup</button>
+          </div>
+          <p class="hint">
+            Instagram DM dihubungkan lewat akun Zernio milik Anda sendiri; biaya Zernio ditagih langsung oleh Zernio.
+            Boleh lebih dari satu akun Zernio, misalnya per cabang atau per brand.
+          </p>
+          <ul id="zernio-list" class="zernio-list"></ul>
+          <form id="zernio-form" class="zernio-form">
+            <h3>Tambah akun Zernio</h3>
+            <p class="hint">
+              Masuk ke zernio.com, buka Settings → API Keys, buat kunci baru, lalu tempel kuncinya (diawali
+              <code>sk_</code>) di bawah.
+            </p>
+            <label>Nama akun<input name="name" required maxlength="60" placeholder="contoh: Cabang Bandung" /></label
+            ><label
+              >Kunci API Zernio<input
+                name="apiKey"
+                type="password"
+                required
+                autocomplete="off"
+                pattern="sk_[A-Za-z0-9_\-]{8,300}"
+                placeholder="sk_…"
+            /></label>
+            <p class="hint">
+              NC-WA memeriksa kunci, memakai profil "NC-WA" di akun Zernio Anda, dan mendaftarkan webhook pesan masuk.
+              Kunci disimpan terenkripsi dan tidak ditampilkan lagi.
+            </p>
+            <button>Simpan &amp; periksa</button>
           </form>
         </dialog>
         <dialog id="pairing" aria-label="Hubungkan WhatsApp">
@@ -2218,6 +2279,7 @@ X-API-Key: KUNCI_ANDA   # header bebas, opsional
     </main>
     <footer>NC-WA · Integrasi WhatsApp untuk alur kerja Anda</footer>
     <script src="/dashboard/js/core.js" defer></script>
+    <script src="/dashboard/js/pages/instagram.js" defer></script>
     <script src="/dashboard/js/pages/paket.js" defer></script>
     <script src="/dashboard/js/pages/admin.js" defer></script>
     <script src="/dashboard/js/pages/ai.js" defer></script>

@@ -9,8 +9,12 @@ import { ApiError } from '../../../libraries/errors.js';
 import { validateSessionId } from '../data-access/session-store.js';
 
 export type Status = 'qr_required' | 'connecting' | 'connected' | 'logged_out';
+// Sesi tanpa channel adalah WhatsApp. Sesi Instagram (lewat Zernio) memakai engine yang sama; `phone` berisi
+// @username akunnya dan nomor pelanggannya adalah ID pengguna Instagram.
+export type Channel = 'instagram';
 export interface SessionInfo {
   id: string;
+  channel?: Channel;
   createdAt?: number;
   serviceActive?: boolean;
   status: Status;
@@ -95,8 +99,16 @@ export class SessionManager {
     return session;
   }
   detail(id: string): SessionInfo {
-    const { status, phone, filter, createdAt, serviceActive } = this.get(id);
-    return { id, status, phone, filter, createdAt, serviceActive: serviceActive !== false };
+    const { status, phone, filter, createdAt, serviceActive, channel } = this.get(id);
+    return {
+      id,
+      ...(channel ? { channel } : {}),
+      status,
+      phone,
+      filter,
+      createdAt,
+      serviceActive: serviceActive !== false,
+    };
   }
   qr(id: string) {
     const session = this.get(id);
@@ -107,12 +119,13 @@ export class SessionManager {
   list() {
     return [...this.sessions.keys()].map(id => this.detail(id));
   }
-  async create(id: unknown) {
+  async create(id: unknown, channel?: Channel) {
     SessionManager.validateId(id);
     if (this.stopped) throw new ApiError(503, 'unavailable', 'Engine sedang berhenti');
     if (this.sessions.has(id)) throw new ApiError(409, 'session_exists', `Session ${id} sudah ada`);
     const session: Session = {
       id,
+      ...(channel ? { channel } : {}),
       createdAt: Date.now(),
       serviceActive: true,
       status: 'connecting',

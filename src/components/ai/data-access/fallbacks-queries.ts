@@ -4,7 +4,7 @@ import type { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import type { Executor, SqlValue } from '../../../libraries/db.js';
 export function lockWaitingByNotification(c: Executor, params: SqlValue[]) {
   return c.execute<RowDataPacket[]>(
-    `SELECT * FROM ai_fallbacks WHERE account_id=? AND session_id=? AND status='waiting' AND (notification_message_id=? OR id=?) FOR UPDATE`,
+    `SELECT * FROM ai_fallbacks WHERE account_id=? AND (session_id=? OR notify_session_id=?) AND status='waiting' AND (notification_message_id=? OR id=?) FOR UPDATE`,
     params,
   );
 }
@@ -63,7 +63,14 @@ export function setConfirmationMessage(c: Executor, params: SqlValue[]) {
   return c.execute('UPDATE ai_fallbacks SET confirmation_message_id=? WHERE id=?', params);
 }
 export function setNotificationMessage(c: Executor, params: SqlValue[]) {
-  return c.execute('UPDATE ai_fallbacks SET notification_message_id=? WHERE id=?', params);
+  return c.execute('UPDATE ai_fallbacks SET notification_message_id=?,notify_session_id=? WHERE id=?', params);
+}
+// Tiket dari sesi lain (Instagram) yang notifikasinya dikirim lewat sesi WhatsApp ini ke nomor tim tersebut.
+export function findRelayedWaiting(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    "SELECT id FROM ai_fallbacks WHERE account_id=? AND notify_session_id=? AND session_id<>notify_session_id AND fallback_number=? AND status='waiting' LIMIT 1",
+    params,
+  );
 }
 export function markFailed(c: Executor, params: SqlValue[]) {
   return c.execute("UPDATE ai_fallbacks SET status='failed' WHERE id=?", params);

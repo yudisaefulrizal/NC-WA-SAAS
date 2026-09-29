@@ -588,11 +588,12 @@ async function sessions() {
       new Option(label, ''),
       ...data
         .filter(s => s.serviceActive !== false)
-        .map(s => new Option(s.id + (s.phone ? ' · ' + s.phone : ''), s.id)),
+        .map(s => new Option(s.id + (s.phone ? ' · ' + sessionAccountLabel(s) : ''), s.id)),
     );
     select.value = current;
   }
-  table('sessions', ['Sesi', 'Pesan', 'Nomor WhatsApp', 'Status', 'Tindakan'], data, s => {
+  table('sessions', ['Sesi', 'Pesan', 'Nomor / akun', 'Status', 'Tindakan'], data, s => {
+    const instagram = s.channel === 'instagram';
     const badge = document.createElement('span');
     badge.className = 'badge ' + (s.serviceActive === false ? 'inactive' : s.status);
     badge.textContent =
@@ -603,7 +604,9 @@ async function sessions() {
           ] || s.status;
     const actions = document.createElement('div');
     actions.className = 'row-actions';
-    if (s.serviceActive !== false && s.status !== 'connected')
+    if (instagram && s.serviceActive !== false && s.status === 'logged_out')
+      actions.append(button('Hubungkan ulang', () => reconnectInstagram(s)));
+    if (!instagram && s.serviceActive !== false && s.status !== 'connected')
       actions.append(
         button(s.status === 'logged_out' ? 'Pasang ulang' : 'Lihat QR', async () => {
           if (s.status === 'logged_out') await api('/sessions/' + encodeURIComponent(s.id) + '/reconnect', 'POST');
@@ -612,12 +615,13 @@ async function sessions() {
       );
     actions.append(
       button('Logout', async () => {
-        if (!confirm('Putuskan perangkat WhatsApp ini?')) return;
+        if (!confirm(instagram ? 'Putuskan Instagram ini dari NC-WA?' : 'Putuskan perangkat WhatsApp ini?')) return;
         await api('/sessions/' + encodeURIComponent(s.id) + '/logout', 'POST');
         await sessions();
       }),
       button('Hapus', async () => {
-        if (!confirm('Hapus sesi dan data koneksi perangkat ini?')) return;
+        if (!confirm(instagram ? 'Hapus sesi Instagram ini dari NC-WA?' : 'Hapus sesi dan data koneksi perangkat ini?'))
+          return;
         await api('/sessions/' + encodeURIComponent(s.id), 'DELETE');
         await sessions();
       }),
@@ -639,7 +643,8 @@ async function sessions() {
       choice.append(input, document.createTextNode(label));
       filters.append(choice);
     }
-    return [s.id, filters, s.phone || '—', badge, actions];
+    // DM Instagram tidak punya grup, jadi filter pesan hanya untuk WhatsApp.
+    return [s.id, instagram ? '—' : filters, sessionAccountLabel(s), badge, actions];
   });
 }
 async function pair(id) {
@@ -674,7 +679,8 @@ $('closeqr').onclick = closeQr;
 $('refreshsessions').onclick = () => run(sessions);
 $('refreshusage').onclick = () => run(usage);
 form('sessionform', async data => {
-  await api('/sessions', 'POST', data);
+  if (data.kind === 'instagram') return connectInstagram(data.id, data.zernioId, false);
+  await api('/sessions', 'POST', { id: data.id });
   await sessions();
   $('sessionform').reset();
   $('addconnection').close();

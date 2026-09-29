@@ -1,0 +1,78 @@
+/* Instagram DM lewat Zernio: pilihan jenis sesi di dialog Tambah sesi dan daftar akun Zernio. */
+.session-form {
+  display: grid;
+  gap: 12px;
+}
+.session-kinds {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.session-kinds legend {
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.session-kind {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+}
+.session-kind:has(input:checked) {
+  border-color: var(--green);
+}
+.session-kind input {
+  width: auto;
+  flex: none;
+  margin: 3px 0 0;
+  box-shadow: none;
+}
+.session-kind span {
+  display: grid;
+  gap: 2px;
+}
+.session-kind small {
+  font-weight: 400;
+}
+.session-instagram {
+  display: grid;
+  gap: 6px;
+}
+.session-instagram .secondary {
+  justify-self: start;
+}
+.zernio-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 10px;
+}
+.zernio-list > li {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+}
+.zernio-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.zernio-head strong {
+  flex-grow: 1;
+}
+.zernio-form {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.zernio-form h3 {
+  margin: 0;
+}

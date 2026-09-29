@@ -19,6 +19,7 @@ import { referral as defaultReferral, referralRoutes, referralAdminRoutes } from
 import { publicAccountRoutes, sessionAuth, accountRoutes, accountAdminRoutes } from '../components/account/index.js';
 import { billingPublicRoutes, billingRoutes, billingAdminRoutes } from '../components/billing/index.js';
 import { assetPublicRoutes } from '../components/auto-share/index.js';
+import { instagram, instagramPublicRoutes, instagramRoutes } from '../components/instagram/index.js';
 
 export function createApp(gateway = defaultGateway, payments = defaultPayments, referral = defaultReferral) {
   const app = express();
@@ -35,6 +36,8 @@ export function createApp(gateway = defaultGateway, payments = defaultPayments, 
   app.disable('x-powered-by');
   app.set('trust proxy', process.env.TRUST_PROXY_HOPS ? Number(process.env.TRUST_PROXY_HOPS) : false);
   app.use(helmet());
+  // Webhook Zernio membaca body mentah untuk tanda tangannya, jadi dipasang sebelum parser JSON.
+  instagramPublicRoutes(app, { instagram });
   // Definisi graf Editor profil bisa jauh melewati 16 KB.
   const normalJson = express.json({ limit: '16kb' }),
     builderJson = express.json({ limit: '128kb' });
@@ -75,6 +78,7 @@ export function createApp(gateway = defaultGateway, payments = defaultPayments, 
   billingRoutes(app, { payments, gateway });
   aiAccountRoutes(app, {});
   builderAccountRoutes(app);
+  instagramRoutes(app, { instagram });
   referralRoutes(app, { referral });
   app.use('/api/admin', (_req, res, next) => {
     if (res.locals.account.role !== 'owner') {

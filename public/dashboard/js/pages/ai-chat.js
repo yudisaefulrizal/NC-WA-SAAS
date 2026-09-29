@@ -4,6 +4,8 @@ const chat = {
   id: '',
   list: [],
   contacts: new Map(),
+  handles: new Map(),
+  instagram: false,
   saved: new Set(),
   filter: 'all',
   search: '',
@@ -20,7 +22,9 @@ const chatTick = {
 };
 const chatOrigins = { ai: 'AI', manual: 'Manual', api: 'API', system: 'Sistem' };
 // Nomor Indonesia ditampilkan sebagai +62 812-3456-7890; nomor lain apa adanya.
+// Pelanggan Instagram tidak punya nomor; yang ditampilkan @username-nya.
 function chatNumber(customer) {
+  if (chat.handles.has(customer)) return chat.handles.get(customer);
   if (!customer.startsWith('62')) return customer;
   const rest = customer.slice(2);
   return '+62 ' + [rest.slice(0, 3), rest.slice(3, 7), rest.slice(7)].filter(Boolean).join('-');
@@ -70,9 +74,11 @@ async function loadConversations() {
   const id = $('ai-session').value,
     generation = assistantLoad;
   if (!id || aiView !== 'sessions') return;
-  const [rows, savedContacts] = await Promise.all([
+  const instagram = aiSessions.find(s => s.id === id)?.channel === 'instagram';
+  const [rows, savedContacts, instagramContacts] = await Promise.all([
     api('/sessions/' + encodeURIComponent(id) + '/ai/chats'),
-    api('/auto-share/contacts'),
+    instagram ? [] : api('/auto-share/contacts'),
+    instagram ? api('/api/instagram/contacts?session=' + encodeURIComponent(id)) : [],
   ]);
   if (id !== $('ai-session').value || generation !== assistantLoad) return;
   if (chat.id !== id) {
@@ -85,6 +91,10 @@ async function loadConversations() {
   const number = c => String(c.nomor).replace(/@s\.whatsapp\.net$/, '');
   chat.saved = new Set(savedContacts.map(number));
   chat.contacts = new Map(savedContacts.filter(c => c.nama).map(c => [number(c), c.nama]));
+  chat.instagram = instagram;
+  chat.handles = new Map(instagramContacts.filter(c => c.username).map(c => [c.customer, '@' + c.username]));
+  for (const c of instagramContacts)
+    if (c.name || c.username) chat.contacts.set(c.customer, c.name || '@' + c.username);
   renderChatList();
   if (chat.active) await loadChatMessages();
   else renderChatView();
@@ -216,7 +226,8 @@ function renderChatView() {
   $('chat-status').textContent = label;
   $('chat-pause').textContent = current.paused ? 'Lanjutkan AI' : 'Jeda AI';
   $('chat-full-auto').checked = Boolean(current.full_auto);
-  $('chat-save-contact').hidden = chat.saved.has(current.customer);
+  // Kontak Auto Share adalah nomor WhatsApp; pelanggan Instagram tidak bisa disimpan ke sana.
+  $('chat-save-contact').hidden = chat.saved.has(current.customer) || chat.instagram;
   $('chat-context').hidden = !current.router_context;
   $('chat-context-value').textContent = current.router_context || '';
   const nodes = [];

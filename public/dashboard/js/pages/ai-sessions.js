@@ -1,4 +1,5 @@
-// Asisten AI, carousel sesi: kartu nomor WhatsApp, slot tambah/upgrade, geser, dan penyesuaian lebar layar.
+// Asisten AI, carousel sesi: kartu sesi WhatsApp dan Instagram, slot tambah/upgrade, geser, dan penyesuaian lebar
+// layar.
 const addIcon =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const upgradeIcon =
@@ -91,6 +92,11 @@ function buildSessionCard(s, offset) {
     status.onclick = e => {
       e.stopPropagation();
       run(async () => {
+        // Sesi Instagram tidak memakai QR; yang terputus dihubungkan ulang lewat login Instagram di Zernio.
+        if (s.channel === 'instagram') {
+          if (s.status === 'logged_out') await reconnectInstagram(s);
+          return;
+        }
         if (s.status === 'logged_out') await api('/sessions/' + encodeURIComponent(s.id) + '/reconnect', 'POST');
         await pair(s.id);
       });
@@ -101,7 +107,7 @@ function buildSessionCard(s, offset) {
   const name = document.createElement('strong');
   name.textContent = s.id;
   const phone = document.createElement('small');
-  phone.textContent = s.phone || '—';
+  phone.textContent = sessionAccountLabel(s);
   nameBlock.append(name, phone);
   head.append(status, nameBlock);
   const foot = document.createElement('div');

@@ -33,11 +33,13 @@ export async function handleFallbackReply(
   message: IncomingMessage,
 ) {
   const [settings] = await assistantsSql.findFallbackNumber(db, [account, session, message.from]);
-  if (!settings[0]?.fallback_number) return false;
+  const [relayed] = await fallbacksSql.findRelayedWaiting(db, [account, session, message.from]);
+  if (!settings[0]?.fallback_number && !relayed[0]) return false;
   const ticketId = message.text.match(/\b(FB-[A-Z0-9]{8,48})\b/i)?.[1]?.toUpperCase();
   const ticket = await transaction(async c => {
     const [rows] = await fallbacksSql.lockWaitingByNotification(c, [
       account,
+      session,
       session,
       message.quotedMessageId ?? '',
       ticketId ?? '',
@@ -48,19 +50,21 @@ export async function handleFallbackReply(
     return row;
   });
   if (!ticket) return true;
+  // Jawaban dikirim ke sesi pelanggan pada tiket, yang bisa berbeda dari sesi WhatsApp tempat tim membalas.
+  const target = String(ticket.session_id);
   const answer = 'Berikut konfirmasi dari tim: ' + message.text.trim();
   let sent = false;
   try {
     const relayed = await sendBilled(
       account,
       manager,
-      session,
+      target,
       'text',
       { to: ticket.customer, text: answer },
       'fallback_resume_' + digest(message.messageId).slice(0, 64),
     );
     sent = true;
-    await recordOutgoing(account, session, {
+    await recordOutgoing(account, target, {
       customer: ticket.customer,
       messageId: relayed.messageId,
       origin: 'manual',
@@ -71,7 +75,7 @@ export async function handleFallbackReply(
     await fallbacksSql.updateResolution(c, [sent ? 'resolved' : 'failed', sent, ticket.id]);
     if (!sent) return;
     const [limits] = await settingsSql.shareMemoryLimit(c);
-    const [rows] = await conversationsSql.lockMessages(c, [account, session, ticket.customer]);
+    const [rows] = await conversationsSql.lockMessages(c, [account, target, ticket.customer]);
     if (rows[0])
       await conversationsSql.updateMessagesAndRevision(c, [
         JSON.stringify(
@@ -80,7 +84,7 @@ export async function handleFallbackReply(
           ),
         ),
         account,
-        session,
+        target,
         ticket.customer,
       ]);
   });
@@ -143,8 +147,18 @@ export async function answerFallback(
   });
   return { ok: sent, status: sent ? 'resolved' : 'failed' };
 }
+// Sesi yang mengirim notifikasi fallback ke nomor tim: sesi itu sendiri untuk WhatsApp; untuk sesi Instagram, sesi
+// WhatsApp tersambung yang paling awal dibuat di akun yang sama.
+export function notifierSession(manager: SessionManager, session: string) {
+  if (manager.detail(session).channel !== 'instagram') return session;
+  return manager
+    .list()
+    .filter(s => s.channel !== 'instagram' && s.status === 'connected' && s.serviceActive !== false)
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || a.id.localeCompare(b.id))[0]?.id;
+}
 export async function manualOutgoing(svc: AIService, account: string, session: string, message: IncomingMessage) {
-  if (message.isGroup || !/^[1-9][0-9]{5,14}$/.test(message.from)) return;
+  // Hingga 20 digit: pelanggan sesi Instagram dikenali dari ID penggunanya.
+  if (message.isGroup || !/^[1-9][0-9]{5,19}$/.test(message.from)) return;
   await transaction(async c => {
     await lockAccount(c, account);
     const [known] = await messageOriginsSql.find(c, [account, session, message.messageId]);

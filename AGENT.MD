@@ -39,7 +39,7 @@ Struktur mengikuti Node.js Best Practices: kode dikelompokkan per komponen bisni
 | `test/` | Tes, dengan jalur yang sama seperti `src/` (`test/components/ai/profiles.test.ts` menguji `src/components/ai`); `test/components/ai/graph-fixture.ts` berisi graf uji bersama untuk tes runtime. |
 | `scripts/test/`, `scripts/checks/`, `scripts/tools/` | Runner tes terisolasi, pemeriksaan browser, dan utilitas (`owner`, `backup`, `restore-check`, `setup-*`, `bench`). |
 
-Komponen: `account` (akun, login, API key), `billing` (paket, kredit WhatsApp, pembayaran, kirim berbayar), `whatsapp` (sesi Baileys, pesan, media, event, webhook), `ai` (Asisten AI, profil graf dan Editor profil), `auto-share`, dan `referral`.
+Komponen: `account` (akun, login, API key), `billing` (paket, kredit WhatsApp, pembayaran, kirim berbayar), `whatsapp` (sesi Baileys, pesan, media, event, webhook), `instagram` (Instagram DM lewat Zernio: akun Zernio klien, konektor sesi, webhook, alur hubungkan), `ai` (Asisten AI, profil graf dan Editor profil), `auto-share`, dan `referral`.
 
 **Aturan ketergantungan**
 - Arah panggilan: `entry-points` → `domain` → `data-access` → `libraries`. Jangan dibalik.
@@ -90,6 +90,13 @@ Komentar pembuka, import, tipe, fungsi yang diekspor, lalu helper internal.
 
 - **Kredit WhatsApp** dipesan dulu (reservasi) dengan idempotency key sebelum pesan dikirim (`billing/domain/outbound.ts`, `billing/domain/credits.ts`). Hasil kirim yang belum pasti tidak pernah dikirim ulang otomatis.
 - **Engine** (`whatsapp/domain/sessions.ts`): satu pemilik aktif per session. Login disimpan di `storage/whatsapp/<akun>/<sesi>/`, dan semua session dipulihkan saat startup.
+- **Instagram DM lewat Zernio** (`src/components/instagram/`):
+  - Sesi Instagram adalah sesi biasa di SessionManager dengan `channel: 'instagram'`; `phone` berisi `@username`. Gateway membungkus konektor WhatsApp dengan `instagram.connector()`: sesi yang ada di `instagram_channels` tersambung lewat Zernio, sisanya Baileys. Jadi AI, kredit, riwayat chat, dan batas sesi paket berlaku sama.
+  - Nomor pelanggan adalah ID pengguna Instagram (IGSID, angka hingga 20 digit), yang juga dipakai Zernio sebagai `conversationId` untuk mengirim. ID pesan Instagram diganti hash `ig_…` (`messageIdOf`) karena bisa melewati kolom riwayat chat.
+  - Klien boleh punya banyak akun Zernio (`instagram_zernio_accounts`, kunci dan secret webhook terenkripsi). Menambah akun memeriksa kunci, memakai/membuat profil "NC-WA", dan mendaftarkan webhook ke `APP_ORIGIN/zernio/webhook/<id>` (tanda tangan HMAC dari body mentah, dipasang sebelum parser JSON).
+  - Cookie login SameSite=strict tidak ikut saat Zernio mengalihkan balik, jadi `/zernio/callback` mengenali pemilik dari token state sekali pakai (di memori, 30 menit), mencocokkan akun Instagram ke API Zernio, lalu meneruskan ke dashboard dengan meta refresh.
+  - Fallback dari sesi Instagram diberitahukan lewat sesi WhatsApp tersambung paling awal di akun itu (`ai_fallbacks.notify_session_id`); balasan tim di WhatsApp diteruskan ke sesi pelanggan pada tiket.
+  - Belum diuji dengan akun Zernio dan Instagram sungguhan; tesnya memakai server Zernio tiruan. Balasan di luar jendela 24 jam Instagram ditolak Meta (belum memakai tag HUMAN_AGENT).
 - **Asisten AI**:
   - Semua profil AI adalah graf yang dibuat pemilik melalui Editor profil `/dashboard/admin/ai-builder` (profil statis CS Usaha, CS Lembaga Pendidikan, Tester AI, dan AI Studio sudah dihapus): definisi graf/skema disimpan di `ai_graph_profiles`, versi terbit di `ai_graph_versions`, dan record tenant di `ai_data_records`. Runtime di `domain/builder/engine.ts`; panduan kontrak ada di `docs/dynamic-ai-profiles-design.md`. Tidak perlu menambah tabel atau kode per profil.
   - Node data ada tiga: Data tabel (`data_table`, dulu `tool`), Data teks (`data_text`), dan Data isian (`data_form`), masing-masing untuk koleksi `kind` `list`, `text`, dan `form`; teks/isian disimpan sebagai satu record. Operasinya berjalan lewat satu adapter (`builder/record-tools.ts`): database di runtime dan Uji Coba, memori di simulasi. Semantik filter/kata kunci/urutan ada dua kali, di SQL (`graph-profiles-queries.ts`) dan JavaScript (`record-query.ts`); ubah keduanya bersamaan dan jalankan tes paritas di `builder-data.test.ts`.

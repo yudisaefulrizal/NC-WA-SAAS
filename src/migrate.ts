@@ -3,6 +3,7 @@
 import { migrateAutoShare } from './components/auto-share/index.js';
 import { migrateAI } from './components/ai/index.js';
 import { migrateReferral } from './components/referral/index.js';
+import { migrateInstagram } from './components/instagram/index.js';
 import { db } from './libraries/db.js';
 
 try {
@@ -83,6 +84,7 @@ try {
   await migrateAI();
   await migrateAutoShare();
   await migrateReferral();
+  await migrateInstagram();
   console.log('Migrasi fondasi dan AI selesai.');
 } finally {
   await db.end();

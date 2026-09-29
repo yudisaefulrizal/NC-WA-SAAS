@@ -28,4 +28,4 @@ show = async () => {
   nav.insertBefore($('docslink'), nav.querySelector('.settings-menu'));
 };
 
-void run(show);
+void run(show).then(showInstagramNotice);

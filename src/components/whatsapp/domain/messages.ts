@@ -10,8 +10,9 @@ export type Outbound =
 export function recipient(value: unknown): string {
   const to = requiredString(value, 'to', 80);
   if (/^[0-9]+(?:-[0-9]+)?@g\.us$/.test(to)) return to;
-  if (!/^[1-9][0-9]{5,14}$/.test(to))
-    throw new ApiError(400, 'invalid_request', 'to harus nomor internasional tanpa +');
+  // Hingga 20 digit karena ID pengguna Instagram (sesi Instagram) juga dipakai sebagai nomor tujuan.
+  if (!/^[1-9][0-9]{5,19}$/.test(to))
+    throw new ApiError(400, 'invalid_request', 'to harus nomor internasional tanpa + atau ID pengguna Instagram');
   return `${to}@s.whatsapp.net`;
 }
 export function readRecipient(value: unknown): string {

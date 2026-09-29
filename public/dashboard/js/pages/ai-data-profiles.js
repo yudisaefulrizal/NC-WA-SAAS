@@ -295,9 +295,10 @@ form('ai-attach-form', async data => {
 function renderAISessionFilters() {
   const filters = $('ai-session-filters'),
     session = aiSessions.find(s => s.id === $('ai-session').value);
-  filters.hidden = !session || aiView !== 'sessions';
+  // DM Instagram tidak punya grup, jadi filter pesan hanya untuk sesi WhatsApp.
+  filters.hidden = !session || aiView !== 'sessions' || session.channel === 'instagram';
   filters.replaceChildren();
-  if (!session) return;
+  if (!session || session.channel === 'instagram') return;
   filters.setAttribute('aria-label', 'Filter pesan ' + session.id);
   for (const [value, label] of Object.entries({ private: 'pribadi', group: 'grup', all: 'semua' })) {
     const choice = document.createElement('label'),

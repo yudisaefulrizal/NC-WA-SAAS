@@ -8,6 +8,6 @@ export type { IncomingMessage } from './domain/incoming.js';
 export { recipient } from './domain/messages.js';
 export type { MediaType, Outbound } from './domain/messages.js';
 export { SessionManager } from './domain/sessions.js';
-export type { Connector } from './domain/sessions.js';
+export type { Channel, Connection, Connector, SessionInfo, Update } from './domain/sessions.js';
 export { TenantWebhooks } from './domain/tenant-webhooks.js';
 export { sessionDetailRoutes, sessionRoutes } from './entry-points/routes.js';
