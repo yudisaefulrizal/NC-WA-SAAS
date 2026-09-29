@@ -4,7 +4,7 @@
 import { db } from '../../../libraries/db.js';
 import type { Connector, SessionManager } from '../../whatsapp/index.js';
 import { ChannelHub, channelConnector } from './channel-connection.js';
-import { finishConnect, startConnect } from './connect-flow.js';
+import { connectInstagram, reconnectInstagram } from './connect-flow.js';
 import { receiveWebhook } from './webhook-events.js';
 import * as accounts from './zernio-accounts.js';
 import * as channelsSql from '../data-access/channels-queries.js';
@@ -45,15 +45,18 @@ export class Instagram {
       await this.requireHost().removeSession(account, session);
     return accounts.deleteZernioAccount(account, id);
   }
-  async startConnect(account: string, body: unknown) {
-    return startConnect(account, await this.requireHost().manager(account), body);
+  async connect(account: string, body: unknown) {
+    return connectInstagram(account, await this.requireHost().manager(account), body);
   }
-  finishConnect(query: Record<string, unknown>) {
-    const host = this.requireHost();
-    return finishConnect(query, account => host.manager(account));
+  async reconnect(account: string, session: unknown) {
+    return reconnectInstagram(account, await this.requireHost().manager(account), session);
   }
   receiveWebhook(zernioId: string, raw: Buffer, signature: unknown) {
-    return receiveWebhook(this.hub, zernioId, raw, signature);
+    // Akun yang dihubungkan ulang di Zernio langsung menyambungkan lagi sesinya yang terputus.
+    return receiveWebhook(this.hub, zernioId, raw, signature, async (account, session) => {
+      const manager = await this.requireHost().manager(account);
+      if (manager.list().find(s => s.id === session)?.status === 'logged_out') await manager.reconnect(session);
+    });
   }
   async contacts(account: string, session: unknown) {
     if (typeof session !== 'string') return [];

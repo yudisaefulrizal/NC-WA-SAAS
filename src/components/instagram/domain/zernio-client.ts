@@ -88,15 +88,6 @@ export async function createWebhook(key: string, input: { name: string; url: str
 export async function deleteWebhook(key: string, id: string) {
   await zernio(key, 'DELETE', '/v1/webhooks/settings?webhookId=' + encodeURIComponent(id));
 }
-export async function connectUrl(key: string, profileId: string, redirectUrl: string) {
-  const query = new URLSearchParams({ profileId, redirect_url: redirectUrl });
-  const data = await zernio<{ authUrl?: string }>(key, 'GET', '/v1/connect/instagram?' + query);
-  // Tautan login wajib HTTPS; HTTP hanya diterima bila API Zernio-nya sendiri HTTP (server tiruan untuk uji).
-  const allowed = baseUrl().startsWith('http:') ? /^https?:\/\// : /^https:\/\//;
-  if (!data.authUrl || !allowed.test(data.authUrl))
-    throw new ApiError(502, 'zernio_failed', 'Zernio tidak mengembalikan tautan login Instagram');
-  return data.authUrl;
-}
 // Semua akun Instagram di akun Zernio klien, dari profil mana pun.
 export async function listInstagramAccounts(key: string) {
   const query = new URLSearchParams({ platform: 'instagram' });

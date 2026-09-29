@@ -38,7 +38,13 @@ interface WebhookPayload {
 const seen = new Set<string>();
 const mediaTypes: Record<string, MediaType> = { image: 'image', video: 'video', audio: 'audio', file: 'document' };
 
-export async function receiveWebhook(hub: ChannelHub, zernioId: string, raw: Buffer, signature: unknown) {
+export async function receiveWebhook(
+  hub: ChannelHub,
+  zernioId: string,
+  raw: Buffer,
+  signature: unknown,
+  reconnected: (account: string, session: string) => Promise<void>,
+) {
   if (!/^[0-9a-f-]{36}$/.test(zernioId)) throw new ApiError(404, 'not_found', 'Webhook tidak dikenal');
   const [rows] = await zernioSql.findById(db, [zernioId]);
   const row = rows[0];
@@ -55,14 +61,19 @@ export async function receiveWebhook(hub: ChannelHub, zernioId: string, raw: Buf
   }
   await zernioSql.touchEvent(db, [zernioId]);
   if (payload.id && seen.has(payload.id)) return;
-  await route(hub, zernioId, payload);
+  await route(hub, zernioId, payload, reconnected);
   // Dicatat setelah berhasil, supaya kiriman ulang Zernio masih diproses bila percobaan pertama gagal.
   if (payload.id) {
     seen.add(payload.id);
     if (seen.size > 5000) seen.delete(seen.values().next().value!);
   }
 }
-async function route(hub: ChannelHub, zernioId: string, payload: WebhookPayload) {
+async function route(
+  hub: ChannelHub,
+  zernioId: string,
+  payload: WebhookPayload,
+  reconnected: (account: string, session: string) => Promise<void>,
+) {
   const igAccount = payload.account?.accountId ?? payload.account?.id;
   if (!igAccount) return;
   const [channels] = await channelsSql.findByIgAccount(db, [zernioId, igAccount]);
@@ -76,8 +87,9 @@ async function route(hub: ChannelHub, zernioId: string, payload: WebhookPayload)
       hub.emit(account, session, { disconnected: 401 });
       return;
     case 'account.connected':
-      // Sesi yang sudah terputus tetap menunggu pemilik menekan "Hubungkan ulang"; di sini hanya status akunnya.
+      // Klien menghubungkan ulang akunnya di dashboard Zernio; sesi NC-WA-nya ikut tersambung lagi.
       await channelsSql.updateStatus(db, ['active', zernioId, igAccount]);
+      await reconnected(account, session);
       return;
     case 'message.received':
     case 'message.sent': {

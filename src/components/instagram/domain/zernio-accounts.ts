@@ -1,7 +1,7 @@
 // Akun Zernio milik klien (boleh lebih dari satu per akun NC-WA): menambah dengan memeriksa kunci dan mendaftarkan
-// webhook pesan masuk; memeriksa ulang, mengganti kunci, menghapus, dan daftar akun Instagram-nya. Profil Zernio
-// adalah urusan klien: NC-WA tidak membuat atau mengubahnya, hanya mencatat profil default sebagai tujuan akun
-// Instagram baru yang dihubungkan dari NC-WA.
+// webhook pesan masuk; memeriksa ulang, mengganti kunci, menghapus, dan daftar akun Instagram-nya. Profil dan login
+// Instagram adalah urusan klien di Zernio: NC-WA tidak membuat atau mengubahnya, hanya mencatat profil default untuk
+// mengenali bahwa kunci pengganti berasal dari akun Zernio yang sama.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { db } from '../../../libraries/db.js';
 import { decrypt, encrypt } from '../../../libraries/crypto.js';

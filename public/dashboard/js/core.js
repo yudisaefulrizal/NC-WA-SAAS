@@ -679,7 +679,7 @@ $('closeqr').onclick = closeQr;
 $('refreshsessions').onclick = () => run(sessions);
 $('refreshusage').onclick = () => run(usage);
 form('sessionform', async data => {
-  if (data.kind === 'instagram') return connectInstagram(data.id, data.zernioId, false, data.instagramId);
+  if (data.kind === 'instagram') return connectInstagram(data.id, data.zernioId, data.instagramId);
   await api('/sessions', 'POST', { id: data.id });
   await sessions();
   $('sessionform').reset();

@@ -1,6 +1,6 @@
 // Pemeriksaan browser Instagram DM lewat Zernio di /dashboard/ai: dialog Tambah sesi dengan pilihan Instagram,
-// menambah akun Zernio, alur login Instagram sampai kembali ke dashboard dengan pesan hasil, kartu sesi Instagram,
-// dan tata letak ponsel. Zernio dan halaman login Instagram adalah server tiruan.
+// menambah akun Zernio, memasang akun Instagram yang sudah ada di Zernio, kartu sesi Instagram, dan tata letak
+// ponsel. Zernio adalah server tiruan.
 import { chromium } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -30,9 +30,11 @@ const origin = 'http://127.0.0.1:' + port,
 process.env.APP_ORIGIN = origin;
 process.env.ZERNIO_API_URL = zernioOrigin + '/api';
 process.env.PAYMENT_ENCRYPTION_KEY ??= 'b'.repeat(64);
-// Zernio tiruan. Halaman /oauth berperan sebagai login Instagram: langsung mengalihkan balik ke NC-WA.
-let redirect = '';
-const instagramAccounts = [{ _id: 'igacc1', platform: 'instagram', username: 'kopisenja.id', isActive: true }];
+// Zernio tiruan: dua akun Instagram, satu di antaranya terputus di Zernio.
+const instagramAccounts = [
+  { _id: 'igacc1', platform: 'instagram', username: 'kopisenja.id', isActive: true },
+  { _id: 'igacc2', platform: 'instagram', username: 'kopisenja.dago', isActive: true, needsReconnection: true },
+];
 const zernio = createServer(async (req, res) => {
   const url = new URL(req.url!, zernioOrigin);
   const json = (data: unknown) => {
@@ -40,15 +42,6 @@ const zernio = createServer(async (req, res) => {
     res.end(JSON.stringify(data));
   };
   for await (const _ of req);
-  if (url.pathname === '/oauth') {
-    const back = new URL(redirect);
-    back.searchParams.set('connected', 'instagram');
-    // Login berhasil: akun baru muncul di Zernio.
-    instagramAccounts.push({ _id: 'igacc2', platform: 'instagram', username: 'kopisenja.dago', isActive: true });
-    back.searchParams.set('accountId', 'igacc2');
-    res.writeHead(302, { Location: back.toString() });
-    return res.end();
-  }
   if (req.headers.authorization !== 'Bearer sk_browser_check_1') {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     return res.end('{"error":"Unauthorized"}');
@@ -56,10 +49,6 @@ const zernio = createServer(async (req, res) => {
   const route = req.method + ' ' + url.pathname;
   if (route === 'GET /api/v1/profiles') return json({ profiles: [{ _id: 'prof1', name: 'Default', isDefault: true }] });
   if (route === 'POST /api/v1/webhooks/settings') return json({ success: true, webhook: { _id: 'wh1' } });
-  if (route === 'GET /api/v1/connect/instagram') {
-    redirect = url.searchParams.get('redirect_url')!;
-    return json({ authUrl: zernioOrigin + '/oauth' });
-  }
   if (route === 'GET /api/v1/accounts') return json({ accounts: instagramAccounts });
   res.writeHead(404);
   res.end();
@@ -140,22 +129,23 @@ try {
   await dialog.getByRole('button', { name: 'Hubungkan Instagram' }).click();
   await page.locator('#message').filter({ hasText: '@kopisenja.id terhubung sebagai sesi ig-shop' }).waitFor();
   assert.equal(await dialog.isVisible(), false);
-  // Akun baru: login Instagram tiruan mengalihkan balik; pesan hasil tampil di dashboard.
-  await openAddSession();
-  await dialog.getByText('Instagram DM', { exact: true }).click();
-  await igSelect.locator('option', { hasText: '(sesi ig-shop)' }).waitFor({ state: 'attached' });
-  await igSelect.selectOption('');
-  await dialog.locator('input[name="id"]').fill('ig-baru');
-  await Promise.all([
-    page.waitForURL(origin + '/dashboard/ai'),
-    dialog.getByRole('button', { name: 'Hubungkan Instagram' }).click(),
-  ]);
-  await page.locator('#message').filter({ hasText: '@kopisenja.dago terhubung sebagai sesi ig-baru' }).waitFor();
   const card = page
     .locator('.ai-session-card')
     .filter({ hasText: 'ig-shop' })
     .filter({ hasText: '@kopisenja.id · Instagram' });
   assert.ok((await card.count()) > 0);
+  // Akun yang sudah dipakai dan yang terputus di Zernio tidak bisa dipilih; tidak ada pilihan login dari NC-WA.
+  await openAddSession();
+  await dialog.getByText('Instagram DM', { exact: true }).click();
+  await igSelect.locator('option', { hasText: '(sesi ig-shop)' }).waitFor({ state: 'attached' });
+  assert.equal(
+    await igSelect
+      .locator('option', { hasText: '(terputus di Zernio)' })
+      .evaluate(o => (o as HTMLOptionElement).disabled),
+    true,
+  );
+  assert.equal(await igSelect.locator('option', { hasText: 'Login' }).count(), 0);
+  await dialog.getByRole('button', { name: 'Tutup' }).click();
   await page.screenshot({ path: join(screenshots, 'instagram-connected-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   await openAddSession();

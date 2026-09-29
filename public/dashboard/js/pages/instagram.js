@@ -1,19 +1,6 @@
 // Instagram DM lewat Zernio di dashboard: daftar dan pengelolaan akun Zernio, pilihan jenis sesi di dialog Tambah
-// sesi, alur hubungkan (ulang) Instagram, dan pesan hasil setelah kembali dari login Instagram.
-let zernioAccounts = [],
-  instagramNotice = '';
-// Hasil dari /zernio/callback dibawa lewat query; dibaca sekali lalu dibuang dari alamat.
-{
-  const params = new URLSearchParams(location.search);
-  if (params.has('instagram')) {
-    instagramNotice = params.get('pesan') || (params.get('instagram') === 'ok' ? 'Instagram terhubung.' : '');
-    history.replaceState(null, '', location.pathname);
-  }
-}
-function showInstagramNotice() {
-  if (instagramNotice) $('message').textContent = instagramNotice;
-  instagramNotice = '';
-}
+// sesi, dan memasang atau menyambungkan lagi akun Instagram. Login Instagram dilakukan klien di dashboard Zernio.
+let zernioAccounts = [];
 async function loadZernio() {
   zernioAccounts = await api('/api/instagram/zernio');
   renderZernio();
@@ -101,16 +88,16 @@ async function loadInstagramAccounts() {
   const accounts = await api('/api/instagram/zernio/' + encodeURIComponent(zernioId) + '/instagram');
   if (generation !== instagramLoad) return;
   select.replaceChildren(
+    new Option(accounts.length ? 'Pilih akun Instagram' : 'Belum ada Instagram di akun Zernio ini', ''),
     ...accounts.map(a => {
       const label =
-        '@' + a.username + (a.session ? ' (sesi ' + a.session + ')' : a.active ? '' : ' (perlu login ulang)');
+        '@' + a.username + (a.session ? ' (sesi ' + a.session + ')' : a.active ? '' : ' (terputus di Zernio)');
       const option = new Option(label, a.id);
-      option.disabled = Boolean(a.session);
+      option.disabled = Boolean(a.session) || !a.active;
       return option;
     }),
-    new Option('+ Login akun Instagram baru', ''),
   );
-  select.value = accounts.find(a => !a.session)?.id ?? '';
+  select.value = accounts.find(a => !a.session && a.active)?.id ?? '';
 }
 // Menampilkan isian yang sesuai jenis sesi; pilihan akun Zernio hanya wajib untuk Instagram.
 function syncSessionKind() {
@@ -118,31 +105,28 @@ function syncSessionKind() {
   $('session-instagram').hidden = !instagram;
   $('session-zernio').required = instagram;
   $('session-zernio').disabled = !instagram;
+  $('session-instagram-account').required = instagram;
+  $('session-instagram-account').disabled = !instagram;
   $('session-submit').textContent = instagram ? 'Hubungkan Instagram' : 'Hubungkan sesi';
   if (instagram) void run(loadZernio);
 }
-// Akun yang masih aktif di Zernio langsung terpasang; selain itu halaman login Instagram dari Zernio dibuka di tab
-// yang sama, dan Zernio mengalihkan balik ke /zernio/callback.
-async function connectInstagram(sessionId, zernioId, reconnect, instagramId) {
+async function connectInstagram(sessionId, zernioId, instagramId) {
   if (!zernioId) throw Error('Pilih akun Zernio terlebih dahulu.');
-  const result = await api('/api/instagram/connect', 'POST', {
-    sessionId,
-    zernioId,
-    reconnect,
-    ...(instagramId ? { instagramId } : {}),
-  });
-  if (result.authUrl) return location.assign(result.authUrl);
+  if (!instagramId) throw Error('Pilih akun Instagram. Tambahkan akunnya di dashboard Zernio bila belum ada.');
+  const result = await api('/api/instagram/connect', 'POST', { sessionId, zernioId, instagramId });
   $('addconnection').close();
   $('sessionform').reset();
   await sessions();
   if (typeof loadAI === 'function' && !$('ai').hidden) await loadAI();
   $('message').textContent = result.message;
 }
+// Menyambungkan lagi sesi yang terputus; bila akunnya masih terputus di Zernio, pesannya meminta klien
+// menghubungkannya ulang di dashboard Zernio dulu.
 async function reconnectInstagram(session) {
-  await loadZernio();
-  const owner = zernioAccounts.find(z => z.instagram.some(i => i.session === session.id));
-  if (!owner) throw Error('Akun Zernio untuk sesi ini tidak ditemukan. Hapus sesinya lalu hubungkan ulang.');
-  await connectInstagram(session.id, owner.id, true);
+  const result = await api('/api/instagram/sessions/' + encodeURIComponent(session.id) + '/reconnect', 'POST');
+  await sessions();
+  if (typeof loadAI === 'function' && !$('ai').hidden) await loadAI();
+  $('message').textContent = result.message;
 }
 // Label akun sebuah sesi untuk tabel dan kartu: nomor WhatsApp, atau @username dengan penanda Instagram.
 function sessionAccountLabel(s) {

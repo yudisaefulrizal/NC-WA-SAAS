@@ -1,5 +1,5 @@
-// Tes Instagram DM lewat Zernio dengan server Zernio tiruan: akun Zernio per klien (lebih dari satu), alur hubungkan
-// Instagram lewat state sekali pakai, DM masuk dijawab AI lewat Zernio, balasan manual menjeda AI, fallback
+// Tes Instagram DM lewat Zernio dengan server Zernio tiruan: akun Zernio per klien (lebih dari satu), memasang akun
+// Instagram yang sudah ada di Zernio tanpa login, DM masuk dijawab AI lewat Zernio, balasan manual menjeda AI, fallback
 // diberitahukan ke tim lewat WhatsApp dan jawabannya diteruskan ke DM, tanda tangan webhook, putus, dan hapus akun.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +36,7 @@ const zernio = {
   createdProfiles: 0,
   webhookBodies: [] as Record<string, unknown>[],
   webhooks: new Map<string, { _id: string; url: string; secret: string; isActive: boolean }[]>(),
-  redirects: [] as string[],
+  connectCalls: 0,
   sent: [] as { key: string; recipient: string; body: Record<string, unknown> }[],
   deleted: [] as string[],
   sequence: 0,
@@ -85,7 +85,7 @@ const server = createServer(async (req, res) => {
     return reply(200, { success: true });
   }
   if (route === 'GET /api/v1/connect/instagram') {
-    zernio.redirects.push(url.searchParams.get('redirect_url')!);
+    zernio.connectCalls++;
     return reply(200, { authUrl: 'https://zernio.test/oauth/instagram', state: 'x' });
   }
   if (route === 'GET /api/v1/accounts')
@@ -263,16 +263,20 @@ test('Zernio accounts: key checked, webhook registered without touching profiles
   assert.equal(zernio.webhooks.get('sk_test_pusat_12345')!.length, 1);
 });
 
-test('Connect flow: existing Instagram accounts attach directly, new ones log in with a one-time state', async () => {
+test('Connect: only Instagram accounts already connected in Zernio are attached; NC-WA never starts a login', async () => {
   await request(app).post('/sessions').set('X-API-Key', apiKey).send({ id: 'wa' }).expect(200);
+  zernio.instagram
+    .get('sk_test_pusat_12345')!
+    .push({ _id: 'igacc2', username: 'kopisenja.dago', needsReconnection: true });
   const listed = (await api('get', '/api/instagram/zernio/' + pusat + '/instagram').expect(200)).body;
-  assert.deepEqual(listed, [{ id: 'igacc1', username: 'kopisenja.id', active: true, session: null }]);
-  // Akun yang sudah ada di Zernio dipasang tanpa login ulang.
-  const direct = await api('post', '/api/instagram/connect')
+  assert.deepEqual(listed, [
+    { id: 'igacc1', username: 'kopisenja.id', active: true, session: null },
+    { id: 'igacc2', username: 'kopisenja.dago', active: false, session: null },
+  ]);
+  const connected = await api('post', '/api/instagram/connect')
     .send({ zernioId: pusat, sessionId: 'ig-shop', instagramId: 'igacc1' })
     .expect(200);
-  assert.deepEqual(direct.body, { connected: true, message: '@kopisenja.id terhubung sebagai sesi ig-shop.' });
-  assert.equal(zernio.redirects.length, 0);
+  assert.deepEqual(connected.body, { message: '@kopisenja.id terhubung sebagai sesi ig-shop.' });
   const sessions = (await request(app).get('/sessions').set('X-API-Key', apiKey).expect(200)).body;
   const ig = sessions.find((s: { id: string }) => s.id === 'ig-shop');
   assert.equal(ig.channel, 'instagram');
@@ -283,28 +287,18 @@ test('Connect flow: existing Instagram accounts attach directly, new ones log in
     sessionId: 'ig-dua',
     instagramId: 'igacc1',
   });
-  assert.equal(duplicate.status, 409);
-  assert.match(duplicate.body.message, /sudah terpasang sebagai sesi ig-shop/);
-  // Akun baru: login lewat Zernio, lalu dipasang saat dialihkan balik.
-  const started = await api('post', '/api/instagram/connect')
-    .send({ zernioId: pusat, sessionId: 'ig-baru' })
-    .expect(200);
-  assert.equal(started.body.authUrl, 'https://zernio.test/oauth/instagram');
-  const redirect = new URL(zernio.redirects.at(-1)!);
-  assert.equal(redirect.origin + redirect.pathname, origin + '/zernio/callback');
-  const state = redirect.searchParams.get('state')!;
-  zernio.instagram
-    .get('sk_test_pusat_12345')!
-    .push({ _id: 'igacc2', username: 'kopisenja.dago', needsReconnection: false });
-  // Username dari URL diabaikan; yang dipakai data akun dari API Zernio.
-  const back = await request(app)
-    .get('/zernio/callback')
-    .query({ state, connected: 'instagram', accountId: 'igacc2', username: 'palsu' })
-    .expect(200);
-  assert.match(back.text, /http-equiv="refresh"/);
-  assert.match(decodeURIComponent(back.text.replaceAll('+', ' ')), /@kopisenja\.dago terhubung sebagai sesi ig-baru/);
-  const replay = await request(app).get('/zernio/callback').query({ state, accountId: 'igacc2' }).expect(200);
-  assert.match(decodeURIComponent(replay.text.replaceAll('+', ' ')), /kedaluwarsa/);
+  assert.equal(duplicate.body.error, 'instagram_in_use');
+  // Akun yang terputus di Zernio harus dihubungkan ulang di Zernio dulu; tanpa pilihan akun tidak ada yang dipasang.
+  const disconnected = await api('post', '/api/instagram/connect').send({
+    zernioId: pusat,
+    sessionId: 'ig-dago',
+    instagramId: 'igacc2',
+  });
+  assert.equal(disconnected.body.error, 'instagram_disconnected');
+  const missing = await api('post', '/api/instagram/connect').send({ zernioId: pusat, sessionId: 'ig-dago' });
+  assert.equal(missing.status, 400);
+  assert.equal(zernio.connectCalls, 0);
+  await request(app).get('/zernio/callback').query({ state: 'x' }).expect(404);
 });
 
 test('Incoming DM is answered by AI through Zernio, recorded like a number, and signatures are enforced', async () => {
@@ -384,7 +378,7 @@ test('Fallback from an Instagram DM notifies the team on WhatsApp and relays the
   }, 'tiket selesai');
 });
 
-test('Manual reply from the Instagram app pauses AI; disconnect and Zernio account removal clean up', async () => {
+test('Manual reply pauses AI; reconnecting in Zernio restores the session; Zernio account removal cleans up', async () => {
   await webhook(pusat, dm('manual-1', 'Saya bantu cek ya kak', 'message.sent', { sentVia: 'human' })).expect(200);
   await until(async () => {
     const [rows] = await db.execute<any[]>(
@@ -400,27 +394,28 @@ test('Manual reply from the Instagram app pauses AI; disconnect and Zernio accou
   }).expect(200);
   const manager = await gateway.manager(account);
   await until(() => manager.detail('ig-shop').status === 'logged_out', 'sesi terputus');
-  // Izin yang kedaluwarsa di Zernio butuh login Instagram lagi; sesi yang sama dipulihkan.
+  // Selama akunnya masih terputus di Zernio, Hubungkan ulang di NC-WA ditolak dengan petunjuk.
   zernio.instagram.get('sk_test_pusat_12345')![0].needsReconnection = true;
-  const login = await api('post', '/api/instagram/connect')
-    .send({ zernioId: pusat, sessionId: 'ig-shop', reconnect: true })
-    .expect(200);
-  assert.ok(login.body.authUrl);
+  const refused = await api('post', '/api/instagram/sessions/ig-shop/reconnect');
+  assert.equal(refused.body.error, 'instagram_disconnected');
+  assert.match(refused.body.message, /dashboard Zernio/);
+  // Klien menghubungkan ulang di Zernio; webhook account.connected menyambungkan sesinya otomatis.
   zernio.instagram.get('sk_test_pusat_12345')![0].needsReconnection = false;
-  const state = new URL(zernio.redirects.at(-1)!).searchParams.get('state')!;
-  await request(app).get('/zernio/callback').query({ state, accountId: 'igacc1' }).expect(200);
-  assert.equal(manager.detail('ig-shop').status, 'connected');
-  // Bila akunnya masih aktif di Zernio, hubungkan ulang langsung tanpa login.
+  await webhook(pusat, {
+    id: 'conn-1',
+    event: 'account.connected',
+    account: { accountId: 'igacc1', profileId: 'prof-pusat_', platform: 'instagram', username: 'kopisenja.id' },
+  }).expect(200);
+  await until(() => manager.detail('ig-shop').status === 'connected', 'sesi tersambung lagi dari webhook');
+  // Tombol Hubungkan ulang juga menyambungkan bila akunnya sudah aktif di Zernio.
   await webhook(pusat, {
     id: 'disc-2',
     event: 'account.disconnected',
     account: { accountId: 'igacc1', profileId: 'prof-pusat_', platform: 'instagram', username: 'kopisenja.id' },
   }).expect(200);
   await until(() => manager.detail('ig-shop').status === 'logged_out', 'sesi terputus lagi');
-  const direct = await api('post', '/api/instagram/connect')
-    .send({ zernioId: pusat, sessionId: 'ig-shop', reconnect: true })
-    .expect(200);
-  assert.equal(direct.body.connected, true);
+  const direct = await api('post', '/api/instagram/sessions/ig-shop/reconnect').expect(200);
+  assert.deepEqual(direct.body, { message: '@kopisenja.id terhubung kembali.' });
   assert.equal(manager.detail('ig-shop').status, 'connected');
   const webhookId = zernio.webhooks.get('sk_test_pusat_12345')![0]._id;
   await api('delete', '/api/instagram/zernio/' + pusat).expect(200);
