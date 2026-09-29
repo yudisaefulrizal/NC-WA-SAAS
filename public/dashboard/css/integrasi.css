@@ -1,0 +1,201 @@
+/* Halaman Integrasi: jatah sesi, peringatan koneksi terputus, daftar koneksi semua platform, dan akun penyedia. */
+#integrasi {
+  display: grid;
+  gap: 18px;
+}
+#integrasi[hidden] {
+  display: none;
+}
+.integrations-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+.integrations-head .label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.integrations-head > div {
+  text-align: right;
+}
+.integrations-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: #fff5e6;
+  border: 1px solid #f0d3a6;
+  color: #5c3a0a;
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.integrations-alert[hidden] {
+  display: none;
+}
+.integrations-alert strong {
+  background: #fde2bd;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+.integrations-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.integrations-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.integrations-card-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+.integrations-card-head .hint {
+  margin: 2px 0 0;
+  max-width: 640px;
+}
+.integrations-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#integrasi .integrations-filters button {
+  background: #fff;
+  color: #42574e;
+  border-color: var(--line);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+#integrasi .integrations-filters button[aria-pressed='true'] {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
+.integration-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.integration-name div {
+  display: grid;
+}
+.integration-name small {
+  color: var(--muted);
+}
+.integration-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.integration-icon.whatsapp {
+  background: #e1f4ea;
+  color: #128c4f;
+}
+.integration-icon.instagram {
+  background: #fbe9f2;
+  color: #a3245f;
+}
+#integrasi .row-actions button {
+  background: #fff;
+  color: #42574e;
+  border-color: var(--line);
+  padding: 7px 12px;
+  font-size: 13px;
+}
+#integrasi .row-actions button:hover {
+  background: #f0f4f2;
+}
+#integrasi .row-actions button.danger {
+  color: #a8231a;
+  border-color: #efc9c4;
+}
+.integrations-providers {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+.integration-provider {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+.integration-provider .hint {
+  margin: 0;
+}
+.integration-provider-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.integration-provider-head strong {
+  flex-grow: 1;
+}
+/* Di ponsel setiap koneksi menjadi kartu: tabel lima kolom terlalu sempit untuk dibaca. */
+@media (max-width: 640px) {
+  #integrations-list {
+    overflow: visible;
+  }
+  #integrations-list table,
+  #integrations-list tbody,
+  #integrations-list tr,
+  #integrations-list td {
+    display: block;
+    width: auto;
+    min-width: 0;
+  }
+  #integrations-list thead {
+    display: none;
+  }
+  #integrations-list tr {
+    border-bottom: 1px solid var(--line);
+    padding: 12px 0;
+  }
+  #integrations-list td {
+    border: 0;
+    padding: 3px 0;
+  }
+  #integrations-list td:nth-child(2),
+  #integrations-list td:nth-child(3) {
+    padding-left: 46px;
+    font-size: 13px;
+  }
+  #integrations-list td:nth-child(4) {
+    padding-left: 46px;
+  }
+  #integrations-list td:nth-child(5) .row-actions {
+    padding-top: 6px;
+  }
+  .integrations-head {
+    justify-content: space-between;
+  }
+  .integrations-head > div {
+    text-align: left;
+  }
+}
+#integrasi .row-actions {
+  flex-wrap: wrap;
+}
+.integration-provider-head code {
+  overflow-wrap: anywhere;
+}

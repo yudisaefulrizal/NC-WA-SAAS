@@ -307,6 +307,7 @@ function startShareRealtime() {
     }
     if (data.event === 'message') recordReceivedTest(data);
     chatRealtime(data);
+    inboxRealtime(data);
     if (data.event !== 'auto_share.contact_added' || $('dashboard').hidden || $('auto-share').hidden) return;
     void run(async () => {
       await loadAutoShare();
@@ -374,6 +375,8 @@ async function show() {
       webhooks(),
       paymentList(),
       loadAI(),
+      loadIntegrations(),
+      loadInbox(),
       loadAutoShare(),
       loadReferral(),
     ]);
@@ -430,13 +433,14 @@ function navigate() {
   const owner = !$('adminlink').hidden;
   const allowed = owner
     ? ['admin', 'dokumentasi']
-    : ['nomor', 'uji-pesan', 'ai', 'auto-share', 'integrasi', 'dokumentasi', 'paket', 'referral'];
+    : ['nomor', 'uji-pesan', 'ai', 'chat', 'auto-share', 'integrasi', 'dokumentasi', 'paket', 'referral'];
   const requested = location.pathname.split('/')[2] || location.hash.slice(1);
   const page = allowed.includes(requested) ? requested : allowed[0];
   if (requested !== page) history.replaceState(null, '', '/dashboard/' + page);
   $('pagetitle').textContent = {
     'auto-share': 'Auto Share',
     ai: 'Asisten AI',
+    chat: 'Chat',
     nomor: 'Session WhatsApp',
     integrasi: 'Integrasi',
     pemakaian: 'Riwayat pemakaian',
@@ -446,7 +450,18 @@ function navigate() {
     admin: 'Pengelolaan layanan',
     dokumentasi: 'Dokumentasi API',
   }[page];
-  for (const id of ['nomor', 'uji-pesan', 'ai', 'auto-share', 'integrasi', 'paket', 'referral', 'admin', 'dokumentasi'])
+  for (const id of [
+    'nomor',
+    'uji-pesan',
+    'ai',
+    'chat',
+    'auto-share',
+    'integrasi',
+    'paket',
+    'referral',
+    'admin',
+    'dokumentasi',
+  ])
     $(id).hidden = id !== page;
   const subpages = {
     ai: 'Pengaturan AI',
@@ -492,11 +507,13 @@ function navigate() {
           }[sub]
         : {
             nomor: 'Hubungkan nomor WhatsApp dan pantau koneksi Anda.',
-            integrasi: 'Sambungkan WhatsApp ke aplikasi dan workflow Anda.',
+            integrasi: 'Hubungkan dan putuskan akun WhatsApp dan Instagram yang dilayani NC-WA.',
             dokumentasi: 'Panduan untuk membangun integrasi WhatsApp Anda.',
             'uji-pesan': 'Coba pengiriman dan lihat riwayat pemakaian kredit.',
             referral: 'Bagikan kode referral dan pantau bonus serta komisi Anda.',
           }[page] || '';
+  // Halaman Chat tanpa judul halaman, supaya kotak masuknya langsung di atas.
+  document.querySelector('.heading').hidden = page === 'chat';
   $('userstats').hidden = owner || page !== 'nomor';
   if (page !== 'nomor') closeQr();
 }
@@ -514,6 +531,8 @@ document.querySelectorAll('.tabs a:not(.sidebar-brand)').forEach(a =>
     history.pushState(null, '', a.pathname);
     navigate();
     if (a.pathname === '/dashboard/ai') void run(loadAI);
+    if (a.pathname === '/dashboard/integrasi') void run(loadIntegrations);
+    if (a.pathname === '/dashboard/chat') void run(loadInbox);
     if (a.pathname === '/dashboard/auto-share') void run(loadAutoShare);
     if (a.pathname === '/dashboard/referral') void run(loadReferral);
     if (a.pathname === '/dashboard/admin/referral') void run(loadAdminReferral);
@@ -661,6 +680,7 @@ async function pair(id) {
       if (state.qr) $('qrimage').src = state.qr;
       if (state.status === 'connected') {
         await sessions();
+        if (!$('integrasi').hidden) await loadIntegrations();
         if (!$('ai').hidden) await loadAI();
         return;
       }

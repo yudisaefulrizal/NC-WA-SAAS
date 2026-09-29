@@ -5,7 +5,7 @@ import express from 'express';
 import { ApiError } from '../../../libraries/errors.js';
 import type { AIService } from '../domain/service.js';
 import { clientProfiles } from '../domain/profiles/registry.js';
-import { chatMessages, listChats } from '../domain/chat.js';
+import { chatMessages, listAllChats, listChats } from '../domain/chat.js';
 export function aiRoutes(router: express.Router, { ai }: { ai: AIService }) {
   router.get('/sessions/:id/ai', async (req, res) => {
     res.locals.manager.detail(req.params.id);
@@ -61,6 +61,11 @@ export function aiRoutes(router: express.Router, { ai }: { ai: AIService }) {
   router.delete('/sessions/:id/ai/fallbacks/:fallback', async (req, res) => {
     res.locals.manager.detail(req.params.id);
     res.json(await ai.removeFallback(res.locals.accountId, req.params.id, req.params.fallback));
+  });
+  // Halaman Chat: semua sesi sekaligus; sesi dibaca dari SessionManager akun, bukan dari request.
+  router.get('/ai/chats', async (_req, res) => {
+    const sessions = (res.locals.manager as { list(): { id: string }[] }).list().map(s => s.id);
+    res.json(await listAllChats(res.locals.accountId, sessions));
   });
   router.get('/sessions/:id/ai/chats', async (req, res) => {
     res.locals.manager.detail(req.params.id);

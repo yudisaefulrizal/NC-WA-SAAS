@@ -107,9 +107,9 @@ $('sendconnection').disabled = true;
   aiTrialTab('assistant');
 }
 {
-  const source = $('integrasi'),
+  const source = $('api-integrasi'),
     panel = document.createElement('section'),
-    tab = button('Integrasi', () => aiTab('integrasi'));
+    tab = button('API & Webhook', () => aiTab('integrasi'));
   panel.id = 'ai-tab-integrasi';
   panel.className = 'ai-management';
   panel.hidden = true;

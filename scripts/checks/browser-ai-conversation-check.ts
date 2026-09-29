@@ -185,10 +185,10 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#chat-back').click();
   await list.waitFor();
-  assert.equal(await page.locator('.chat-pane').isHidden(), true);
+  assert.equal(await page.locator('#chat-shell .chat-pane').isHidden(), true);
   await list.getByText('Rina Amalia', { exact: true }).click();
   await page.locator('#chat-view').waitFor();
-  assert.equal(await page.locator('.chat-list-pane').isHidden(), true);
+  assert.equal(await page.locator('#chat-shell .chat-list-pane').isHidden(), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   await page.screenshot({ path: join(screenshots, 'chat-mobile.png') });
   assert.deepEqual(errors, []);

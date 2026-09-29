@@ -6,6 +6,7 @@ import { ApiError } from '../../../libraries/errors.js';
 import type { IncomingMessage } from '../../whatsapp/index.js';
 import * as chatMessagesSql from '../data-access/chat-messages-queries.js';
 import * as conversationsSql from '../data-access/conversations-queries.js';
+import * as fallbacksSql from '../data-access/fallbacks-queries.js';
 export type ChatOrigin = 'customer' | 'ai' | 'manual' | 'api' | 'system';
 export type ChatStatus = 'sent' | 'delivered' | 'read';
 let notify: (account: string, session: string, customer: string) => void = () => {};
@@ -122,6 +123,21 @@ export async function listChats(account: string, session: string) {
     .slice(0, 300);
 }
 
+// Kotak masuk gabungan halaman Chat: percakapan dari semua sesi akun (WhatsApp dan Instagram) dengan nama sesinya,
+// ditandai bila masih ada tiket fallback yang menunggu jawaban tim. Urut aktivitas terbaru, maksimal 300.
+export async function listAllChats(account: string, sessions: string[]) {
+  const [waiting] = await fallbacksSql.listWaitingCustomers(db, [account]);
+  const pending = new Set(waiting.map(row => row.session_id + '\u0000' + row.customer));
+  const all = [];
+  for (const session of sessions)
+    for (const entry of await listChats(account, session))
+      all.push({ ...entry, session, waiting: pending.has(session + '\u0000' + entry.customer) });
+  const time = (entry: Record<string, unknown>) => {
+    const last = entry.last as { at: Date } | null;
+    return last ? new Date(last.at).getTime() : 0;
+  };
+  return all.sort((a, b) => time(b) - time(a)).slice(0, 300);
+}
 // Halaman terbaru diambil lebih dulu dari database, dikembalikan urut dari terlama ke terbaru. `before` adalah
 // kursor pesan tertua yang sedang tampil.
 export async function chatMessages(account: string, session: string, customer: string, before?: unknown) {

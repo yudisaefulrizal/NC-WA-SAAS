@@ -354,6 +354,12 @@ test('Fallback from an Instagram DM notifies the team on WhatsApp and relays the
     return Boolean(tickets[0]?.notification_message_id);
   }, 'tiket mencatat notifikasi');
   assert.equal(tickets[0].session_id, 'ig-shop');
+  // Halaman Chat: kotak masuk gabungan menandai percakapan yang menunggu jawaban tim, lengkap dengan sesinya.
+  const inbox = (await request(app).get('/ai/chats').set('X-API-Key', apiKey).expect(200)).body;
+  const dmEntry = inbox.find((e: { session: string; customer: string }) => e.customer === customer);
+  assert.equal(dmEntry.session, 'ig-shop');
+  assert.equal(dmEntry.waiting, true);
+  assert.ok(inbox.some((e: { session: string }) => e.session === 'wa'));
   assert.equal(tickets[0].notify_session_id, 'wa');
   const before = zernio.sent.length;
   whatsapp.get(account + '/wa')!({

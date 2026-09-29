@@ -5,6 +5,7 @@ async function loadZernio() {
   zernioAccounts = await api('/api/instagram/zernio');
   renderZernio();
   fillZernioSelect();
+  if (!$('integrasi').hidden) renderProviders();
 }
 function zernioTime(value) {
   return value
@@ -117,7 +118,8 @@ async function connectInstagram(sessionId, zernioId, instagramId) {
   $('addconnection').close();
   $('sessionform').reset();
   await sessions();
-  if (typeof loadAI === 'function' && !$('ai').hidden) await loadAI();
+  if (!$('ai').hidden) await loadAI();
+  if (!$('integrasi').hidden) await loadIntegrations();
   $('message').textContent = result.message;
 }
 // Menyambungkan lagi sesi yang terputus; bila akunnya masih terputus di Zernio, pesannya meminta klien
@@ -125,7 +127,8 @@ async function connectInstagram(sessionId, zernioId, instagramId) {
 async function reconnectInstagram(session) {
   const result = await api('/api/instagram/sessions/' + encodeURIComponent(session.id) + '/reconnect', 'POST');
   await sessions();
-  if (typeof loadAI === 'function' && !$('ai').hidden) await loadAI();
+  if (!$('ai').hidden) await loadAI();
+  if (!$('integrasi').hidden) await loadIntegrations();
   $('message').textContent = result.message;
 }
 // Label akun sebuah sesi untuk tabel dan kartu: nomor WhatsApp, atau @username dengan penanda Instagram.

@@ -75,3 +75,9 @@ export function findRelayedWaiting(c: Executor, params: SqlValue[]) {
 export function markFailed(c: Executor, params: SqlValue[]) {
   return c.execute("UPDATE ai_fallbacks SET status='failed' WHERE id=?", params);
 }
+export function listWaitingCustomers(c: Executor, params: SqlValue[]) {
+  return c.execute<RowDataPacket[]>(
+    "SELECT DISTINCT session_id,customer FROM ai_fallbacks WHERE account_id=? AND status='waiting'",
+    params,
+  );
+}
